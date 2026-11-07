@@ -286,6 +286,60 @@ impl Harness {
         self.settle();
     }
 
+    /// Move the pointer to a window position (logical px).
+    pub fn pointer_move(&mut self, note: usize, x: f32, y: f32) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            n.ui().window().dispatch_event(WindowEvent::PointerMoved { position: slint::LogicalPosition::new(x, y) });
+        });
+    }
+
+    /// The pointer leaves the note's window.
+    pub fn pointer_exit(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::PointerExited));
+    }
+
+    /// Press (without moving first) with the left or right button.
+    pub fn press_button(&mut self, note: usize, x: f32, y: f32, right: bool) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let position = slint::LogicalPosition::new(x, y);
+            let button = if right { slint::platform::PointerEventButton::Right } else { slint::platform::PointerEventButton::Left };
+            n.ui().window().dispatch_event(WindowEvent::PointerPressed { position, button });
+        });
+    }
+
+    pub fn release_button(&mut self, note: usize, x: f32, y: f32, right: bool) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let position = slint::LogicalPosition::new(x, y);
+            let button = if right { slint::platform::PointerEventButton::Right } else { slint::platform::PointerEventButton::Left };
+            n.ui().window().dispatch_event(WindowEvent::PointerReleased { position, button });
+        });
+    }
+
+    /// Opacity of the toolbar (0 hidden, 1 shown).
+    pub fn toolbar_opacity(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.ui().get_toolbar_opacity()).unwrap()
+    }
+
+    /// Whether the toolbar takes part in drawing and hit testing at all.
+    pub fn toolbar_visible(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.ui().get_toolbar_visible()).unwrap()
+    }
+
+    /// Number of context menus shown so far.
+    pub fn menus_shown(&self) -> usize {
+        self.menu.shown.borrow().len()
+    }
+
+    /// Give a note's window keyboard focus without moving the pointer.
+    pub fn activate_window(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(true)));
+    }
+
     /// Windows asks a note to paint (it was uncovered).
     pub fn paint_request(&mut self, note: usize) {
         let id = self.id(note);

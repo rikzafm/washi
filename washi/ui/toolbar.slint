@@ -1,0 +1,225 @@
+// The formatting toolbar: six visual buttons (B, I, U, ab, list, image) in the band reserved at the
+// bottom of the paper. Geometry is measured from the hover mockup (docs/design/spec.json,
+// layout.toolbar), in logical px in the paper's own (untilted) frame. The glyph fonts come from
+// docs/design/fonts.md (ticket 03).
+//
+// Slint's software renderer cannot rotate elements, but the paper is tilted 1.5 degrees, so the
+// toolbar tilts with it: shapes are Paths whose points are rotated about the paper's center, and
+// glyphs (text cannot be rotated) are placed at their rotated cell centers.
+import "../../fonts/Gelasio-Bold.ttf";
+import "../../fonts/Gelasio-Regular.ttf";
+import "../../fonts/NotoSerif-Italic.ttf";
+import "../../fonts/NotoSerif-Regular.ttf";
+
+export global ToolbarMetrics {
+    /// Height of the band at the bottom of the paper. Always reserved, shown or not.
+    out property <length> band-height: 56px;
+    /// Fade in and out.
+    out property <duration> fade: 120ms;
+    out property <length> button-size: 40px;
+    out property <length> button-radius: 10.8px;
+    /// Where the first button's left edge and the top of every button sit, in the paper frame.
+    out property <length> first-button-x: 23.2px;
+    out property <length> button-top-above-bottom: 55.8px;
+    /// Distance between the centers of two neighbouring cells.
+    out property <length> pitch: 42.667px;
+    out property <color> ink-active: #2B2F36;
+    out property <color> ink-muted: #8B919A;
+    out property <color> button-fill: #F0F0EE;
+}
+
+/// The paper's frame: its center in window px and the sine and cosine of its tilt.
+struct Frame {
+    w: float,
+    h: float,
+    cx: float,
+    cy: float,
+    cs: float,
+    sn: float,
+}
+
+/// Rotation about the paper center: `du`, `dv` are px in the untilted paper frame, measured from
+/// the paper's center (u right, v down). The result is window px.
+global Tilt {
+    public pure function x(f: Frame, du: float, dv: float) -> float {
+        return f.cx + du * f.cs - dv * f.sn;
+    }
+    public pure function y(f: Frame, du: float, dv: float) -> float {
+        return f.cy + du * f.sn + dv * f.cs;
+    }
+}
+
+/// A tilted rectangle with rounded corners (radius `r` = 0 gives a plain one).
+component TRect inherits Path {
+    in property <Frame> f;
+    in property <float> u0;
+    in property <float> v0;
+    in property <float> w;
+    in property <float> h;
+    in property <float> r: 0;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    // start on the top edge, go clockwise
+    MoveTo { x: Tilt.x(root.f, root.u0 + root.r, root.v0); y: Tilt.y(root.f, root.u0 + root.r, root.v0); }
+    LineTo { x: Tilt.x(root.f, root.u0 + root.w - root.r, root.v0); y: Tilt.y(root.f, root.u0 + root.w - root.r, root.v0); }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true;
+        x: Tilt.x(root.f, root.u0 + root.w, root.v0 + root.r); y: Tilt.y(root.f, root.u0 + root.w, root.v0 + root.r); }
+    LineTo { x: Tilt.x(root.f, root.u0 + root.w, root.v0 + root.h - root.r); y: Tilt.y(root.f, root.u0 + root.w, root.v0 + root.h - root.r); }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true;
+        x: Tilt.x(root.f, root.u0 + root.w - root.r, root.v0 + root.h); y: Tilt.y(root.f, root.u0 + root.w - root.r, root.v0 + root.h); }
+    LineTo { x: Tilt.x(root.f, root.u0 + root.r, root.v0 + root.h); y: Tilt.y(root.f, root.u0 + root.r, root.v0 + root.h); }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true;
+        x: Tilt.x(root.f, root.u0, root.v0 + root.h - root.r); y: Tilt.y(root.f, root.u0, root.v0 + root.h - root.r); }
+    LineTo { x: Tilt.x(root.f, root.u0, root.v0 + root.r); y: Tilt.y(root.f, root.u0, root.v0 + root.r); }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true;
+        x: Tilt.x(root.f, root.u0 + root.r, root.v0); y: Tilt.y(root.f, root.u0 + root.r, root.v0); }
+    Close { }
+}
+
+/// A text glyph centered at a (tilted) cell center, `dx`, `dy` logical px of fine adjustment.
+component Glyph inherits Text {
+    in property <Frame> f;
+    in property <float> du;
+    in property <float> dv;
+    in property <float> dx: 0;
+    in property <float> dy: 0;
+    x: (Tilt.x(root.f, root.du, root.dv) + root.dx) * 1px - self.width / 2;
+    y: (Tilt.y(root.f, root.du, root.dv) + root.dy) * 1px - self.height / 2;
+    width: 60px;
+    height: 60px;
+    horizontal-alignment: center;
+    vertical-alignment: center;
+}
+
+/// The hit area of a button, at its (tilted) cell center.
+component Hit inherits TouchArea {
+    in property <Frame> f;
+    in property <float> du;
+    in property <float> dv;
+    x: Tilt.x(root.f, root.du, root.dv) * 1px - self.width / 2;
+    y: Tilt.y(root.f, root.du, root.dv) * 1px - self.height / 2;
+    width: ToolbarMetrics.button-size;
+    height: ToolbarMetrics.button-size;
+}
+
+/// A dot (or a circle outline) centered at a tilted point.
+component Dot inherits Rectangle {
+    in property <Frame> f;
+    in property <float> du;
+    in property <float> dv;
+    in property <length> d: 2px;
+    x: Tilt.x(root.f, root.du, root.dv) * 1px - self.width / 2;
+    y: Tilt.y(root.f, root.du, root.dv) * 1px - self.height / 2;
+    width: root.d;
+    height: root.d;
+    border-radius: root.d / 2;
+}
+
+/// A polyline through tilted points, as a stroked Path with round joins and caps.
+component Line5 inherits Path {
+    in property <Frame> f;
+    in property <float> u0;
+    in property <float> v0;
+    in property <float> u1;
+    in property <float> v1;
+    in property <float> u2;
+    in property <float> v2;
+    in property <float> u3;
+    in property <float> v3;
+    in property <float> u4;
+    in property <float> v4;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    stroke-line-join: round;
+    stroke-line-cap: round;
+    MoveTo { x: Tilt.x(root.f, root.u0, root.v0); y: Tilt.y(root.f, root.u0, root.v0); }
+    LineTo { x: Tilt.x(root.f, root.u1, root.v1); y: Tilt.y(root.f, root.u1, root.v1); }
+    LineTo { x: Tilt.x(root.f, root.u2, root.v2); y: Tilt.y(root.f, root.u2, root.v2); }
+    LineTo { x: Tilt.x(root.f, root.u3, root.v3); y: Tilt.y(root.f, root.u3, root.v3); }
+    LineTo { x: Tilt.x(root.f, root.u4, root.v4); y: Tilt.y(root.f, root.u4, root.v4); }
+}
+
+/// The toolbar. It covers the whole window (it draws only its buttons); the owner gives it the
+/// paper's frame: where the paper's untilted top-left corner is, its size, and its tilt.
+export component Toolbar inherits Rectangle {
+    /// The caret is in a bold block (ticket 11 drives this).
+    in property <bool> bold-active: true;
+    in property <length> paper-x;
+    in property <length> paper-y;
+    in property <length> paper-w;
+    in property <length> paper-h;
+    in property <angle> tilt;
+    /// True while the pointer holds one of the buttons down.
+    out property <bool> any-pressed: h0.pressed || h1.pressed || h2.pressed || h3.pressed || h4.pressed || h5.pressed;
+
+    property <Frame> f: {
+        w: root.width / 1px,
+        h: root.height / 1px,
+        cx: (root.paper-x + root.paper-w / 2) / 1px,
+        cy: (root.paper-y + root.paper-h / 2) / 1px,
+        cs: Math.cos(root.tilt),
+        sn: Math.sin(root.tilt),
+    };
+    // cell centers, from the paper's center
+    property <float> cv: (root.paper-h / 2 - ToolbarMetrics.button-top-above-bottom + ToolbarMetrics.button-size / 2) / 1px;
+    property <float> half: ToolbarMetrics.button-size / 2px;
+    property <float> pitch: ToolbarMetrics.pitch / 1px;
+    property <float> u-first: (ToolbarMetrics.first-button-x + ToolbarMetrics.button-size / 2 - root.paper-w / 2) / 1px;
+    property <float> c0: root.u-first;
+    property <float> c1: root.u-first + root.pitch;
+    property <float> c2: root.u-first + 2 * root.pitch;
+    property <float> c3: root.u-first + 3 * root.pitch;
+    property <float> c4: root.u-first + 4 * root.pitch;
+    property <float> c5: root.u-first + 5 * root.pitch;
+    property <color> muted: ToolbarMetrics.ink-muted;
+    property <color> ink: ToolbarMetrics.ink-active;
+
+    // the active button's background
+    TRect {
+        visible: root.bold-active;
+        f: root.f;
+        u0: root.c0 - root.half;
+        v0: root.cv - root.half - 0.85;
+        w: 2 * root.half;
+        h: 2 * root.half;
+        r: ToolbarMetrics.button-radius / 1px;
+        fill: ToolbarMetrics.button-fill;
+    }
+
+    Glyph { f: root.f; du: root.c0; dv: root.cv; dx: 0.67; dy: 1; text: "B"; font-family: "Gelasio"; font-weight: 700; font-size: 23.4px; color: root.bold-active ? root.ink : root.muted; }
+    Glyph { f: root.f; du: root.c1; dv: root.cv; dx: 0.85; dy: -1.7; text: "I"; font-family: "Noto Serif"; font-italic: true; font-size: 22.8px; color: root.muted; }
+    Glyph { f: root.f; du: root.c2; dv: root.cv; dx: 1; dy: -1; text: "U"; font-family: "Noto Serif"; font-size: 22.7px; color: root.muted; }
+    Glyph { f: root.f; du: root.c3; dv: root.cv; dx: 0.67; dy: 1; text: "ab"; font-family: "Gelasio"; font-size: 23.1px; color: root.muted; }
+    // the underline of U and the strike-through of ab are drawn, not part of the glyphs
+    TRect { f: root.f; u0: root.c2 - 7.6; v0: root.cv + 9.3; w: 17.2; h: 1.3; fill: root.muted; }
+    TRect { f: root.f; u0: root.c3 - 11.3; v0: root.cv + 2; w: 24; h: 1.3; fill: root.muted; }
+
+    // list: three bullets and three rules
+    for row in 3: Dot { f: root.f; du: root.c4 - 6; dv: root.cv - 7.3 + row * 6; d: 2px; background: root.muted; }
+    for row in 3: TRect { f: root.f; u0: root.c4 - 3; v0: root.cv - 8.3 + row * 6; w: 13.8; h: 2; r: 1; fill: root.muted; }
+
+    // image: frame, sun, and mountains
+    TRect { f: root.f; u0: root.c5 - 7.5; v0: root.cv - 8.5; w: 17.7; h: 15.7; r: 2.5; stroke: root.muted; stroke-width: 1.6px; }
+    Dot { f: root.f; du: root.c5 - 2.5; dv: root.cv - 4.5; d: 5px; border-width: 1.4px; border-color: root.muted; }
+    Line5 {
+        f: root.f;
+        u0: root.c5 - 7; v0: root.cv + 6;
+        u1: root.c5 - 2; v1: root.cv + 1;
+        u2: root.c5 + 1.5; v2: root.cv + 4;
+        u3: root.c5 + 4.5; v3: root.cv + 1.5;
+        u4: root.c5 + 8; v4: root.cv + 5;
+        stroke: root.muted;
+        stroke-width: 1.5px;
+    }
+
+    h0 := Hit { f: root.f; du: root.c0; dv: root.cv; }
+    h1 := Hit { f: root.f; du: root.c1; dv: root.cv; }
+    h2 := Hit { f: root.f; du: root.c2; dv: root.cv; }
+    h3 := Hit { f: root.f; du: root.c3; dv: root.cv; }
+    h4 := Hit { f: root.f; du: root.c4; dv: root.cv; }
+    h5 := Hit { f: root.f; du: root.c5; dv: root.cv; }
+}
