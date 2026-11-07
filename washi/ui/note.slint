@@ -89,7 +89,9 @@ export component NoteWindow inherits Window {
                 x: root.margin;
                 y: root.paper-top;
                 width: root.width - 2 * root.margin;
-                height: root.paper-bottom - ToolbarMetrics.band-height - root.paper-top;
+                // The tilted band's top edge rises by half the paper width times sin(tilt) at the left;
+                // text may not reach into it, and a level clip cannot follow the tilt.
+                height: root.paper-bottom - ToolbarMetrics.band-height - root.paper-top - (root.width - 2 * root.margin) / 2 * root.tilt.sin();
                 clip: true;
 
                 text-layer := TextLayer {

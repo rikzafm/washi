@@ -113,6 +113,7 @@ impl Doc {
             heading: style(th.get_heading_size(), th.get_heading_pitch()),
             body: style(th.get_body_size(), th.get_body_pitch()),
             tilt_deg: th.get_text_tilt() as f64,
+            max_run: th.get_step_width() as f64,
         };
         let runs = textflow::layout(&self.blocks.borrow(), self.paper.get(), &tokens);
         self.runs.set_vec(

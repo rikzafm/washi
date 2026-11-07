@@ -32,6 +32,9 @@ pub struct Tokens {
     pub body: Style,
     /// Tilt of the text with the paper, degrees clockwise.
     pub tilt_deg: f64,
+    /// Words wider than this are drawn in pieces, so that each piece is within a fraction of a
+    /// pixel of the tilted baseline (a whole word would be off by half its width times tan).
+    pub max_run: f64,
 }
 
 impl Tokens {
@@ -144,6 +147,25 @@ fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<(String, f64)>> {
     lines
 }
 
+/// Split a word into pieces of at most `max` width (at least one character each).
+fn pieces(word: &str, max: f64, m: &Measure) -> Vec<String> {
+    let mut out = vec![];
+    let (mut cur, mut w) = (String::new(), 0.0);
+    for c in word.chars() {
+        let a = m.advance(c);
+        if !cur.is_empty() && w + a > max {
+            out.push(std::mem::take(&mut cur));
+            w = 0.0;
+        }
+        cur.push(c);
+        w += a;
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
 /// Lay the blocks out in a paper of size `paper` (logical px).
 pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
     let avail = paper.0 - t.inset_left - t.inset_right;
@@ -158,10 +180,13 @@ pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
         for (li, line) in wrap(&b.text, avail, &m).into_iter().enumerate() {
             let y = top + li as f64 * st.pitch;
             for (word, at) in line {
-                let x = t.inset_left + at;
-                let width = m.width(&word);
-                let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
-                runs.push(Run { block: bi, kind: b.kind, line: li, text: word, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                let mut x = t.inset_left + at;
+                for piece in pieces(&word, t.max_run, &m) {
+                    let width = m.width(&piece);
+                    let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
+                    runs.push(Run { block: bi, kind: b.kind, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                    x += width;
+                }
             }
         }
         // every block takes at least one line, even when empty
@@ -186,6 +211,7 @@ mod tests {
         heading: Style { size: 24.0, pitch: 29.3 },
         body: Style { size: 22.65, pitch: 29.1 },
         tilt_deg: 1.45,
+        max_run: f64::MAX,
     };
 
     const MOCKUP: &str = "# Endfield Note\n## **Thermite Cutter : POG & Akekuri**\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";
@@ -216,6 +242,26 @@ mod tests {
             let (a, b) = (w[0].x + w[0].width / 2.0, w[1].x + w[1].width / 2.0);
             let got = ((w[1].y + w[1].dy) - (w[0].y + w[0].dy)) / ((b + w[1].dx) - (a + w[0].dx));
             assert!((got - slope).abs() < 0.0005, "slope {got} vs {slope}");
+        }
+    }
+
+    #[test]
+    fn long_words_are_drawn_in_pieces_that_stay_within_a_pixel_of_the_tilted_baseline() {
+        let tokens = Tokens { max_run: 16.0, ..TOKENS };
+        let runs = layout(&parse(MOCKUP), (363.0, 433.0), &tokens);
+        let whole = layout(&parse(MOCKUP), (363.0, 433.0), &TOKENS);
+        // same words, same line breaks, same text
+        assert_eq!(runs.iter().map(|r| r.text.as_str()).collect::<String>(), whole.iter().map(|r| r.text.as_str()).collect::<String>());
+        assert_eq!(runs.iter().map(|r| r.line + 10 * r.block).max(), whole.iter().map(|r| r.line + 10 * r.block).max());
+        assert!(runs.len() > whole.len() * 2);
+        // every piece sits within 0.3 px of the exact tilt of its own left and right end
+        let s = tokens.tilt_deg.to_radians().sin();
+        for r in &runs {
+            for end in [r.x, r.x + r.width] {
+                let exact = tilt_offset(end, r.y + r.pitch / 2.0, (363.0, 433.0), tokens.tilt_deg).1;
+                let _ = s;
+                assert!((exact - r.dy).abs() < 0.3, "{:?}: {} vs {}", r.text, exact, r.dy);
+            }
         }
     }
 

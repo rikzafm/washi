@@ -6,6 +6,8 @@ export global Theme {
     out property <angle> text-tilt: 1.45deg;
     // The text settles flat over this long when editing starts, and back when it ends.
     out property <duration> settle: 120ms;
+    // At rest the text is drawn in pieces at most this wide, each on the tilted baseline.
+    out property <length> step-width: 16px;
 
     out property <color> ink: #2B2F36;
     out property <string> handwriting: "Shadows Into Light";
