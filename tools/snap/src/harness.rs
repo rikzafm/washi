@@ -219,6 +219,52 @@ impl Harness {
         self.settle();
     }
 
+    /// Ask a block to take the caret (at its start).
+    pub fn place_caret(&mut self, note: usize, block: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let ui = n.ui();
+            ui.set_focus_block(block as i32);
+            ui.set_focus_offset(0);
+            ui.set_focus_serial(ui.get_focus_serial() + 1);
+        });
+    }
+
+    /// Press `Ctrl+Shift+<letter>` in the note.
+    pub fn press_ctrl_shift(&mut self, note: usize, letter: char) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let (ctrl, shift): (slint::SharedString, slint::SharedString) = (Key::Control.into(), Key::Shift.into());
+            let letter = letter.to_ascii_uppercase().to_string();
+            w.dispatch_event(WindowEvent::KeyPressed { text: ctrl.clone() });
+            w.dispatch_event(WindowEvent::KeyPressed { text: shift.clone() });
+            w.dispatch_event(WindowEvent::KeyPressed { text: letter.clone().into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: letter.into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: shift });
+            w.dispatch_event(WindowEvent::KeyReleased { text: ctrl });
+        });
+        self.settle();
+    }
+
+    /// Click (press and release, left button) at a window position, moving there first.
+    pub fn click(&mut self, note: usize, x: f32, y: f32) {
+        self.pointer_move(note, x, y);
+        self.press_button(note, x, y, false);
+        self.release_button(note, x, y, false);
+        self.settle();
+    }
+
+    /// Which toolbar buttons show as active: B, I, U, ab, list.
+    pub fn toolbar_active(&self, note: usize) -> [bool; 5] {
+        self.app()
+            .with_note(self.id(note), |n| {
+                let ui = n.ui();
+                [ui.get_fmt_bold(), ui.get_fmt_italic(), ui.get_fmt_underline(), ui.get_fmt_strike(), ui.get_fmt_list()]
+            })
+            .unwrap()
+    }
+
     /// Let deferred work (releasing closed windows) run.
     pub fn settle(&mut self) {
         platform::advance(Duration::ZERO);

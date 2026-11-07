@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{Block, Caret, Document, Kind};
+use crate::document::{Block, Caret, Document, Kind, Style as Flags};
 use crate::history::History;
 use crate::textflow::{self, Style, Tokens};
 use slint::{Model, VecModel};
@@ -136,6 +136,9 @@ struct Doc {
     doc: RefCell<Document>,
     model: Rc<VecModel<BlockData>>,
     runs: Rc<VecModel<RunData>>,
+    rules: Rc<VecModel<RuleData>>,
+    /// The block that last held the caret: what the toolbar and the format shortcuts act on.
+    caret: Cell<usize>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
     /// Undo and redo (ticket 12): the snapshots of this note's document.
@@ -154,7 +157,15 @@ pub const HINT: &str = "Note Something....";
 
 impl Doc {
     fn new() -> Rc<Doc> {
-        Rc::new(Doc { doc: RefCell::new(Document::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)), history: RefCell::new(History::new(Document::new())) })
+        Rc::new(Doc {
+            doc: RefCell::new(Document::new()),
+            model: Rc::new(VecModel::default()),
+            runs: Rc::new(VecModel::default()),
+            rules: Rc::new(VecModel::default()),
+            caret: Cell::new(0),
+            paper: Cell::new((363.0, 433.0)),
+            history: RefCell::new(History::new(Document::new())),
+        })
     }
 
     /// Replace everything (opening a note, or text set from outside).
@@ -234,8 +245,14 @@ impl Doc {
     fn relayout(&self, ui: &NoteWindow) {
         let tokens = Self::tokens(ui);
         let doc = self.doc.borrow();
-        let mut runs = textflow::layout(doc.blocks(), self.paper.get(), &tokens);
+        let (mut runs, rules) = textflow::layout_all(doc.blocks(), self.paper.get(), &tokens);
         ui.set_content_height(textflow::extent(doc.blocks(), self.paper.get().0, &tokens).1 as f32);
+        self.rules.set_vec(
+            rules
+                .iter()
+                .map(|r| RuleData { x: r.x as f32, y: r.y as f32, dx: r.dx as f32, dy: r.dy as f32, width: r.width as f32, height: r.height as f32 })
+                .collect::<Vec<_>>(),
+        );
         let hint = doc.is_empty();
         if hint {
             runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
@@ -252,6 +269,7 @@ impl Doc {
                     size: r.size as f32,
                     pitch: r.pitch as f32,
                     bold: r.bold,
+                    italic: r.italic,
                     hint,
                 })
                 .collect::<Vec<_>>(),
@@ -260,6 +278,45 @@ impl Doc {
 
     fn text(&self) -> String {
         self.doc.borrow().to_text()
+    }
+
+    /// The caret's block, kept within the document.
+    fn caret_block(&self) -> usize {
+        self.caret.get().min(self.doc.borrow().len().saturating_sub(1))
+    }
+
+    /// Toolbar button or shortcut `what` (0 bold, 1 italic, 2 underline, 3 strike, 4 list) on the
+    /// paragraph holding the caret. True when the document changed.
+    fn format(&self, what: i32) -> bool {
+        let i = self.caret_block();
+        let before = self.doc.borrow().clone();
+        let done = {
+            let mut doc = self.doc.borrow_mut();
+            match what {
+                0 => doc.toggle_style(i, Flags::BOLD),
+                1 => doc.toggle_style(i, Flags::ITALIC),
+                2 => doc.toggle_style(i, Flags::UNDERLINE),
+                3 => doc.toggle_style(i, Flags::STRIKE),
+                4 => doc.toggle_list(i),
+                _ => false,
+            }
+        };
+        if done {
+            self.structural(before);
+        }
+        done
+    }
+
+    /// Show the formats of the caret's paragraph on the toolbar buttons.
+    fn show_formats(&self, ui: &NoteWindow) {
+        let doc = self.doc.borrow();
+        let b = doc.blocks().get(self.caret_block());
+        let has = |f: Flags| b.is_some_and(|b| b.style.contains(f));
+        ui.set_fmt_bold(b.is_some_and(|b| b.is_bold()));
+        ui.set_fmt_italic(has(Flags::ITALIC));
+        ui.set_fmt_underline(has(Flags::UNDERLINE));
+        ui.set_fmt_strike(has(Flags::STRIKE));
+        ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
     }
 
     /// Scroll the least that brings the caret's line into the text area (the top of the note when
@@ -282,8 +339,17 @@ impl Doc {
     /// new blocks; then the caret to move to is returned.
     fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
         if !text.contains(['\n', '\r']) {
-            self.doc.borrow_mut().set_text(i, text);
-            return None;
+            let before = self.doc.borrow().clone();
+            let mut doc = self.doc.borrow_mut();
+            let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
+            doc.set_text(i, text);
+            // `# ` or `- ` typed at the start of a paragraph
+            let caret = doc.auto_format(i, &old, cursor);
+            drop(doc);
+            if caret.is_some() {
+                self.structural(before);
+            }
+            return caret;
         }
         let before = self.doc.borrow().clone();
         let mut doc = self.doc.borrow_mut();
@@ -367,7 +433,7 @@ fn block_data(b: &Block) -> BlockData {
         Kind::ListItem => BlockKind::ListItem,
         Kind::Image => BlockKind::Image,
     };
-    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold() }
+    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold(), italic: b.style.contains(Flags::ITALIC) }
 }
 
 pub struct Note {
@@ -398,7 +464,9 @@ impl Note {
         doc.load(content);
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
+        ui.set_rules(slint::ModelRc::from(doc.rules.clone()));
         doc.relayout(&ui);
+        doc.show_formats(&ui);
         ui.set_text(doc.text().as_str().into());
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
@@ -421,6 +489,10 @@ impl Note {
                     ui.set_text(text.as_str().into());
                     ui.set_window_title(window_title(&text).into());
                     if let Some(c) = focus {
+                        doc.caret.set(c.block);
+                    }
+                    doc.show_formats(&ui);
+                    if let Some(c) = focus {
                         ui.set_focus_block(c.block as i32);
                         ui.set_focus_offset(c.offset as i32);
                         ui.set_focus_serial(ui.get_focus_serial() + 1);
@@ -442,6 +514,23 @@ impl Note {
                     history_timer.start(TimerMode::SingleShot, HISTORY_PAUSE, move || doc.checkpoint());
                 }
                 changed(caret);
+            });
+        }
+        {
+            let (changed, doc) = (changed.clone(), doc.clone());
+            ui.on_format(move |what| {
+                if doc.format(what) {
+                    changed(None);
+                }
+            });
+        }
+        {
+            let (doc, weak) = (doc.clone(), ui.as_weak());
+            ui.on_focus_entered(move |i| {
+                doc.caret.set(i.max(0) as usize);
+                if let Some(ui) = weak.upgrade() {
+                    doc.show_formats(&ui);
+                }
             });
         }
         {
@@ -601,6 +690,8 @@ impl Note {
         self.ui.set_text_focused_block(-1);
         self.ui.set_focus_block(-1);
         self.doc.load(text);
+        self.doc.caret.set(0);
+        self.doc.show_formats(&self.ui);
         self.doc.relayout(&self.ui);
         self.ui.set_text(self.doc.text().as_str().into());
         self.ui.set_window_title(window_title(text).into());
