@@ -1,0 +1,26 @@
+// Walking-skeleton note: unstyled paper. Real styling arrives with the paper/theme tickets.
+export component NoteWindow inherits Window {
+    title: "Washi";
+    preferred-width: 431px;
+    preferred-height: 451px;
+    min-width: 200px;
+    min-height: 200px;
+    background: #fdfaf0;
+
+    in-out property <string> text;
+    callback edited(string);
+
+    input := TextInput {
+        x: 30px;
+        y: 30px;
+        width: parent.width - 60px;
+        height: parent.height - 60px;
+        wrap: word-wrap;
+        font-size: 14px;
+        color: #222222;
+        text <=> root.text;
+        edited => { root.edited(self.text); }
+    }
+
+    init => { input.focus(); }
+}

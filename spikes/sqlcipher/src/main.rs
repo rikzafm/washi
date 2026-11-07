@@ -5,7 +5,7 @@ fn main() {
     let c = Connection::open(&path).unwrap();
     c.pragma_update(None, "key", "x'2DD29CA851E7B56E4697B0E1F08507293D761A05CE4D1B628663F411A8086D99'").unwrap();
     c.execute_batch("CREATE TABLE n(id INTEGER PRIMARY KEY, t TEXT); INSERT INTO n(t) VALUES ('hello washi');").unwrap();
-    let v: String = c.query_row("SELECT cipher_version()", [], |r| r.get(0)).unwrap();
+    let v: String = c.query_row("PRAGMA cipher_version", [], |r| r.get(0)).unwrap();
     drop(c);
     let raw = std::fs::read(&path).unwrap();
     let plain = raw.windows(11).any(|w| w == b"hello washi");
