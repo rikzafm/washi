@@ -14,7 +14,12 @@ export component TextLayer inherits Rectangle {
     /// While the note is suspended (covered, minimized) losing the focus does not change its look.
     in property <bool> suspended: false;
     in property <int> resync: 0;
-    callback block-edited(int, string);
+    callback block-edited(int, string, int);
+    callback block-key(int, string, int) -> bool;
+    /// Rust asks for the focus: block, caret offset, and a counter that changes with each request.
+    in property <int> focus-block: -1;
+    in property <int> focus-offset: 0;
+    in property <int> focus-serial: 0;
 
     // The block whose field has the focus, -1 for none. (Not a count: blocks that vanish with the
     // model never report losing the focus.)
@@ -26,7 +31,7 @@ export component TextLayer inherits Rectangle {
     out property <float> tilt-scale: 1 - flat;
 
     for r in root.runs: Text {
-        visible: root.flat < 1;
+        visible: r.hint || root.flat < 1;
         x: r.x + r.dx * root.tilt-scale;
         y: r.y + r.dy * root.tilt-scale;
         text: r.text;
@@ -35,7 +40,7 @@ export component TextLayer inherits Rectangle {
         font-size: r.size;
         font-weight: r.bold ? 700 : 400;
         line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
-        color: Theme.ink;
+        color: r.hint ? Theme.ink-hint : Theme.ink;
     }
 
     VerticalLayout {
@@ -46,13 +51,18 @@ export component TextLayer inherits Rectangle {
         for b[i] in root.blocks: BlockView {
             kind: b.kind;
             text: b.text;
+            bold: b.bold;
             autofocus: i == 0;
             show-input: root.flat >= 1;
             resync: root.resync;
             // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
-            gap-before: i == 0 || root.blocks[i - 1].kind == b.kind ? 0px
+            gap-before: i == 0 || root.blocks[i - 1].kind == b.kind || (root.blocks[i - 1].kind == BlockKind.list-item && b.kind == BlockKind.body) || (root.blocks[i - 1].kind == BlockKind.body && b.kind == BlockKind.list-item) ? 0px
                 : b.kind == BlockKind.heading ? Theme.heading-gap : Theme.body-gap;
-            edited(t) => { root.block-edited(i, t); }
+            wanted: i == root.focus-block;
+            focus-serial: root.focus-serial;
+            focus-offset: root.focus-offset;
+            edited(t, c) => { root.block-edited(i, t, c); }
+            key(k, o) => { return root.block-key(i, k, o); }
             focus-changed(f) => {
                 if (f) { root.focused-block = i; } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
             }
