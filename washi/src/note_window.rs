@@ -195,6 +195,7 @@ impl Doc {
         let tokens = Self::tokens(ui);
         let doc = self.doc.borrow();
         let mut runs = textflow::layout(doc.blocks(), self.paper.get(), &tokens);
+        ui.set_content_height(textflow::extent(doc.blocks(), self.paper.get().0, &tokens).1 as f32);
         let hint = doc.is_empty();
         if hint {
             runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
@@ -219,6 +220,22 @@ impl Doc {
 
     fn text(&self) -> String {
         self.doc.borrow().to_text()
+    }
+
+    /// Scroll the least that brings the caret's line into the text area (the top of the note when
+    /// the caret is on its first line).
+    fn reveal(&self, ui: &NoteWindow, block: usize, offset: usize) {
+        let tokens = Self::tokens(ui);
+        let doc = self.doc.borrow();
+        let Some((top, bottom)) = textflow::caret_span(doc.blocks(), block, offset, self.paper.get().0, &tokens) else { return };
+        let (_, content) = textflow::extent(doc.blocks(), self.paper.get().0, &tokens);
+        let view = ui.get_text_view_height() as f64;
+        let cur = ui.get_scroll_y() as f64;
+        let mut to = if top <= tokens.inset_top + 0.5 { 0.0 } else if top < cur { top } else if bottom > cur + view { bottom - view } else { cur };
+        to = to.min((content - view).max(0.0)).max(0.0);
+        if (to - cur).abs() > 0.01 {
+            ui.set_scroll_y(to as f32);
+        }
     }
 
     /// Block `i` was edited to `text`, the caret now at `cursor`. Line breaks in it (a paste) make
@@ -351,6 +368,7 @@ impl Note {
                         ui.set_focus_block(c.block as i32);
                         ui.set_focus_offset(c.offset as i32);
                         ui.set_focus_serial(ui.get_focus_serial() + 1);
+                        doc.reveal(&ui, c.block, c.offset);
                     }
                 }
                 autosave.dirty.set(true);
@@ -377,8 +395,17 @@ impl Note {
                     ui.set_focus_block(caret.block as i32);
                     ui.set_focus_offset(caret.offset as i32);
                     ui.set_focus_serial(ui.get_focus_serial() + 1);
+                    doc.reveal(&ui, caret.block, caret.offset);
                 }
                 true
+            });
+        }
+        {
+            let (doc, weak) = (doc.clone(), ui.as_weak());
+            ui.on_caret_moved(move |block, offset| {
+                if let Some(ui) = weak.upgrade() {
+                    doc.reveal(&ui, block.max(0) as usize, offset.max(0) as usize);
+                }
             });
         }
         {
