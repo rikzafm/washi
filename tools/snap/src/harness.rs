@@ -5,7 +5,7 @@ use slint::ComponentHandle;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
-use washi::platform::{KeyProtector, NoteId};
+use washi::platform::{KeyProtector, NoteId, WindowState};
 use washi::{App, Env, StartError};
 
 /// One app instance's world: a temporary data folder, fakes for Windows, and the running app.
@@ -16,6 +16,8 @@ pub struct Harness {
     pub power: Rc<FakePower>,
     pub menu: Rc<FakeMenu>,
     pub dialogs: Rc<FakeDialogs>,
+    pub startup: Rc<FakeStartup>,
+    pub instance: Rc<FakeInstance>,
     app: Option<App>,
     last_ids: Vec<NoteId>,
 }
@@ -39,6 +41,8 @@ impl Harness {
         let power = Rc::new(FakePower::default());
         let menu = Rc::new(FakeMenu::default());
         let dialogs = Rc::new(FakeDialogs::default());
+        let startup = Rc::new(FakeStartup::default());
+        let instance = Rc::new(FakeInstance::default());
         let env = Env {
             data_dir: dir.path().to_path_buf(),
             protector: Rc::new(FakeProtector::new(seed)),
@@ -47,8 +51,10 @@ impl Harness {
             power: power.clone(),
             menu: menu.clone(),
             dialogs: dialogs.clone(),
+            startup: startup.clone(),
+            instance: instance.clone(),
         };
-        Harness { dir, env, signals, power, menu, dialogs, app: None, last_ids: Vec::new() }
+        Harness { dir, env, signals, power, menu, dialogs, startup, instance, app: None, last_ids: Vec::new() }
     }
 
     fn app(&self) -> &App {
@@ -63,7 +69,8 @@ impl Harness {
 
     pub fn start(&mut self) -> Result<(), StartError> {
         self.app = None;
-        let app = App::start(self.env.clone())?;
+        self.instance.process_exited(); // a fresh process: nothing else is running
+        let app = App::launch(self.env.clone())?.expect("the first launch cannot hand off");
         // Give every window the focus a real one would have.
         for id in app.note_ids() {
             app.with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(true)));
@@ -77,6 +84,11 @@ impl Harness {
         self.quit();
         self.app = None;
         self.start()
+    }
+
+    /// Launch Washi again while it runs. True if that launch handed off and exited.
+    pub fn launch_again(&mut self) -> bool {
+        App::launch(self.env.clone()).expect("second launch").is_none()
     }
 
     pub fn quit(&mut self) {
@@ -109,6 +121,15 @@ impl Harness {
         self.app().with_note(id, |n| n.ui().set_text(text.into()));
     }
 
+    pub fn press_enter(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            w.dispatch_event(WindowEvent::KeyPressed { text: Key::Return.into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: Key::Return.into() });
+        });
+    }
+
     pub fn press_backspace(&mut self, note: usize) {
         let id = self.id(note);
         self.app().with_note(id, |n| {
@@ -126,9 +147,167 @@ impl Harness {
         self.last_ids = self.app().note_ids();
         let id = self.last_ids[note];
         self.app().close_note(id);
+        self.settle();
+    }
+
+    /// Right-click on the paper. The menu answers with `choose` (a label path) or is dismissed.
+    pub fn right_click(&mut self, note: usize, choose: Option<&[&str]>) {
+        *self.menu.next_path.borrow_mut() = choose.map(|p| p.iter().map(|s| s.to_string()).collect());
+        self.menu.next_choice.set(None);
+        self.click_right(note, 5.0, 5.0);
+        self.settle();
+    }
+
+    /// Right-click at a window position without queuing any menu answer.
+    pub fn click_right(&mut self, note: usize, x: f32, y: f32) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let position = slint::LogicalPosition::new(x, y);
+            w.dispatch_event(WindowEvent::PointerMoved { position });
+            let button = slint::platform::PointerEventButton::Right;
+            w.dispatch_event(WindowEvent::PointerPressed { position, button });
+            w.dispatch_event(WindowEvent::PointerReleased { position, button });
+        });
+    }
+
+    /// Press `Ctrl+<letter>` in the note.
+    pub fn press_ctrl(&mut self, note: usize, letter: char) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let ctrl: slint::SharedString = Key::Control.into();
+            w.dispatch_event(WindowEvent::KeyPressed { text: ctrl.clone() });
+            w.dispatch_event(WindowEvent::KeyPressed { text: letter.to_string().into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: letter.to_string().into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: ctrl });
+        });
+        self.settle();
+    }
+
+    /// Let deferred work (releasing closed windows) run.
+    pub fn settle(&mut self) {
+        platform::advance(Duration::ZERO);
+    }
+
+    /// Resize a note's window (logical pixels).
+    pub fn resize_note(&mut self, note: usize, w: u32, h: u32) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| n.ui().window().set_size(slint::LogicalSize::new(w as f32, h as f32)));
+    }
+
+    /// Size of a note's window (logical pixels).
+    pub fn note_size(&self, note: usize) -> (u32, u32) {
+        let g = self.app().with_note(self.id(note), |n| n.geometry()).unwrap();
+        (g.w, g.h)
+    }
+
+    /// The items of the most recently shown menu.
+    pub fn last_menu(&self) -> Vec<washi::platform::MenuItem> {
+        self.menu.shown.borrow().last().cloned().expect("no menu was shown")
+    }
+
+    /// Windows that still exist (open notes, plus any not yet released).
+    pub fn window_count(&self) -> usize {
+        platform::windows().len()
+    }
+
+    /// Id of an open note.
+    pub fn note_id(&self, note: usize) -> NoteId {
+        self.id(note)
+    }
+
+    /// Whether a note is gone from the database.
+    pub fn is_deleted(&self, id: NoteId) -> bool {
+        self.app().saved_text(id).is_none()
+    }
+
+    // ---- window state (suspension) ----
+
+    fn set_state(&mut self, note: usize, change: impl FnOnce(&mut WindowState)) {
+        let id = self.id(note);
+        change(self.signals.states.borrow_mut().entry(id).or_default());
+        self.app().window_state_changed();
+    }
+
+    pub fn minimize(&mut self, note: usize) {
+        // What Windows does: the window goes inactive and is never painted while minimized.
+        let id = self.id(note);
+        self.app().with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(false)));
+        self.repaint_pending(note);
+        self.set_state(note, |s| {
+            s.minimized = true;
+            s.focused = false;
+        });
+    }
+
+    pub fn restore(&mut self, note: usize) {
+        self.set_state(note, |s| s.minimized = false);
+    }
+
+    pub fn focus(&mut self, note: usize) {
+        self.set_state(note, |s| s.focused = true);
+    }
+
+    /// Move the mouse over a note's margin.
+    pub fn hover(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let position = slint::LogicalPosition::new(5.0, 5.0);
+            n.ui().window().dispatch_event(WindowEvent::PointerMoved { position });
+        });
+        self.settle();
+    }
+
+    /// Windows asks a note to paint (it was uncovered).
+    pub fn paint_request(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().paint_requested(id);
+    }
+
+    pub fn is_suspended(&self) -> bool {
+        self.app().is_suspended()
+    }
+
+    /// Time until the next Slint timer is due; `None` when none is scheduled.
+    pub fn next_timer_due(&self) -> Option<Duration> {
+        slint::platform::duration_until_next_timer_update()
+    }
+
+    /// Draw a note if it asked for a repaint; says whether it did (so a second call is `false`).
+    pub fn repaint_pending(&self, note: usize) -> bool {
+        let w = platform::windows().remove(note);
+        let (pw, ph) = platform::WINDOW_SIZE;
+        let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
+        w.draw_if_needed(|r| {
+            r.render(&mut buf, pw as usize);
+        })
+    }
+
+    pub fn draw_pending(&self, note: usize) -> bool {
+        self.repaint_pending(note)
+    }
+
+    /// Position and size last written to the database for a note.
+    pub fn saved_geometry(&self, id: NoteId) -> Option<washi::storage::Geometry> {
+        self.app().saved_geometry(id)
     }
 
     // ---- check ----
+
+    /// The title a note's window (and taskbar button) shows.
+    pub fn window_title(&self, note: usize) -> String {
+        self.app().with_note(self.id(note), |n| n.title()).unwrap()
+    }
+
+    pub fn always_on_top(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.always_on_top()).unwrap()
+    }
+
+    /// Whether "Start with Windows" is registered.
+    pub fn startup_registered(&self) -> bool {
+        self.startup.enabled.get()
+    }
 
     pub fn open_note_count(&self) -> usize {
         self.app().note_ids().len()
@@ -191,7 +370,9 @@ impl Harness {
         std::fs::write(self.path("key.bin"), wrapped).unwrap();
     }
 
-    pub fn damage_database_header(&self) {
+    pub fn damage_database_header(&mut self) {
+        // Close the app first: closing the database checkpoints the WAL back over the header.
+        self.app = None;
         let p = self.path("notes.db");
         let mut b = std::fs::read(&p).unwrap();
         for byte in b.iter_mut().take(32) {

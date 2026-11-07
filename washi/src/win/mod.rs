@@ -2,15 +2,19 @@
 
 mod dialogs;
 mod dpapi;
+mod instance;
 mod menu;
 mod process;
 mod signals;
+mod startup;
 
 pub use dialogs::Win32Dialogs;
 pub use dpapi::DpapiProtector;
+pub use instance::Win32Instance;
 pub use menu::Win32ContextMenu;
 pub use process::Win32Power;
 pub use signals::Win32Signals;
+pub use startup::Win32Startup;
 
 use crate::platform::Clock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -42,4 +46,12 @@ impl Clock for SystemClock {
     fn monotonic(&self) -> Duration {
         self.start.elapsed()
     }
+}
+
+/// Group every note's taskbar button under one Washi identity. Call once at startup, before
+/// any window exists.
+pub fn set_app_identity() {
+    let id = wide("Washi.Notes");
+    // SAFETY: NUL-terminated string, copied by the call.
+    unsafe { windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };
 }

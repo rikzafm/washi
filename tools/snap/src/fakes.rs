@@ -85,27 +85,48 @@ impl WindowSignals for FakeSignals {
 pub struct FakePower {
     pub efficiency: Cell<bool>,
     pub releases: Cell<u32>,
+    /// Every call in order: `release_memory`, `efficiency_on`, `efficiency_off`.
+    pub log: RefCell<Vec<String>>,
 }
 
 impl ProcessPower for FakePower {
     fn set_efficiency_mode(&self, on: bool) {
         self.efficiency.set(on);
+        self.log.borrow_mut().push(if on { "efficiency_on" } else { "efficiency_off" }.into());
     }
     fn release_memory(&self) {
         self.releases.set(self.releases.get() + 1);
+        self.log.borrow_mut().push("release_memory".into());
     }
 }
 
-/// Records the menus shown and answers with a queued choice.
+/// Records the menus shown and answers with a queued choice: either a raw item id, or a path
+/// of labels (e.g. `["Open note", "shopping list"]`) looked up in the menu actually shown.
 #[derive(Default)]
 pub struct FakeMenu {
     pub shown: RefCell<Vec<Vec<MenuItem>>>,
     pub next_choice: Cell<Option<u32>>,
+    pub next_path: RefCell<Option<Vec<String>>>,
+}
+
+fn find<'a>(items: &'a [MenuItem], path: &[String]) -> Option<&'a MenuItem> {
+    let (first, rest) = path.split_first()?;
+    let it = items.iter().find(|i| &i.label == first)?;
+    if rest.is_empty() {
+        Some(it)
+    } else {
+        find(&it.children, rest)
+    }
 }
 
 impl ContextMenu for FakeMenu {
     fn show(&self, items: &[MenuItem], _at: (i32, i32)) -> Option<u32> {
         self.shown.borrow_mut().push(items.to_vec());
+        if let Some(path) = self.next_path.borrow_mut().take() {
+            let it = find(items, &path).unwrap_or_else(|| panic!("no menu item {path:?} in {items:?}"));
+            assert!(it.enabled, "menu item {path:?} is disabled");
+            return Some(it.id);
+        }
         self.next_choice.take()
     }
 }
@@ -131,5 +152,51 @@ impl Dialogs for FakeDialogs {
     }
     fn pick_save_file(&self, _suggested_name: &str, _filter: &str) -> Option<PathBuf> {
         self.save_path.borrow().clone()
+    }
+}
+
+/// Stands in for the `Run` registry value: a flag that outlives the app, like the registry does.
+#[derive(Default)]
+pub struct FakeStartup {
+    pub enabled: Cell<bool>,
+}
+
+impl StartupRegistration for FakeStartup {
+    fn is_enabled(&self) -> bool {
+        self.enabled.get()
+    }
+    fn set_enabled(&self, on: bool) {
+        self.enabled.set(on);
+    }
+}
+
+/// Stands in for the named mutex and the wake-up event between Washi processes.
+#[derive(Default)]
+pub struct FakeInstance {
+    claimed: Cell<bool>,
+    listener: RefCell<Option<Rc<dyn Fn()>>>,
+}
+
+impl FakeInstance {
+    /// The running process ended: the next launch is the first again.
+    pub fn process_exited(&self) {
+        self.claimed.set(false);
+        *self.listener.borrow_mut() = None;
+    }
+}
+
+impl SingleInstance for FakeInstance {
+    fn acquire(&self) -> Launch {
+        if !self.claimed.replace(true) {
+            return Launch::First;
+        }
+        let listener = self.listener.borrow().clone();
+        if let Some(wake) = listener {
+            wake();
+        }
+        Launch::HandedOff
+    }
+    fn listen(&self, on_request: Rc<dyn Fn()>) {
+        *self.listener.borrow_mut() = Some(on_request);
     }
 }

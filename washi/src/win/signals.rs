@@ -31,6 +31,14 @@ impl WindowSignals for Win32Signals {
         }
     }
 
+    fn attach(&self, note: NoteId, hwnd: isize) {
+        self.register(note, hwnd);
+    }
+
+    fn detach(&self, note: NoteId) {
+        self.unregister(note);
+    }
+
     fn app_in_background(&self) -> bool {
         // SAFETY: simple queries.
         unsafe {

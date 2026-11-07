@@ -24,9 +24,11 @@ accessibility = ["slint/accessibility"]
 # `software-renderer-systemfonts` is a placeholder until ticket 03 embeds fonts.
 slint = { version = "1.18", default-features = false, features = [
     "std", "compat-1-2", "backend-winit", "renderer-software", "software-renderer-systemfonts",
+    "raw-window-handle-06",
 ] }
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 zeroize = "1"
+raw-window-handle = "0.6"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
@@ -35,6 +37,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Memory",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Controls_Dialogs",
+    "Win32_UI_Shell",
+    "Win32_System_Registry",
+    "Win32_Security",
 ] }
 
 [build-dependencies]
