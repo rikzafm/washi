@@ -48,6 +48,8 @@ export component BlockView inherits Rectangle {
     in property <int> focus-serial: 0;
     in property <int> focus-offset: 0;
     callback focus-changed(bool);
+    /// The caret of this block's field moved to this byte offset (the note keeps it in view).
+    callback caret-moved(int);
     /// Bumped to make the field state its focus again (after a suspension).
     in property <int> resync: 0;
     changed resync => { root.focus-changed(input.has-focus); }
@@ -87,6 +89,9 @@ export component BlockView inherits Rectangle {
         // an image has no text field
         visible: root.kind != BlockKind.image;
         edited => { root.edited(self.text, self.cursor-position-byte-offset); }
+        changed cursor-position-byte-offset => {
+            if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset); }
+        }
         key-pressed(e) => {
             // Ctrl+Z undoes, Ctrl+Y (or Ctrl+Shift+Z) redoes: the note keeps the history, not the field
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta) {

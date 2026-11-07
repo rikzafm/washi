@@ -413,6 +413,29 @@ impl Harness {
         });
     }
 
+    /// Turn the mouse wheel at a window position (logical px); positive `dy` is up.
+    pub fn wheel(&mut self, note: usize, x: f32, y: f32, dy: f32) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            n.ui().window().dispatch_event(WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(x, y), delta_x: 0.0, delta_y: dy });
+        });
+    }
+
+    /// How far the text is scrolled up, in logical px (0 at the top).
+    pub fn scroll_offset(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.ui().get_scroll_y()).unwrap()
+    }
+
+    /// Height of the text area in logical px.
+    pub fn text_view_height(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.ui().get_text_view_height()).unwrap()
+    }
+
+    /// Opacity of the scrollbar (0 hidden, 1 shown).
+    pub fn scrollbar_opacity(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.ui().get_scrollbar_opacity()).unwrap()
+    }
+
     /// How much of the resting tilt the text still carries: 1 at rest, 0 while editing.
     pub fn text_tilt_scale(&self, note: usize) -> f32 {
         self.app().with_note(self.id(note), |n| n.ui().get_text_tilt_scale()).unwrap()

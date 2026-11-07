@@ -1,0 +1,41 @@
+import { ToolbarMetrics } from "toolbar.slint";
+
+// Scrolling of a note's text. The wheel moves the text inside the text area; the bar only shows
+// the position (thin, ink-muted), and only while the pointer is over the note and the text overflows.
+export global ScrollMetrics {
+    out property <length> bar-width: 3px;
+    // From the paper's right edge: inside the right inset, clear of the text.
+    out property <length> bar-right: 24px;
+    // Space kept between the bar and the ends of the text area.
+    out property <length> bar-pad: 8px;
+    out property <length> min-thumb: 24px;
+    out property <duration> fade: 120ms;
+}
+
+/// The thin bar. `view` is the text area's height, `content` the text's, `offset` how far it is scrolled.
+export component ScrollBar inherits Rectangle {
+    in property <length> view;
+    in property <length> content;
+    in property <length> offset;
+    in property <bool> shown: false;
+
+    property <bool> overflowing: root.content > root.view + 0.5px;
+    property <length> track: max(0px, root.view - 2 * ScrollMetrics.bar-pad);
+    property <length> thumb: root.content > 0px ? max(ScrollMetrics.min-thumb, root.track * root.view / root.content) : 0px;
+    property <length> travel: max(0px, root.track - root.thumb);
+    property <length> range: max(0.001px, root.content - root.view);
+
+    out property <float> bar-opacity: (root.shown && root.overflowing) ? 1 : 0;
+    opacity: root.bar-opacity;
+    visible: root.bar-opacity > 0;
+    animate opacity { duration: ScrollMetrics.fade; easing: ease-out; }
+
+    Rectangle {
+        x: parent.width - ScrollMetrics.bar-width;
+        y: ScrollMetrics.bar-pad + root.travel * clamp(root.offset / root.range, 0, 1);
+        width: ScrollMetrics.bar-width;
+        height: root.thumb;
+        border-radius: self.width / 2;
+        background: ToolbarMetrics.ink-muted;
+    }
+}
