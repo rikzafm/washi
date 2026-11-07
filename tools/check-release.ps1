@@ -1,7 +1,8 @@
 # Release-binary checks (run by CI, runnable locally). Requires a release build of washi.
 #   1. no GPU renderer in washi's dependency tree
 #   2. dev-only tool crates are not in washi's dependency tree
-#   3. washi.exe is a GUI-subsystem exe (no console window) with the PerMonitorV2 manifest
+#   3. no system-font scanning: Latin text uses the fonts embedded from fonts/ (ticket 08)
+#   4. washi.exe is a GUI-subsystem exe (no console window) with the PerMonitorV2 manifest
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $fail = $false
@@ -14,6 +15,9 @@ foreach ($bad in 'femtovg', 'skia-safe', 'i-slint-renderer-skia', 'i-slint-rende
 foreach ($bad in 'snap', 'uidiff', 'tempfile') {
     if ($tree -match "(?im)^$bad ") { Write-Host "FAIL: dev-only crate '$bad' in washi's dependency tree"; $fail = $true }
 }
+
+$features = cargo tree -p washi -e features --prefix none 2>&1 | Out-String
+if ($features -match 'software-renderer-systemfonts') { Write-Host 'FAIL: slint feature software-renderer-systemfonts is on (fonts must be embedded)'; $fail = $true }
 
 $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'target' }
 $exe = Join-Path $targetDir 'release\washi.exe'

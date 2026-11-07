@@ -4,7 +4,7 @@ use crate::platform::{Clock, NoteId};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 use crate::blocks::{self, Block, Kind};
-use slint::{Model, VecModel};
+use slint::VecModel;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;

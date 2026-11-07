@@ -16,6 +16,8 @@ export component BlockView inherits Rectangle {
     in property <BlockKind> kind: body;
     in property <string> text;
     in property <bool> autofocus: false;
+    /// Space above the block, in logical px (set by the stack from the kinds around it).
+    in property <length> gap-before: 0px;
     callback edited(string);
 
     property <length> size: kind == BlockKind.title ? Theme.title-size
@@ -23,11 +25,11 @@ export component BlockView inherits Rectangle {
     property <length> pitch: kind == BlockKind.title ? Theme.title-pitch
         : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch;
 
-    preferred-height: input.preferred-height;
+    preferred-height: root.gap-before + input.preferred-height;
 
     input := TextInput {
         x: 0;
-        y: 0;
+        y: root.gap-before;
         width: parent.width;
         wrap: word-wrap;
         single-line: false;

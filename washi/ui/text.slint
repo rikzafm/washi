@@ -1,8 +1,10 @@
 import { Theme } from "theme.slint";
-import { BlockData, BlockView } from "block.slint";
+import { BlockData, BlockKind, BlockView } from "block.slint";
 
-// The note's text: blocks stacked in the paper's frame, tilted with the paper.
-// `width`/`height` are the paper's size; the layer rotates about the paper's center.
+// The note's text: blocks stacked in the paper's frame (fixed insets, not proportions of the size).
+// `width`/`height` are the paper's size.
+// The mockups' text is tilted 1.5 deg with the paper, but Slint's software renderer cannot rotate
+// text (transform-rotation is a no-op there, slint#6068), so the text stays level for now.
 export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
     callback block-edited(int, string);
@@ -16,6 +18,9 @@ export component TextLayer inherits Rectangle {
             kind: b.kind;
             text: b.text;
             autofocus: i == 0;
+            // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
+            gap-before: i == 0 || root.blocks[i - 1].kind == b.kind ? 0px
+                : b.kind == BlockKind.heading ? Theme.heading-gap : Theme.body-gap;
             edited(t) => { root.block-edited(i, t); }
         }
     }
