@@ -1,0 +1,100 @@
+// Spike UI: tilted rounded-rect paper drawn as a Path from bound properties,
+// stacked translucent shadow Paths, a hover-driven toolbar over a child TextInput.
+export component Note inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    title: "washi spike";
+    preferred-width: 431px;
+    preferred-height: 451px;
+    min-width: 200px;
+    min-height: 200px;
+
+    in property <bool> shadows: true;
+    in property <bool> probe: true;
+    out property <bool> hovered: ta.has-hover;
+    in property <int> shadow-n: 8;
+    in property <length> shadow-step: 1px;
+    in property <image> cached;
+    in property <bool> use-cached: false;
+
+    property <length> margin: 30px;
+    property <angle> tilt: 1.5deg;
+    property <float> cs: tilt.cos();
+    property <float> sn: tilt.sin();
+    property <length> r: 6px;
+    property <length> pw: root.width - 2 * margin;
+    property <length> ph: root.height - 2 * margin;
+
+    pure function pt(cx: length, cy: length, lx: length, ly: length) -> string {
+        return ((cx + lx * cs - ly * sn) / 1px) + " " + ((cy + lx * sn + ly * cs) / 1px);
+    }
+    pure function outline(cx: length, cy: length, hw: length, hh: length, rr: length) -> string {
+        return "M " + pt(cx, cy, -hw, -hh + rr)
+            + " A " + (rr / 1px) + " " + (rr / 1px) + " 0 0 1 " + pt(cx, cy, -hw + rr, -hh)
+            + " L " + pt(cx, cy, hw - rr, -hh)
+            + " A " + (rr / 1px) + " " + (rr / 1px) + " 0 0 1 " + pt(cx, cy, hw, -hh + rr)
+            + " L " + pt(cx, cy, hw, hh - rr)
+            + " A " + (rr / 1px) + " " + (rr / 1px) + " 0 0 1 " + pt(cx, cy, hw - rr, hh)
+            + " L " + pt(cx, cy, -hw + rr, hh)
+            + " A " + (rr / 1px) + " " + (rr / 1px) + " 0 0 1 " + pt(cx, cy, -hw, hh - rr)
+            + " Z";
+    }
+
+    // 8 stacked copies, each grown by 1px, low alpha, offset down: approximates a ~24px blur.
+    for i in (root.shadows ? root.shadow-n : 0): Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: outline(margin + pw / 2, margin + ph / 2 + 4px, pw / 2 + i * shadow-step, ph / 2 + i * shadow-step, r + i * shadow-step);
+        fill: #00000014;
+    }
+
+    if root.use-cached: Image { width: root.width; height: root.height; source: root.cached; image-fit: fill; }
+
+    Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: outline(margin + pw / 2, margin + ph / 2, pw / 2, ph / 2, r);
+        fill: white;
+        stroke: #00000010;
+        stroke-width: 0.5px;
+    }
+
+    // Deterministic half-transparent probe shapes in the empty margin (top-right corner):
+    // a 50%-alpha red square and a fully empty (alpha 0) reference square next to it.
+    if root.probe: Rectangle { x: root.width - 24px; y: 2px; width: 20px; height: 20px; background: #ff000080; }
+
+    // Hover test: parent TouchArea with a child TextInput that covers most of it.
+    ta := TouchArea {
+        x: margin; y: margin; width: pw; height: ph;
+        Rectangle {
+            x: 12px; y: 24px; width: parent.width - 24px; height: parent.height - 70px;
+            Text { text: "Note Something...."; color: #00000040; visible: input.text == ""; font-size: 16px; }
+            input := TextInput { width: parent.width; height: parent.height; font-size: 16px; wrap: word-wrap; }
+        }
+        Rectangle {
+            y: parent.height - 40px; height: 40px; width: parent.width;
+            opacity: ta.has-hover ? 1 : 0;
+            animate opacity { duration: 120ms; }
+            Text { text: "B  I  U  ab"; color: #555; }
+        }
+    }
+    // tapes (fixed size, pinned to corners)
+    Rectangle { x: margin - 10px; y: margin - 8px; width: 80px; height: 22px; background: #f4a6c0cc; }
+    Rectangle { x: root.width - margin - 70px; y: root.height - margin - 14px; width: 80px; height: 22px; background: #9ec9f0cc; }
+}
+
+// Empty window: baseline for memory measurements.
+export component Bare inherits Window {
+    no-frame: true;
+    always-on-top: true;
+    background: transparent;
+    preferred-width: 431px;
+    preferred-height: 451px;
+}
+
+
