@@ -2,6 +2,7 @@
 
 mod cc;
 mod empty;
+pub mod fontmatch;
 mod icons;
 mod image;
 mod paper;
