@@ -4,6 +4,7 @@ use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 use crate::document::{Block, Caret, Document, Kind};
+use crate::history::History;
 use crate::textflow::{self, Style, Tokens};
 use slint::{Model, VecModel};
 use std::cell::{Cell, RefCell};
@@ -137,21 +138,60 @@ struct Doc {
     runs: Rc<VecModel<RunData>>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
+    /// Undo and redo (ticket 12): the snapshots of this note's document.
+    history: RefCell<History<Document>>,
 }
+
+/// Typing is snapshotted once it pauses this long; structural changes are snapshotted at once.
+pub const HISTORY_PAUSE: Duration = Duration::from_millis(500);
+
+/// The keys the block field sends for Ctrl+Z and Ctrl+Y (see ui/block.slint).
+const UNDO_KEY: &str = "\u{1a}";
+const REDO_KEY: &str = "\u{19}";
 
 /// The shown text of an empty note.
 pub const HINT: &str = "Note Something....";
 
 impl Doc {
     fn new() -> Rc<Doc> {
-        Rc::new(Doc { doc: RefCell::new(Document::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)) })
+        Rc::new(Doc { doc: RefCell::new(Document::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)), history: RefCell::new(History::new(Document::new())) })
     }
 
     /// Replace everything (opening a note, or text set from outside).
     fn load(&self, content: &str) {
         let parsed = Document::parse(content);
         self.model.set_vec(parsed.blocks().iter().map(block_data).collect::<Vec<_>>());
+        *self.history.borrow_mut() = History::new(parsed.clone());
         *self.doc.borrow_mut() = parsed;
+    }
+
+    /// Snapshot the document as it is now (typing paused, or an undo is about to step back).
+    fn checkpoint(&self) {
+        self.history.borrow_mut().record(self.doc.borrow().clone());
+    }
+
+    /// A structural change just happened to the document that was `before`: snapshot the typing
+    /// before it, then the change.
+    fn structural(&self, before: Document) {
+        let mut h = self.history.borrow_mut();
+        h.record(before);
+        h.record(self.doc.borrow().clone());
+    }
+
+    /// Ctrl+Z (`redo` false) or Ctrl+Y: show the previous or next snapshot. The caret to place,
+    /// or `None` when there is no such snapshot.
+    fn step(&self, redo: bool) -> Option<Caret> {
+        self.checkpoint();
+        let target = {
+            let mut h = self.history.borrow_mut();
+            if redo { h.redo() } else { h.undo() }?.clone()
+        };
+        let mut doc = self.doc.borrow_mut();
+        let at = doc.blocks().iter().zip(target.blocks()).take_while(|(a, b)| a == b).count();
+        let block = at.min(target.len() - 1);
+        let offset = target.blocks()[block].text.len();
+        *doc = target;
+        Some(Caret { block, offset })
     }
 
     fn tokens(ui: &NoteWindow) -> Tokens {
@@ -224,11 +264,12 @@ impl Doc {
     /// Block `i` was edited to `text`, the caret now at `cursor`. Line breaks in it (a paste) make
     /// new blocks; then the caret to move to is returned.
     fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
-        let mut doc = self.doc.borrow_mut();
         if !text.contains(['\n', '\r']) {
-            doc.set_text(i, text);
+            self.doc.borrow_mut().set_text(i, text);
             return None;
         }
+        let before = self.doc.borrow().clone();
+        let mut doc = self.doc.borrow_mut();
         let old = match doc.blocks().get(i) {
             Some(b) if b.is_text() => b.text.clone(),
             _ => return None,
@@ -246,7 +287,10 @@ impl Doc {
         while !old.is_char_boundary(start) || !text.is_char_boundary(start) {
             start -= 1;
         }
-        Some(doc.insert_text(i, start, end, &text[start..cursor]))
+        let caret = doc.insert_text(i, start, end, &text[start..cursor]);
+        drop(doc);
+        self.structural(before);
+        Some(caret)
     }
 
     /// Enter, Backspace, Delete, Up or Down in block `i` at `offset`. `Some((caret, changed))` when
@@ -254,16 +298,25 @@ impl Doc {
     /// `None` when the field keeps it.
     fn key(&self, i: usize, key: &str, offset: usize, ui: &NoteWindow) -> Option<(Caret, bool)> {
         use slint::platform::Key;
+        let before = self.doc.borrow().clone();
         let mut doc = self.doc.borrow_mut();
         let is = |k: Key| key == char::from(k).to_string();
-        if is(Key::Return) {
-            return Some((doc.split(i, offset), true));
+        let edit = if is(Key::Return) {
+            Some(doc.split(i, offset))
+        } else if is(Key::Backspace) {
+            doc.backspace(i, offset)
+        } else if is(Key::Delete) {
+            doc.delete(i, offset)
+        } else {
+            None
+        };
+        if let Some(c) = edit {
+            drop(doc);
+            self.structural(before);
+            return Some((c, true));
         }
-        if is(Key::Backspace) {
-            return doc.backspace(i, offset).map(|c| (c, true));
-        }
-        if is(Key::Delete) {
-            return doc.delete(i, offset).map(|c| (c, true));
+        if is(Key::Return) || is(Key::Backspace) || is(Key::Delete) {
+            return None;
         }
         let up = is(Key::UpArrow);
         if !up && !is(Key::DownArrow) {
@@ -306,6 +359,8 @@ pub struct Note {
     doc: Rc<Doc>,
     autosave: Rc<Autosave>,
     timer: Rc<Timer>,
+    /// Snapshots typing once it pauses (stopped while suspended; the next undo snapshots anyway).
+    history_timer: Rc<Timer>,
     geometry: Rc<GeometrySave>,
     geometry_timer: Rc<Timer>,
 }
@@ -337,6 +392,7 @@ impl Note {
         }
         let autosave = Rc::new(Autosave { id, db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
+        let history_timer = Rc::new(Timer::default());
         // everything that changes the text ends here: relayout, stored text, title, autosave
         let changed: Rc<dyn Fn(Option<Caret>)> = {
             let (autosave, timer, weak, doc) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone());
@@ -359,9 +415,14 @@ impl Note {
             })
         };
         {
-            let (changed, doc) = (changed.clone(), doc.clone());
+            let (changed, doc, history_timer) = (changed.clone(), doc.clone(), history_timer.clone());
             ui.on_block_edited(move |i, block_text, cursor| {
                 let caret = doc.edit(i.max(0) as usize, block_text.as_str(), cursor.max(0) as usize);
+                if caret.is_none() {
+                    // typing: snapshot when it pauses
+                    let doc = doc.clone();
+                    history_timer.start(TimerMode::SingleShot, HISTORY_PAUSE, move || doc.checkpoint());
+                }
                 changed(caret);
             });
         }
@@ -369,6 +430,13 @@ impl Note {
             let (changed, doc, weak) = (changed.clone(), doc.clone(), ui.as_weak());
             ui.on_block_key(move |i, key, offset| {
                 let Some(ui) = weak.upgrade() else { return false };
+                if key == UNDO_KEY || key == REDO_KEY {
+                    // taken even with nothing to step to: the field has no history of its own
+                    if let Some(caret) = doc.step(key == REDO_KEY) {
+                        changed(Some(caret));
+                    }
+                    return true;
+                }
                 let Some((caret, edited)) = doc.key(i.max(0) as usize, key.as_str(), offset.max(0) as usize, &ui) else { return false };
                 if edited {
                     changed(Some(caret));
@@ -436,7 +504,7 @@ impl Note {
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, geometry, geometry_timer: Rc::new(Timer::default()) })
+        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()) })
     }
 
     /// The user (or the platform) moved or resized the window: save the new geometry after the
@@ -519,6 +587,7 @@ impl Note {
     /// does not blink). Unsaved edits must have been flushed first.
     pub fn pause(&self) {
         self.timer.stop();
+        self.history_timer.stop();
         self.geometry_timer.stop();
         // the text keeps its look (editing or resting) while nobody can see it: no redraw
         self.ui.set_suspended(true);
