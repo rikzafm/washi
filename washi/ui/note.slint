@@ -1,10 +1,10 @@
 import { Theme } from "theme.slint";
-import { BlockData, RunData } from "block.slint";
+import { BlockData, RuleData, RunData } from "block.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
 
-export { BlockData, BlockKind, RunData } from "block.slint";
+export { BlockData, BlockKind, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
 import { WindowHandles } from "resize-zones.slint";
@@ -30,6 +30,19 @@ export component NoteWindow inherits Window {
     in property <[BlockData]> blocks;
     /// The same text as upright words on the tilted baseline (shown at rest), laid out by Rust.
     in property <[RunData]> runs;
+    /// Underlines, strike-throughs and list bullets, to be drawn with the words.
+    in property <[RuleData]> rules;
+    /// The formats of the paragraph holding the caret (the toolbar buttons' active state).
+    in property <bool> fmt-bold: false;
+    in property <bool> fmt-italic: false;
+    in property <bool> fmt-underline: false;
+    in property <bool> fmt-strike: false;
+    in property <bool> fmt-list: false;
+    /// Format the paragraph holding the caret: 0 bold, 1 italic, 2 underline, 3 strike, 4 list
+    /// (a toolbar button or its shortcut).
+    callback format(int);
+    /// A text field took the focus: the caret is in this block.
+    callback caret-moved(int);
     /// The paper (window minus margins) changed size: Rust lays the words out again.
     callback paper-resized(length, length);
     changed width => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
@@ -93,6 +106,13 @@ export component NoteWindow inherits Window {
                     if (e.text == "n" || e.text == "\u{e}") { root.new-note(); return accept; }
                     if (e.text == "w" || e.text == "\u{17}") { root.close-note(); return accept; }
                     if (e.text == "d" || e.text == "\u{4}") { root.delete-note(); return accept; }
+                    if (e.text == "b" || e.text == "\u{2}") { root.format(0); return accept; }
+                    if (e.text == "i" || e.text == "\u{9}") { root.format(1); return accept; }
+                    if (e.text == "u" || e.text == "\u{15}") { root.format(2); return accept; }
+                }
+                if (e.modifiers.control && e.modifiers.shift && !e.modifiers.alt) {
+                    if (e.text == "x" || e.text == "X" || e.text == "\u{18}") { root.format(3); return accept; }
+                    if (e.text == "l" || e.text == "L" || e.text == "\u{c}") { root.format(4); return accept; }
                 }
                 reject
             }
@@ -115,6 +135,8 @@ export component NoteWindow inherits Window {
                     height: root.paper-bottom - root.paper-top;
                     blocks: root.blocks;
                     runs: root.runs;
+                    rules: root.rules;
+                    caret-moved(i) => { root.caret-moved(i); }
                     suspended: root.suspended;
                     resync: root.text-resync;
                     focus-block: root.focus-block;
@@ -151,6 +173,12 @@ export component NoteWindow inherits Window {
             paper-w: root.width - 2 * root.margin;
             paper-h: root.height - 2 * root.margin;
             tilt: root.tilt;
+            bold-active: root.fmt-bold;
+            italic-active: root.fmt-italic;
+            underline-active: root.fmt-underline;
+            strike-active: root.fmt-strike;
+            list-active: root.fmt-list;
+            activated(k) => { if (k < 5) { root.format(k); } }
             opacity: (paper-touch.has-hover || self.any-pressed) ? 1 : 0;
             visible: self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }

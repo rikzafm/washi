@@ -22,6 +22,8 @@ pub struct Options {
     /// The note has the keyboard focus (level text fields, caret shown) instead of resting
     /// (words on the tilted baseline).
     pub editing: bool,
+    /// The paragraph that holds the caret (it sets the toolbar's active buttons); the title if none.
+    pub caret_block: Option<usize>,
     /// Output size in physical px (the mockup canvas).
     pub canvas: (u32, u32),
     pub desk: [u8; 3],
@@ -29,7 +31,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { text: String::new(), scale: 1.5, paper: (363.0, 384.0), hover: false, editing: false, canvas: (720, 840), desk: [0xD9, 0xDD, 0xE1] }
+        Options { text: String::new(), scale: 1.5, paper: (363.0, 384.0), hover: false, editing: false, caret_block: None, canvas: (720, 840), desk: [0xD9, 0xDD, 0xE1] }
     }
 }
 
@@ -67,6 +69,9 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
     let mut h = Harness::new();
     h.start().map_err(|e| e.to_string())?;
     h.set_note_text(0, &o.text);
+    if let Some(block) = o.caret_block {
+        h.place_caret(0, block);
+    }
 
     let adapter = platform::windows().pop().ok_or("the note has no window")?;
     let win = adapter.window();

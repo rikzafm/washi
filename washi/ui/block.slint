@@ -11,6 +11,7 @@ export struct BlockData {
     text: string,
     /// Drawn in the bold face (headings, and blocks with the bold flag).
     bold: bool,
+    italic: bool,
 }
 
 /// One word at rest: upright, at its level place (x, y) plus the offset (dx, dy) that puts it on the tilted baseline.
@@ -24,8 +25,19 @@ export struct RunData {
     size: length,
     pitch: length,
     bold: bool,
+    italic: bool,
     /// The empty-note hint rather than note text.
     hint: bool,
+}
+
+/// An underline, a strike-through or a list bullet: a level box plus the offset onto the tilted baseline.
+export struct RuleData {
+    x: length,
+    y: length,
+    dx: length,
+    dy: length,
+    width: length,
+    height: length,
 }
 
 // One paragraph: an editable text field styled by its kind.
@@ -33,6 +45,7 @@ export component BlockView inherits Rectangle {
     in property <BlockKind> kind: body;
     in property <string> text;
     in property <bool> bold: false;
+    in property <bool> italic: false;
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
     in property <length> gap-before: 0px;
@@ -80,6 +93,7 @@ export component BlockView inherits Rectangle {
         font-family: Theme.handwriting;
         font-size: root.size;
         font-weight: root.bold ? 700 : 400;
+        font-italic: root.italic;
         line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
         color: Theme.ink;
         // hidden, not removed: a click still lands in the field and starts editing

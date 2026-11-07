@@ -48,9 +48,9 @@ Remove-Item -Recurse -Force $Out -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Out | Out-Null
 
 # 1. snap: the real note component on the desk color
-Run 'snap hover' { & $snap --fixture mockup --hover --scale $Scale --paper $hoverPaper --out "$Out/hover.png" | Out-Null }
+Run 'snap hover' { & $snap --fixture mockup --hover --caret 1 --scale $Scale --paper $hoverPaper --out "$Out/hover.png" | Out-Null }
 Run 'snap idle' { & $snap --fixture mockup --scale $Scale --paper $idlePaper --out "$Out/idle.png" | Out-Null }
-Run 'snap large' { & $snap --fixture long --hover --scale $Scale --paper $largePaper --canvas $largeCanvas --out "$Out/large.png" | Out-Null }
+Run 'snap large' { & $snap --fixture long --hover --caret 1 --scale $Scale --paper $largePaper --canvas $largeCanvas --out "$Out/large.png" | Out-Null }
 
 $only = @(); if ($Only.Count -gt 0) { $only = @('--only', ($Only -join ',')) }
 $failed = $false
