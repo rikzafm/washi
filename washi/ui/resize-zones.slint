@@ -1,0 +1,186 @@
+// Moving and resizing the note: invisible touch zones over the paper. They only tell Rust what the
+// user grabbed (`start-move`, `start-resize`); the platform does the actual move or resize
+// (IMPLEMENTATION_PLAN 3.2). Nothing here draws anything.
+//
+// The zones follow the paper's axis-aligned bounds. The 1.5 deg tilt moves the visible edge by at
+// most about 5 px, which the 8 px zone (4 px each side of the edge) absorbs.
+import { PaperTheme } from "paper-theme.slint";
+import { PaperGeometry } from "paper.slint";
+
+export global ResizeZoneMetrics {
+    // Width of an edge zone, centered on the paper's edge.
+    out property <length> thickness: 8px;
+    // Side of a corner zone, centered on the paper's corner.
+    out property <length> corner: 16px;
+}
+
+// Direction codes, shared with `washi::platform::ResizeEdge::from_code`:
+// 0 north, 1 north-east, 2 east, 3 south-east, 4 south, 5 south-west, 6 west, 7 north-west.
+//
+// A zone is a TouchArea, so it takes the pointer events of what lies under it. The note's own
+// TouchArea shows the toolbar and the context menu, so a zone hands on the right button and
+// pointer moves instead of swallowing them.
+component Zone inherits TouchArea {
+    in property <int> direction;
+    callback start(int);
+    callback right-click(length, length);
+    callback moved();
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.move) { root.moved(); }
+        if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) { root.start(root.direction); }
+        if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+            root.right-click(root.x + self.mouse-x, root.y + self.mouse-y);
+        }
+    }
+}
+
+// An area that drags the whole note.
+component MoveArea inherits TouchArea {
+    callback start();
+    callback right-click(length, length);
+    callback moved();
+    pointer-event(e) => {
+        if (e.kind == PointerEventKind.move) { root.moved(); }
+        if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) { root.start(); }
+        if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+            root.right-click(root.x + self.mouse-x, root.y + self.mouse-y);
+        }
+    }
+}
+
+// Fills the window. Drag the pink tape or the paper's top margin to move; the eight zones on the
+// paper's edges and corners resize.
+export component WindowHandles {
+    callback start-move();
+    callback start-resize(int);
+    callback right-click(length, length);
+    callback moved();
+
+    property <length> l: PaperTheme.margin;
+    property <length> t: PaperTheme.margin;
+    property <length> r: root.width - PaperTheme.margin;
+    property <length> b: root.height - PaperTheme.margin;
+    property <length> th: ResizeZoneMetrics.thickness;
+    property <length> c: ResizeZoneMetrics.corner;
+
+    // The pink tape's box: the same fixed-size image, centered where Tapes puts it.
+    property <image> pink-tape: @image-url("assets/tape-pink.png");
+    property <length> tape-w: pink-tape.width / PaperTheme.tape-image-scale * 1px;
+    property <length> tape-h: pink-tape.height / PaperTheme.tape-image-scale * 1px;
+    property <length> tape-cx: PaperGeometry.x(root.width / 2, root.height / 2,
+        -(root.r - root.l) / 2 + PaperTheme.tape-pink-offset-u, -(root.b - root.t) / 2 + PaperTheme.tape-pink-offset-v);
+    property <length> tape-cy: PaperGeometry.y(root.width / 2, root.height / 2,
+        -(root.r - root.l) / 2 + PaperTheme.tape-pink-offset-u, -(root.b - root.t) / 2 + PaperTheme.tape-pink-offset-v);
+    // Where the top edge zone starts: just past the tape, so the tape stays one grip.
+    property <length> top-zone-x: root.tape-cx + root.tape-w / 2;
+
+    // Moving: the pink tape, and the top margin (the paper's top inset, below the top edge zone).
+    MoveArea {
+        x: root.tape-cx - root.tape-w / 2;
+        y: root.tape-cy - root.tape-h / 2;
+        width: root.tape-w;
+        height: root.tape-h;
+        start => { root.start-move(); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    MoveArea {
+        x: root.l + root.th;
+        y: root.t + root.th / 2;
+        width: root.r - root.l - 2 * root.th;
+        height: PaperTheme.text-top-inset - root.th / 2;
+        start => { root.start-move(); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+
+    // Resizing: four edges, four corners (above the move areas where they overlap).
+    Zone { // north
+        direction: 0;
+        x: root.top-zone-x;
+        y: root.t - root.th / 2;
+        width: root.r - root.c / 2 - root.top-zone-x;
+        height: root.th;
+        mouse-cursor: ns-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    Zone { // east
+        direction: 2;
+        x: root.r - root.th / 2;
+        y: root.t + root.c / 2;
+        width: root.th;
+        height: root.b - root.t - root.c;
+        mouse-cursor: ew-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    Zone { // south
+        direction: 4;
+        x: root.l + root.c / 2;
+        y: root.b - root.th / 2;
+        width: root.r - root.l - root.c;
+        height: root.th;
+        mouse-cursor: ns-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    Zone { // west
+        direction: 6;
+        x: root.l - root.th / 2;
+        y: root.t + root.c / 2;
+        width: root.th;
+        height: root.b - root.t - root.c;
+        mouse-cursor: ew-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    Zone { // north-west
+        direction: 7;
+        x: root.l - root.c / 2;
+        y: root.t - root.c / 2;
+        width: root.c;
+        height: root.c;
+        mouse-cursor: nwse-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    Zone { // north-east
+        direction: 1;
+        x: root.r - root.c / 2;
+        y: root.t - root.c / 2;
+        width: root.c;
+        height: root.c;
+        mouse-cursor: nesw-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    Zone { // south-east
+        direction: 3;
+        x: root.r - root.c / 2;
+        y: root.b - root.c / 2;
+        width: root.c;
+        height: root.c;
+        mouse-cursor: nwse-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+    Zone { // south-west
+        direction: 5;
+        x: root.l - root.c / 2;
+        y: root.b - root.c / 2;
+        width: root.c;
+        height: root.c;
+        mouse-cursor: nesw-resize;
+        start(d) => { root.start-resize(d); }
+        right-click(x, y) => { root.right-click(x, y); }
+        moved => { root.moved(); }
+    }
+}

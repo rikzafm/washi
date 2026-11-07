@@ -46,6 +46,8 @@ pub struct WindowState {
 pub enum SignalEvent {
     /// A note minimized, restored, gained or lost focus, or Washi moved to or from the background.
     StateChanged,
+    /// A note was moved or resized.
+    Geometry(NoteId),
     /// Windows asked a note to paint (for example because it was uncovered).
     Paint(NoteId),
 }
@@ -105,6 +107,88 @@ pub trait SingleInstance {
     /// First instance only: `on_request` runs on the UI thread each time a later launch asks
     /// for a new note.
     fn listen(&self, on_request: std::rc::Rc<dyn Fn()>);
+}
+
+/// A rectangle on the desktop in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScreenRect {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+impl ScreenRect {
+    pub fn new(x: i32, y: i32, w: i32, h: i32) -> Self {
+        ScreenRect { x, y, w, h }
+    }
+    pub fn right(&self) -> i32 {
+        self.x + self.w
+    }
+    pub fn bottom(&self) -> i32 {
+        self.y + self.h
+    }
+    /// The overlap with `other`, or `None` when they do not overlap.
+    pub fn intersect(&self, other: &ScreenRect) -> Option<ScreenRect> {
+        let (x, y) = (self.x.max(other.x), self.y.max(other.y));
+        let (r, b) = (self.right().min(other.right()), self.bottom().min(other.bottom()));
+        (r > x && b > y).then(|| ScreenRect::new(x, y, r - x, b - y))
+    }
+}
+
+/// Which edge or corner of a note the user grabbed to resize it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResizeEdge {
+    North,
+    NorthEast,
+    East,
+    SouthEast,
+    South,
+    SouthWest,
+    West,
+    NorthWest,
+}
+
+impl ResizeEdge {
+    /// The zone codes of `resize-zones.slint`: 0 is north, then clockwise.
+    pub fn from_code(code: i32) -> Option<ResizeEdge> {
+        use ResizeEdge::*;
+        Some(match code {
+            0 => North,
+            1 => NorthEast,
+            2 => East,
+            3 => SouthEast,
+            4 => South,
+            5 => SouthWest,
+            6 => West,
+            7 => NorthWest,
+            _ => return None,
+        })
+    }
+
+    pub fn moves_left(self) -> bool {
+        matches!(self, ResizeEdge::West | ResizeEdge::NorthWest | ResizeEdge::SouthWest)
+    }
+    pub fn moves_right(self) -> bool {
+        matches!(self, ResizeEdge::East | ResizeEdge::NorthEast | ResizeEdge::SouthEast)
+    }
+    pub fn moves_top(self) -> bool {
+        matches!(self, ResizeEdge::North | ResizeEdge::NorthEast | ResizeEdge::NorthWest)
+    }
+    pub fn moves_bottom(self) -> bool {
+        matches!(self, ResizeEdge::South | ResizeEdge::SouthEast | ResizeEdge::SouthWest)
+    }
+}
+
+/// Native window dragging and the screen layout. The user's pointer is already down when
+/// `begin_*` is called; the platform runs the drag until the button is released and keeps the
+/// window within its minimum size.
+pub trait WindowControl {
+    /// Start dragging a note's window by its caption (`hwnd` is its native handle, if any).
+    fn begin_move(&self, note: NoteId, hwnd: Option<isize>);
+    fn begin_resize(&self, note: NoteId, hwnd: Option<isize>, edge: ResizeEdge);
+    /// Work areas (screens minus taskbars) of all connected monitors, primary first.
+    fn work_areas(&self) -> Vec<ScreenRect>;
 }
 
 /// Message boxes and file pickers.
