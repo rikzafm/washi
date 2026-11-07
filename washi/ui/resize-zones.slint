@@ -12,6 +12,9 @@ export global ResizeZoneMetrics {
     out property <length> thickness: 8px;
     // Side of a corner zone, centered on the paper's corner.
     out property <length> corner: 16px;
+    // Height of the paper's top margin, measured from its top edge: grabbing it moves the note.
+    // It stays clear of the text, which starts below it.
+    out property <length> top-margin: 24px;
 }
 
 // Direction codes, shared with `washi::platform::ResizeEdge::from_code`:
@@ -88,7 +91,7 @@ export component WindowHandles {
         x: root.l + root.th;
         y: root.t + root.th / 2;
         width: root.r - root.l - 2 * root.th;
-        height: PaperTheme.text-top-inset - root.th / 2;
+        height: ResizeZoneMetrics.top-margin - root.th / 2;
         start => { root.start-move(); }
         right-click(x, y) => { root.right-click(x, y); }
         pointer-over => { root.pointer-over(); }

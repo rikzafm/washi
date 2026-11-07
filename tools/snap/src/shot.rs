@@ -77,7 +77,7 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
     // Lay the note out first (rows of the text blocks appear on the first draw and focus their
     // field), then show it unfocused: no caret, like the mockups.
     win.request_redraw();
-    win.draw_if_needed(|r| {
+    adapter.draw_if_needed(|r| {
         r.render(&mut vec![PremultipliedRgbaColor::default(); (pw * ph) as usize], pw as usize);
     });
     win.dispatch_event(WindowEvent::WindowActiveChanged(o.editing));
@@ -85,7 +85,7 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
     // for the text to finish settling (flat when editing, tilted at rest).
     h.advance(Duration::from_millis(2));
     win.request_redraw();
-    win.draw_if_needed(|r| {
+    adapter.draw_if_needed(|r| {
         r.render(&mut vec![PremultipliedRgbaColor::default(); (pw * ph) as usize], pw as usize);
     });
     if o.hover {
