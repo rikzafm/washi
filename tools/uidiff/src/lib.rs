@@ -1,6 +1,10 @@
 //! uidiff: measurements of the Washi reference mockups (and, later, of snapshots).
 
 mod cc;
+pub mod compare;
+pub mod index;
+pub mod invariants;
+pub mod report;
 mod empty;
 pub mod fontmatch;
 mod icons;
