@@ -6,7 +6,7 @@
 //! shows instead. Both must break lines in the same places, so this module wraps with the advances
 //! of the same embedded fonts (they have no kerning table, so the advances are exact).
 
-use crate::blocks::{Block, Kind};
+use crate::document::{Block, Kind};
 use ttf_parser::Face;
 
 const REGULAR: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight.ttf");
@@ -42,7 +42,7 @@ impl Tokens {
         match kind {
             Kind::Title => self.title,
             Kind::Heading => self.heading,
-            Kind::Body => self.body,
+            Kind::Body | Kind::ListItem | Kind::Image => self.body,
         }
     }
 }
@@ -52,6 +52,7 @@ impl Tokens {
 pub struct Run {
     pub block: usize,
     pub kind: Kind,
+    pub bold: bool,
     /// Line within the block (0 first).
     pub line: usize,
     pub text: String,
@@ -72,8 +73,8 @@ struct Measure<'a> {
 }
 
 impl<'a> Measure<'a> {
-    fn new(kind: Kind, size: f64) -> Measure<'a> {
-        let data = if kind == Kind::Heading { BOLD } else { REGULAR };
+    fn new(bold: bool, size: f64) -> Measure<'a> {
+        let data = if bold { BOLD } else { REGULAR };
         let face = Face::parse(data, 0).expect("embedded font parses");
         let scale = size / face.units_per_em() as f64;
         Measure { face, scale }
@@ -97,17 +98,30 @@ pub fn tilt_offset(x: f64, y: f64, paper: (f64, f64), tilt_deg: f64) -> (f64, f6
     (rx * (c - 1.0) - ry * s, rx * s + ry * (c - 1.0))
 }
 
-/// Break one block's text into lines of words: `(text of the word, x within the line)` per word.
-fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<(String, f64)>> {
+/// One word (or piece of a word too long for the line) on a line.
+struct Word {
+    text: String,
+    /// x within the line.
+    at: f64,
+    /// Byte offset of the word in the block's text.
+    off: usize,
+}
+
+/// Break one block's text into lines of words.
+fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
     let space = m.advance(' ');
-    let mut lines: Vec<Vec<(String, f64)>> = vec![vec![]];
+    let mut lines: Vec<Vec<Word>> = vec![vec![]];
     let mut x = 0.0;
     let mut pending = 0.0; // spaces seen since the last word
     let mut at_line_start = true;
+    let mut pos = 0; // byte offset of the current word
     for (i, word) in text.split(' ').enumerate() {
         if i > 0 {
             pending += space;
+            pos += 1;
         }
+        let word_pos = pos;
+        pos += word.len();
         if word.is_empty() {
             continue;
         }
@@ -121,25 +135,27 @@ fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<(String, f64)>> {
         if at_line_start && w > avail {
             // a word wider than the line breaks anywhere
             let mut chunk = String::new();
+            let mut chunk_off = word_pos;
             let mut cw = 0.0;
-            for c in word.chars() {
+            for (ci, c) in word.char_indices() {
                 let a = m.advance(c);
                 if cw + a > avail && !chunk.is_empty() {
-                    lines.last_mut().unwrap().push((std::mem::take(&mut chunk), 0.0));
+                    lines.last_mut().unwrap().push(Word { text: std::mem::take(&mut chunk), at: 0.0, off: chunk_off });
                     lines.push(vec![]);
+                    chunk_off = word_pos + ci;
                     cw = 0.0;
                 }
                 chunk.push(c);
                 cw += a;
             }
-            lines.last_mut().unwrap().push((chunk, 0.0));
+            lines.last_mut().unwrap().push(Word { text: chunk, at: 0.0, off: chunk_off });
             x = cw;
             pending = 0.0;
             at_line_start = false;
             continue;
         }
         let at = x + pending;
-        lines.last_mut().unwrap().push((word.to_string(), at));
+        lines.last_mut().unwrap().push(Word { text: word.to_string(), at, off: word_pos });
         x = at + w;
         pending = 0.0;
         at_line_start = false;
@@ -166,6 +182,62 @@ fn pieces(word: &str, max: f64, m: &Measure) -> Vec<String> {
     out
 }
 
+/// Blocks of one group share a rhythm (line pitch); a change of group opens a gap.
+fn group(kind: Kind) -> Kind {
+    if kind == Kind::ListItem { Kind::Body } else { kind }
+}
+
+/// Where the caret is within a block's wrapped lines.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CaretLine {
+    /// Visual line of the caret (0 first) and how many lines the block has.
+    pub line: usize,
+    pub lines: usize,
+    /// Distance from the line's left edge, logical px.
+    pub x: f64,
+}
+
+fn line_starts(lines: &[Vec<Word>]) -> Vec<usize> {
+    lines.iter().enumerate().map(|(i, l)| if i == 0 { 0 } else { l.first().map_or(0, |w| w.off) }).collect()
+}
+
+/// The visual line and x of the caret at byte `offset` of block `b`, in a paper `paper_w` wide.
+pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLine {
+    let avail = paper_w - t.inset_left - t.inset_right;
+    let m = Measure::new(b.is_bold(), t.style(b.kind).size);
+    let lines = wrap(&b.text, avail, &m);
+    let starts = line_starts(&lines);
+    let mut offset = offset.min(b.text.len());
+    while !b.text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let line = starts.iter().rposition(|&s| s <= offset).unwrap_or(0);
+    CaretLine { line, lines: lines.len(), x: m.width(&b.text[starts[line]..offset]) }
+}
+
+/// The byte offset on visual `line` (clamped to the block's last) of block `b` nearest to `x`.
+pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> usize {
+    let avail = paper_w - t.inset_left - t.inset_right;
+    let m = Measure::new(b.is_bold(), t.style(b.kind).size);
+    let lines = wrap(&b.text, avail, &m);
+    let starts = line_starts(&lines);
+    let line = line.min(lines.len() - 1);
+    let (start, end) = (starts[line], starts.get(line + 1).copied().unwrap_or(b.text.len() + 1));
+    let mut best = (start, f64::MAX);
+    let mut at = 0.0;
+    for (i, c) in b.text[start..].char_indices().map(|(i, c)| (start + i, c)).chain(std::iter::once((b.text.len(), ' '))) {
+        if i >= end {
+            break;
+        }
+        let d = (at - x).abs();
+        if d < best.1 {
+            best = (i, d);
+        }
+        at += m.advance(c);
+    }
+    best.0
+}
+
 /// Lay the blocks out in a paper of size `paper` (logical px).
 pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
     let avail = paper.0 - t.inset_left - t.inset_right;
@@ -173,18 +245,18 @@ pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
     let mut top = t.inset_top;
     for (bi, b) in blocks.iter().enumerate() {
         let st = t.style(b.kind);
-        if bi > 0 && blocks[bi - 1].kind != b.kind {
+        if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
             top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
         }
-        let m = Measure::new(b.kind, st.size);
+        let m = Measure::new(b.is_bold(), st.size);
         for (li, line) in wrap(&b.text, avail, &m).into_iter().enumerate() {
             let y = top + li as f64 * st.pitch;
-            for (word, at) in line {
+            for Word { text: word, at, .. } in line {
                 let mut x = t.inset_left + at;
                 for piece in pieces(&word, t.max_run, &m) {
                     let width = m.width(&piece);
                     let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
-                    runs.push(Run { block: bi, kind: b.kind, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                    runs.push(Run { block: bi, kind: b.kind, bold: b.is_bold(), line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
                     x += width;
                 }
             }
@@ -199,7 +271,7 @@ pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blocks::parse;
+    use crate::document::{Block, Document};
 
     pub const TOKENS: Tokens = Tokens {
         inset_left: 32.0,
@@ -225,7 +297,7 @@ mod tests {
 
     #[test]
     fn the_mockup_breaks_where_the_mockup_does() {
-        let runs = layout(&parse(MOCKUP), (363.0, 433.0), &TOKENS);
+        let runs = layout(Document::parse(MOCKUP).blocks(), (363.0, 433.0), &TOKENS);
         assert_eq!(line_texts(&runs, 0), ["Endfield Note"]);
         assert_eq!(line_texts(&runs, 1), ["Thermite Cutter : POG &", "Akekuri"]);
         // the body is one block per stored line, but the mockup's body is one long line
@@ -234,7 +306,7 @@ mod tests {
 
     #[test]
     fn words_on_one_line_follow_the_papers_tilt() {
-        let runs = layout(&parse(MOCKUP), (363.0, 433.0), &TOKENS);
+        let runs = layout(Document::parse(MOCKUP).blocks(), (363.0, 433.0), &TOKENS);
         let line: Vec<&Run> = runs.iter().filter(|r| r.block == 2 && r.line == 1).collect();
         assert!(line.len() >= 5);
         let slope = TOKENS.tilt_deg.to_radians().tan();
@@ -248,8 +320,8 @@ mod tests {
     #[test]
     fn long_words_are_drawn_in_pieces_that_stay_within_a_pixel_of_the_tilted_baseline() {
         let tokens = Tokens { max_run: 16.0, ..TOKENS };
-        let runs = layout(&parse(MOCKUP), (363.0, 433.0), &tokens);
-        let whole = layout(&parse(MOCKUP), (363.0, 433.0), &TOKENS);
+        let runs = layout(Document::parse(MOCKUP).blocks(), (363.0, 433.0), &tokens);
+        let whole = layout(Document::parse(MOCKUP).blocks(), (363.0, 433.0), &TOKENS);
         // same words, same line breaks, same text
         assert_eq!(runs.iter().map(|r| r.text.as_str()).collect::<String>(), whole.iter().map(|r| r.text.as_str()).collect::<String>());
         assert_eq!(runs.iter().map(|r| r.line + 10 * r.block).max(), whole.iter().map(|r| r.line + 10 * r.block).max());
@@ -273,8 +345,8 @@ mod tests {
 
     #[test]
     fn a_bigger_paper_re_wraps_but_keeps_insets() {
-        let narrow = layout(&parse(MOCKUP), (363.0, 433.0), &TOKENS);
-        let wide = layout(&parse(MOCKUP), (600.0, 433.0), &TOKENS);
+        let narrow = layout(Document::parse(MOCKUP).blocks(), (363.0, 433.0), &TOKENS);
+        let wide = layout(Document::parse(MOCKUP).blocks(), (600.0, 433.0), &TOKENS);
         assert_eq!(narrow[0].x, wide[0].x);
         assert_eq!(narrow[0].y, wide[0].y);
         assert_eq!(line_texts(&wide, 1), ["Thermite Cutter : POG & Akekuri"]);
@@ -282,11 +354,56 @@ mod tests {
 
     #[test]
     fn an_empty_title_still_takes_a_line_and_a_long_word_breaks_anywhere() {
-        let runs = layout(&parse("\nx"), (363.0, 433.0), &TOKENS);
+        let runs = layout(Document::parse("\nx").blocks(), (363.0, 433.0), &TOKENS);
         assert_eq!(runs.len(), 1);
         assert!((runs[0].y - (38.2 + 60.0 + 8.1)).abs() < 1e-9);
         let long = "w".repeat(80);
-        let runs = layout(&parse(&format!("t\n{long}")), (363.0, 433.0), &TOKENS);
+        let runs = layout(Document::parse(&format!("t
+{long}")).blocks(), (363.0, 433.0), &TOKENS);
         assert!(runs.iter().filter(|r| r.block == 1).map(|r| r.line).max().unwrap() >= 1);
+    }
+
+    #[test]
+    fn the_caret_knows_its_visual_line_and_x() {
+        let d = Document::parse(MOCKUP);
+        let body = &d.blocks()[2];
+        let first = caret_line(body, 0, 363.0, &TOKENS);
+        assert_eq!((first.line, first.lines, first.x), (0, 4, 0.0));
+        // "for" starts the second line
+        let second = caret_line(body, "Currently POG no Weapon : Ideal ".len(), 363.0, &TOKENS);
+        assert_eq!((second.line, second.x), (1, 0.0));
+        let last = caret_line(body, body.text.len(), 363.0, &TOKENS);
+        assert_eq!(last.line, 3);
+        assert!(last.x > 50.0);
+        // an empty block is one line
+        assert_eq!(caret_line(&Block::new(Kind::Body, ""), 0, 363.0, &TOKENS).lines, 1);
+    }
+
+    #[test]
+    fn offset_at_is_the_inverse_of_caret_line() {
+        let d = Document::parse(MOCKUP);
+        for b in d.blocks() {
+            for o in (0..=b.text.len()).filter(|&o| b.text.is_char_boundary(o)) {
+                let c = caret_line(b, o, 363.0, &TOKENS);
+                let back = offset_at(b, c.line, c.x, 363.0, &TOKENS);
+                // a caret after a wrapping space sits where the next line starts, so compare the position
+                assert_eq!(caret_line(b, back, 363.0, &TOKENS), c, "{:?} at {o}", b.text);
+            }
+        }
+    }
+
+    #[test]
+    fn offset_at_picks_the_nearest_boundary_on_the_line_and_clamps() {
+        let d = Document::parse(MOCKUP);
+        let body = &d.blocks()[2];
+        assert_eq!(offset_at(body, 0, 0.0, 363.0, &TOKENS), 0);
+        assert_eq!(offset_at(body, 1, 0.0, 363.0, &TOKENS), "Currently POG no Weapon : Ideal ".len());
+        assert_eq!(offset_at(body, 3, 1e6, 363.0, &TOKENS), body.text.len());
+        assert_eq!(offset_at(body, 99, 0.0, 363.0, &TOKENS), "Currently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get ".len());
+        // far right of a wrapped line stays on that line
+        let end0 = offset_at(body, 0, 1e6, 363.0, &TOKENS);
+        assert_eq!(caret_line(body, end0, 363.0, &TOKENS).line, 0);
+        let multi = Block::new(Kind::Body, "héllo wörld");
+        assert!(multi.text.is_char_boundary(offset_at(&multi, 0, 20.0, 363.0, &TOKENS)));
     }
 }

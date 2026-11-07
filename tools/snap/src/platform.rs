@@ -14,6 +14,7 @@ use std::time::Duration;
 
 thread_local! {
     static INSTALLED: Cell<bool> = const { Cell::new(false) };
+    static CLIPBOARD: RefCell<Option<String>> = const { RefCell::new(None) };
     static NOW: Rc<Cell<Duration>> = Rc::new(Cell::new(Duration::ZERO));
     static WINDOWS: RefCell<Vec<Weak<StandInWindow>>> = const { RefCell::new(Vec::new()) };
 }
@@ -124,6 +125,20 @@ impl Platform for StandIn {
         Ok(w)
     }
 
+    fn set_clipboard_text(&self, text: &str, clipboard: slint::platform::Clipboard) {
+        if clipboard == slint::platform::Clipboard::DefaultClipboard {
+            CLIPBOARD.with(|c| *c.borrow_mut() = Some(text.to_string()));
+        }
+    }
+
+    fn clipboard_text(&self, clipboard: slint::platform::Clipboard) -> Option<String> {
+        if clipboard == slint::platform::Clipboard::DefaultClipboard {
+            CLIPBOARD.with(|c| c.borrow().clone())
+        } else {
+            None
+        }
+    }
+
     fn duration_since_start(&self) -> Duration {
         NOW.with(|n| n.get())
     }
@@ -155,4 +170,9 @@ pub fn windows() -> Vec<Rc<StandInWindow>> {
         ws.retain(|w| w.strong_count() > 0);
         ws.iter().filter_map(|w| w.upgrade()).collect()
     })
+}
+
+/// Put text on the stand-in clipboard.
+pub fn set_clipboard(text: &str) {
+    CLIPBOARD.with(|c| *c.borrow_mut() = Some(text.to_string()));
 }

@@ -4,11 +4,13 @@ import "../../fonts/ShadowsIntoLight-Italic.ttf";
 import "../../fonts/ShadowsIntoLight-BoldItalic.ttf";
 import { Theme } from "theme.slint";
 
-export enum BlockKind { title, heading, body }
+export enum BlockKind { title, heading, body, list-item, image }
 
 export struct BlockData {
     kind: BlockKind,
     text: string,
+    /// Drawn in the bold face (headings, and blocks with the bold flag).
+    bold: bool,
 }
 
 /// One word at rest: upright, at its level place (x, y) plus the offset (dx, dy) that puts it on the tilted baseline.
@@ -22,18 +24,29 @@ export struct RunData {
     size: length,
     pitch: length,
     bold: bool,
+    /// The empty-note hint rather than note text.
+    hint: bool,
 }
 
 // One paragraph: an editable text field styled by its kind.
 export component BlockView inherits Rectangle {
     in property <BlockKind> kind: body;
     in property <string> text;
+    in property <bool> bold: false;
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
     in property <length> gap-before: 0px;
     /// The level text field is drawn only while editing; at rest the stepped words are.
     in property <bool> show-input: true;
-    callback edited(string);
+    /// The text changed: the new text and where the caret is now.
+    callback edited(string, int);
+    /// Enter, Backspace, Delete, Up or Down was pressed (the key's text, the caret's byte offset);
+    /// true when the note took it (the field then does nothing).
+    callback key(string, int) -> bool;
+    /// Make this block take the focus with the caret at `focus-offset` whenever `focus-serial` changes.
+    in property <bool> wanted: false;
+    in property <int> focus-serial: 0;
+    in property <int> focus-offset: 0;
     callback focus-changed(bool);
     /// Bumped to make the field state its focus again (after a suspension).
     in property <int> resync: 0;
@@ -66,16 +79,40 @@ export component BlockView inherits Rectangle {
         text: root.text;
         font-family: Theme.handwriting;
         font-size: root.size;
-        font-weight: root.kind == BlockKind.heading ? 700 : 400;
+        font-weight: root.bold ? 700 : 400;
         line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
         color: Theme.ink;
         // hidden, not removed: a click still lands in the field and starts editing
         opacity: root.show-input ? 1 : 0;
-        edited => { root.edited(self.text); }
+        // an image has no text field
+        visible: root.kind != BlockKind.image;
+        edited => { root.edited(self.text, self.cursor-position-byte-offset); }
+        key-pressed(e) => {
+            if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta
+                || self.cursor-position-byte-offset != self.anchor-position-byte-offset) {
+                return reject;
+            }
+            if (e.text == Key.Return || e.text == Key.Backspace || e.text == Key.Delete
+                || (!e.modifiers.shift && (e.text == Key.UpArrow || e.text == Key.DownArrow))) {
+                return root.key(e.text, self.cursor-position-byte-offset) ? accept : reject;
+            }
+            reject
+        }
     }
 
+    // Rust changed the text (a merge, a paste): the field shows it.
+    changed text => {
+        if (input.text != root.text) { input.text = root.text; }
+    }
+
+    function take-focus() {
+        input.focus();
+        input.set-selection-offsets(root.focus-offset, root.focus-offset);
+    }
+    changed focus-serial => { if (root.wanted) { root.take-focus(); } }
+
     init => {
-        if (root.autofocus) { input.focus(); }
+        if (root.wanted && root.focus-serial > 0) { root.take-focus(); } else if (root.autofocus) { input.focus(); }
         root.report();
     }
 }

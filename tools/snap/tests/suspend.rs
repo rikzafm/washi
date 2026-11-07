@@ -126,7 +126,7 @@ fn pending_edits_and_geometry_are_saved_before_suspending() {
     h.resize_note(0, 500, 520);
     h.advance(ms(200));
     assert!(h.is_suspended());
-    assert_eq!(h.saved_text(0), "last words");
+    assert_eq!(h.saved_text(0), "# last words");
     let id = h.note_id(0);
     let g = h.saved_geometry(id).unwrap();
     assert_eq!((g.w, g.h), (500, 520));
@@ -160,7 +160,7 @@ fn notes_look_unchanged_while_suspended() {
     minimize_all(&mut h);
     h.advance(secs(10));
     assert!(h.is_suspended());
-    assert_eq!(h.note_text(1), "still here");
+    assert_eq!(h.note_text(1), "# still here");
     // The last frame stays on screen: nothing asked the windows to draw anything else.
     for n in 0..3 {
         assert!(!h.repaint_pending(n), "suspending must not trigger drawing");
@@ -212,7 +212,7 @@ fn waking_restarts_timers_so_edits_are_saved_again() {
     h.restore(0);
     h.type_text(0, "back again");
     h.advance(ms(600));
-    assert_eq!(h.saved_text(0), "back again");
+    assert_eq!(h.saved_text(0), "# back again");
 }
 
 #[test]

@@ -42,7 +42,13 @@ export component NoteWindow inherits Window {
     in property <bool> suspended: false;
     in-out property <int> text-resync: 0;
     /// Block `i` was edited to this text.
-    callback block-edited(int, string);
+    callback block-edited(int, string, int);
+    /// Enter, Backspace, Delete, Up or Down in block `i` at the caret offset; true when taken.
+    callback block-key(int, string, int) -> bool;
+    /// Rust asks a block to take the focus (block, caret offset, request counter).
+    in-out property <int> focus-block: -1;
+    in-out property <int> focus-offset: 0;
+    in-out property <int> focus-serial: 0;
     /// Right click on the paper, in window coordinates.
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
@@ -111,7 +117,11 @@ export component NoteWindow inherits Window {
                     runs: root.runs;
                     suspended: root.suspended;
                     resync: root.text-resync;
-                    block-edited(i, t) => { root.block-edited(i, t); }
+                    focus-block: root.focus-block;
+                    focus-offset: root.focus-offset;
+                    focus-serial: root.focus-serial;
+                    block-edited(i, t, c) => { root.block-edited(i, t, c); }
+                    block-key(i, k, o) => { return root.block-key(i, k, o); }
                 }
             }
         }

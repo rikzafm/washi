@@ -3,9 +3,9 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::blocks::{self, Block, Kind};
+use crate::document::{Block, Caret, Document, Kind};
 use crate::textflow::{self, Style, Tokens};
-use slint::VecModel;
+use slint::{Model, VecModel};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
@@ -86,13 +86,11 @@ impl Autosave {
     }
 }
 
-/// A note's title: its first non-blank line, cut to about 40 characters. `None` for an empty note.
+/// A note's title: its first non-blank text, cut to about 40 characters. `None` for an empty note.
 pub fn note_title(content: &str) -> Option<String> {
     const MAX: usize = 40;
-    let line = content
-        .split(['\n', '\r', '\u{2028}', '\u{2029}'])
-        .map(str::trim)
-        .find(|l| !l.is_empty())?;
+    let doc = Document::parse(content);
+    let line = doc.blocks().iter().map(|b| b.text.trim()).find(|l| !l.is_empty())?;
     if line.chars().count() <= MAX {
         return Some(line.into());
     }
@@ -132,32 +130,34 @@ pub enum NoteEvent {
     Delete,
 }
 
-/// The note text as styled blocks, shared between the window's model and the stored text.
+/// The note's document, shared between the window's model and the stored text.
 struct Doc {
-    blocks: RefCell<Vec<Block>>,
+    doc: RefCell<Document>,
     model: Rc<VecModel<BlockData>>,
     runs: Rc<VecModel<RunData>>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
 }
 
+/// The shown text of an empty note.
+pub const HINT: &str = "Note Something....";
+
 impl Doc {
     fn new() -> Rc<Doc> {
-        Rc::new(Doc { blocks: RefCell::new(Vec::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)) })
+        Rc::new(Doc { doc: RefCell::new(Document::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)) })
     }
 
     /// Replace everything (opening a note, or text set from outside).
     fn load(&self, content: &str) {
-        let parsed = blocks::parse(content);
-        self.model.set_vec(parsed.iter().map(block_data).collect::<Vec<_>>());
-        *self.blocks.borrow_mut() = parsed;
+        let parsed = Document::parse(content);
+        self.model.set_vec(parsed.blocks().iter().map(block_data).collect::<Vec<_>>());
+        *self.doc.borrow_mut() = parsed;
     }
 
-    /// Lay the words out again (text or paper size changed) from the tokens in ui/theme.slint.
-    fn relayout(&self, ui: &NoteWindow) {
+    fn tokens(ui: &NoteWindow) -> Tokens {
         let th = ui.global::<Theme>();
         let style = |size: f32, pitch: f32| Style { size: size as f64, pitch: pitch as f64 };
-        let tokens = Tokens {
+        Tokens {
             inset_left: th.get_text_inset_left() as f64,
             inset_right: th.get_text_inset_right() as f64,
             inset_top: th.get_text_inset_top() as f64,
@@ -168,8 +168,37 @@ impl Doc {
             body: style(th.get_body_size(), th.get_body_pitch()),
             tilt_deg: th.get_text_tilt() as f64,
             max_run: th.get_step_width() as f64,
-        };
-        let runs = textflow::layout(&self.blocks.borrow(), self.paper.get(), &tokens);
+        }
+    }
+
+    /// Make the window's blocks match the document, touching only the rows that differ so the
+    /// fields that stay keep their focus.
+    fn sync_model(&self) {
+        let new: Vec<BlockData> = self.doc.borrow().blocks().iter().map(block_data).collect();
+        let old: Vec<BlockData> = self.model.iter().collect();
+        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
+        let (old_mid, new_mid) = (old.len() - prefix - suffix, new.len() - prefix - suffix);
+        for k in 0..old_mid.min(new_mid) {
+            self.model.set_row_data(prefix + k, new[prefix + k].clone());
+        }
+        for _ in new_mid..old_mid {
+            self.model.remove(prefix + new_mid);
+        }
+        for k in old_mid..new_mid {
+            self.model.insert(prefix + k, new[prefix + k].clone());
+        }
+    }
+
+    /// Lay the words out again (text or paper size changed) from the tokens in ui/theme.slint.
+    fn relayout(&self, ui: &NoteWindow) {
+        let tokens = Self::tokens(ui);
+        let doc = self.doc.borrow();
+        let mut runs = textflow::layout(doc.blocks(), self.paper.get(), &tokens);
+        let hint = doc.is_empty();
+        if hint {
+            runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
+        }
         self.runs.set_vec(
             runs.iter()
                 .map(|r| RunData {
@@ -181,19 +210,82 @@ impl Doc {
                     width: r.width as f32,
                     size: r.size as f32,
                     pitch: r.pitch as f32,
-                    bold: r.kind == Kind::Heading,
+                    bold: r.bold,
+                    hint,
                 })
                 .collect::<Vec<_>>(),
         );
     }
 
-    /// Block `i` was edited; returns the whole stored text.
-    fn edit(&self, i: usize, text: &str) -> String {
-        let mut blocks = self.blocks.borrow_mut();
-        if let Some(b) = blocks.get_mut(i) {
-            b.set_text(text);
+    fn text(&self) -> String {
+        self.doc.borrow().to_text()
+    }
+
+    /// Block `i` was edited to `text`, the caret now at `cursor`. Line breaks in it (a paste) make
+    /// new blocks; then the caret to move to is returned.
+    fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
+        let mut doc = self.doc.borrow_mut();
+        if !text.contains(['\n', '\r']) {
+            doc.set_text(i, text);
+            return None;
         }
-        blocks::serialize(&blocks)
+        let old = match doc.blocks().get(i) {
+            Some(b) if b.is_text() => b.text.clone(),
+            _ => return None,
+        };
+        // the field now holds old[..start] + inserted + old[end..], the caret right after `inserted`
+        let mut cursor = cursor.min(text.len());
+        while !text.is_char_boundary(cursor) {
+            cursor -= 1;
+        }
+        let mut end = old.len() - (text.len() - cursor).min(old.len());
+        while !old.is_char_boundary(end) {
+            end += 1;
+        }
+        let mut start = old.bytes().zip(text.bytes()).take_while(|(a, b)| a == b).count().min(end).min(cursor);
+        while !old.is_char_boundary(start) || !text.is_char_boundary(start) {
+            start -= 1;
+        }
+        Some(doc.insert_text(i, start, end, &text[start..cursor]))
+    }
+
+    /// Enter, Backspace, Delete, Up or Down in block `i` at `offset`. `Some((caret, changed))` when
+    /// the note takes the key (the document changed, or only the caret moves to another block);
+    /// `None` when the field keeps it.
+    fn key(&self, i: usize, key: &str, offset: usize, ui: &NoteWindow) -> Option<(Caret, bool)> {
+        use slint::platform::Key;
+        let mut doc = self.doc.borrow_mut();
+        let is = |k: Key| key == char::from(k).to_string();
+        if is(Key::Return) {
+            return Some((doc.split(i, offset), true));
+        }
+        if is(Key::Backspace) {
+            return doc.backspace(i, offset).map(|c| (c, true));
+        }
+        if is(Key::Delete) {
+            return doc.delete(i, offset).map(|c| (c, true));
+        }
+        let up = is(Key::UpArrow);
+        if !up && !is(Key::DownArrow) {
+            return None;
+        }
+        let tokens = Self::tokens(ui);
+        let width = self.paper.get().0;
+        let at = textflow::caret_line(doc.blocks().get(i)?, offset, width, &tokens);
+        let target = if up {
+            if at.line > 0 {
+                return None;
+            }
+            doc.prev_text_block(i)?
+        } else {
+            if at.line + 1 < at.lines {
+                return None;
+            }
+            doc.next_text_block(i)?
+        };
+        let line = if up { usize::MAX } else { 0 };
+        let to = textflow::offset_at(&doc.blocks()[target], line, at.x, width, &tokens);
+        Some((Caret { block: target, offset: to }, false))
     }
 }
 
@@ -202,8 +294,10 @@ fn block_data(b: &Block) -> BlockData {
         Kind::Title => BlockKind::Title,
         Kind::Heading => BlockKind::Heading,
         Kind::Body => BlockKind::Body,
+        Kind::ListItem => BlockKind::ListItem,
+        Kind::Image => BlockKind::Image,
     };
-    BlockData { kind, text: b.text.as_str().into() }
+    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold() }
 }
 
 pub struct Note {
@@ -233,7 +327,7 @@ impl Note {
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
         doc.relayout(&ui);
-        ui.set_text(content.into());
+        ui.set_text(doc.text().as_str().into());
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
         ui.set_app_icon(app_icon());
@@ -243,18 +337,48 @@ impl Note {
         }
         let autosave = Rc::new(Autosave { id, db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
-        {
+        // everything that changes the text ends here: relayout, stored text, title, autosave
+        let changed: Rc<dyn Fn(Option<Caret>)> = {
             let (autosave, timer, weak, doc) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone());
-            ui.on_block_edited(move |i, block_text| {
-                let text = doc.edit(i.max(0) as usize, block_text.as_str());
+            Rc::new(move |focus: Option<Caret>| {
+                let text = doc.text();
                 if let Some(ui) = weak.upgrade() {
+                    doc.sync_model();
                     doc.relayout(&ui);
                     ui.set_text(text.as_str().into());
                     ui.set_window_title(window_title(&text).into());
+                    if let Some(c) = focus {
+                        ui.set_focus_block(c.block as i32);
+                        ui.set_focus_offset(c.offset as i32);
+                        ui.set_focus_serial(ui.get_focus_serial() + 1);
+                    }
                 }
                 autosave.dirty.set(true);
                 let a = autosave.clone();
                 timer.start(TimerMode::SingleShot, AUTOSAVE_DELAY, move || a.flush());
+            })
+        };
+        {
+            let (changed, doc) = (changed.clone(), doc.clone());
+            ui.on_block_edited(move |i, block_text, cursor| {
+                let caret = doc.edit(i.max(0) as usize, block_text.as_str(), cursor.max(0) as usize);
+                changed(caret);
+            });
+        }
+        {
+            let (changed, doc, weak) = (changed.clone(), doc.clone(), ui.as_weak());
+            ui.on_block_key(move |i, key, offset| {
+                let Some(ui) = weak.upgrade() else { return false };
+                let Some((caret, edited)) = doc.key(i.max(0) as usize, key.as_str(), offset.max(0) as usize, &ui) else { return false };
+                if edited {
+                    changed(Some(caret));
+                } else {
+                    // only the caret moves, to another block
+                    ui.set_focus_block(caret.block as i32);
+                    ui.set_focus_offset(caret.offset as i32);
+                    ui.set_focus_serial(ui.get_focus_serial() + 1);
+                }
+                true
             });
         }
         {
@@ -380,9 +504,11 @@ impl Note {
     pub fn set_text(&self, text: &str) {
         // the fields of the old blocks vanish without saying they lost the focus
         self.ui.set_text_focused_block(-1);
+        self.ui.set_focus_block(-1);
         self.doc.load(text);
         self.doc.relayout(&self.ui);
-        self.ui.set_text(text.into());
+        self.ui.set_text(self.doc.text().as_str().into());
+        self.ui.set_window_title(window_title(text).into());
     }
 
     pub fn text(&self) -> String {

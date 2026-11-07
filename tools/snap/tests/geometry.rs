@@ -199,7 +199,7 @@ fn geometry_and_text_debounces_are_independent() {
     assert_eq!(h.saved_geometry(id).unwrap().x, 10, "geometry saved 500 ms after the move");
     assert_eq!(h.saved_text(0), "", "text still waiting: 200 ms after the edit");
     h.advance(ms(300));
-    assert_eq!(h.saved_text(0), "a");
+    assert_eq!(h.saved_text(0), "# a");
 }
 
 #[test]
