@@ -1,1 +1,37 @@
+# Build output
 target/
+**/target/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.tmp
+*.bak
+*.swp
+.vscode/
+.idea/
+
+# Local test and probe output
+*.db
+*.db-wal
+*.db-shm
+snap-out/
+out/
+
+# AI agent files and tooling
+.agents/
+.claude/
+.scratch/
+.cursor/
+.aider*
+.codex/
+.gemini/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+skills-lock.json
+docs/agents/
+docs/IMPLEMENTATION_PLAN.md
+docs/STEP_BY_STEP_PLAN.md
