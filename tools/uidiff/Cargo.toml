@@ -9,6 +9,11 @@ description = "Measure and compare tool for the Washi reference mockups"
 png = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software", "unstable-fontique-011"] }
+
+# the font search renders thousands of strings: keep test builds fast enough to run it
+[profile.dev]
+opt-level = 2
 
 [dev-dependencies]
 sha2 = "0.10"

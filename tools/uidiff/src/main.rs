@@ -1,6 +1,10 @@
 //! `uidiff --measure <png> [--spec docs/design/spec.json] [--mockup hover|idle]`
 //! `uidiff --update-expected [--spec docs/design/spec.json]`
 //!
+//! `uidiff --font-match [--fonts <dir>] [--spec docs/design/spec.json]`
+//!
+//! --font-match scores every .ttf in the font dir (default `fonts/`) against the hover mockup for each
+//! role and prints the report as JSON; exit code 1 when a role's best IoU is below 0.85.
 //! --measure prints the measurements of the spec regions that apply to the mockup as JSON.
 //! The mockup defaults to the one whose file name matches the PNG, else every region is measured.
 //! --update-expected measures every mockup and stores the results in the spec's "expected" section.
@@ -9,7 +13,7 @@ use std::path::{Path, PathBuf};
 use uidiff::{measure_mockup, measure_regions, Image, Spec};
 
 fn usage() -> ! {
-    eprintln!("usage: uidiff --measure <png> [--spec <spec.json>] [--mockup <name>]\n       uidiff --update-expected [--spec <spec.json>]");
+    eprintln!("usage: uidiff --measure <png> [--spec <spec.json>] [--mockup <name>]\n       uidiff --update-expected [--spec <spec.json>]\n       uidiff --font-match [--fonts <dir>] [--spec <spec.json>]");
     std::process::exit(2)
 }
 
@@ -65,6 +69,7 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut spec_path = PathBuf::from("docs/design/spec.json");
     let (mut measure, mut mockup, mut update) = (None, None, false);
+    let (mut font_match, mut fonts_dir) = (false, PathBuf::from("fonts"));
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -81,12 +86,28 @@ fn run() -> Result<(), String> {
                 mockup = Some(args.get(i).ok_or("--mockup needs a name")?.clone());
             }
             "--update-expected" => update = true,
+            "--font-match" => font_match = true,
+            "--fonts" => {
+                i += 1;
+                fonts_dir = PathBuf::from(args.get(i).ok_or("--fonts needs a directory")?);
+            }
             _ => usage(),
         }
         i += 1;
     }
     let (spec, mut raw) = load_spec(&spec_path)?;
     let dir = spec_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+    if font_match {
+        let report = uidiff::fontmatch::run(&spec, &raw, &dir, &fonts_dir)?;
+        let mut text = String::new();
+        pretty(&report, 0, &mut text);
+        println!("{text}");
+        if report["all_roles_pass"] != true {
+            return Err(format!("a role's best IoU is below {}", uidiff::fontmatch::PASS_IOU));
+        }
+        return Ok(());
+    }
 
     if update {
         let mut expected = serde_json::Map::new();
