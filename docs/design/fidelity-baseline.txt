@@ -25,3 +25,4 @@ idle:image
 invariants:tilt
 invariants:tapes
 invariants:insets
+invariants:fonts   # needs the tilted paper (ticket 07) to anchor the text regions; the fonts themselves are fixed-size

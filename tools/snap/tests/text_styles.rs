@@ -14,16 +14,23 @@ struct Line {
     right: f64,
 }
 
+/// Rows above the toolbar band (the toolbar glyphs are ink too, but not text).
+fn text_rows(s: &Snapshot, paper_h: f64, scale: f64) -> u32 {
+    let win_h = ((paper_h + 2.0 * WINDOW_MARGIN) * scale).round();
+    let top = (s.height as f64 - win_h) / 2.0 + WINDOW_MARGIN * scale;
+    (top + (paper_h - 56.0) * scale) as u32
+}
+
 /// Ink lines of the snapshot in the paper's frame (logical px from its top-left corner).
 fn lines(s: &Snapshot, paper: (f64, f64), scale: f64) -> Vec<Line> {
     let (win_w, win_h) = (((paper.0 + 2.0 * WINDOW_MARGIN) * scale).round(), ((paper.1 + 2.0 * WINDOW_MARGIN) * scale).round());
     let ox = (s.width as f64 - win_w) / 2.0 + WINDOW_MARGIN * scale;
     let oy = (s.height as f64 - win_h) / 2.0 + WINDOW_MARGIN * scale;
     let ink = |x: u32, y: u32| s.pixel(x, y).iter().map(|&c| c as u32).sum::<u32>() < 3 * 140;
-    let rows: Vec<u32> = (0..s.height).map(|y| (0..s.width).filter(|&x| ink(x, y)).count() as u32).collect();
+    let rows: Vec<u32> = (0..text_rows(s, paper.1, scale)).map(|y| (0..s.width).filter(|&x| ink(x, y)).count() as u32).collect();
     let mut out = vec![];
     let mut start = None;
-    for y in 0..=s.height as usize {
+    for y in 0..=rows.len() {
         let has = y < rows.len() && rows[y] > 0;
         match (has, start) {
             (true, None) => start = Some(y),
@@ -87,6 +94,9 @@ fn insets_and_sizes_are_fixed_values_not_proportions_of_the_paper() {
 fn ink_uses_the_mockup_color() {
     let o = Options { text: MOCKUP.into(), paper: (363.0, 433.0), hover: true, ..Options::default() };
     let s = snapshot(&o).unwrap();
-    let darkest = (0..s.height).flat_map(|y| (0..s.width).map(move |x| (x, y))).map(|(x, y)| s.pixel(x, y)).min_by_key(|p| p.iter().map(|&c| c as u32).sum::<u32>()).unwrap();
-    // the renderer's premultiplied blending may be off by one level\n    for (got, want) in darkest.iter().zip([0x2B_u8, 0x2F, 0x36]) {\n        assert!(got.abs_diff(want) <= 2, "{darkest:?}");\n    }
+    let darkest = (0..text_rows(&s, 433.0, 1.5)).flat_map(|y| (0..s.width).map(move |x| (x, y))).map(|(x, y)| s.pixel(x, y)).min_by_key(|p| p.iter().map(|&c| c as u32).sum::<u32>()).unwrap();
+    // the renderer's premultiplied blending may be off by one level
+    for (got, want) in darkest.iter().zip([0x2B_u8, 0x2F, 0x36]) {
+        assert!(got.abs_diff(want) <= 2, "{darkest:?}");
+    }
 }
