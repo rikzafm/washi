@@ -3,6 +3,7 @@
 #   2. dev-only tool crates are not in washi's dependency tree
 #   3. no system-font scanning: Latin text uses the fonts embedded from fonts/ (ticket 08)
 #   4. washi.exe is a GUI-subsystem exe (no console window) with the PerMonitorV2 manifest
+#   5. washi.exe ships no DLL next to it; its size vs the 8 MB target (G5) is reported only
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $fail = $false
@@ -28,6 +29,13 @@ $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
 if ($subsystem -ne 2) { Write-Host "FAIL: PE subsystem is $subsystem, expected 2 (WINDOWS_GUI)"; $fail = $true }
 $text = [Text.Encoding]::ASCII.GetString($bytes)
 if ($text -notmatch 'PerMonitorV2') { Write-Host "FAIL: PerMonitorV2 manifest not found in $exe"; $fail = $true }
+
+# 5. size budget (G5): one exe of at most 8 MB, and it imports only DLLs that ship with Windows
+$budget = 8MB
+# Measurement only (product decision: no size cuts for G5): reported, never fails the check.
+if ($bytes.Length -gt $budget) { Write-Host ("NOTE: {0} is {1:N2} MB, above the {2} MB target (G5 unmet, recorded in docs/PERF.md)" -f $exe, ($bytes.Length / 1MB), ($budget / 1MB)) }
+$stray = Get-ChildItem (Split-Path $exe) -Filter *.dll -ErrorAction SilentlyContinue
+if ($stray) { Write-Host ("FAIL: DLLs next to the exe: " + ($stray.Name -join ', ')); $fail = $true }
 
 if ($fail) { exit 1 }
 Write-Host ("OK: no GPU renderer, no dev crates, GUI subsystem, PerMonitorV2. exe = {0:N2} MB" -f ($bytes.Length / 1MB))

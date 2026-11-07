@@ -115,6 +115,18 @@ fn any_change_during_the_grace_period_restarts_the_10_seconds() {
     assert!(h.is_suspended());
 }
 
+#[test]
+fn focus_moving_to_another_app_while_all_are_minimized_does_not_restart_the_10_seconds() {
+    // Windows hands the foreground to the next window a moment after a minimize, so the focus and
+    // background flags often change inside the grace period. Minimized notes stay hidden either way.
+    let mut h = three_notes();
+    minimize_all(&mut h);
+    h.advance(secs(5));
+    h.switch_away();
+    h.advance(secs(5));
+    assert!(h.is_suspended(), "10 s after the minimize, not 10 s after the focus change");
+}
+
 // ---- what suspending does ----
 
 #[test]
