@@ -8,4 +8,5 @@ mod harness;
 pub mod platform;
 pub mod shot;
 
+pub use fakes::WindowCommand;
 pub use harness::Harness;

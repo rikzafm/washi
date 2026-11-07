@@ -1,6 +1,6 @@
 //! One open note: the Slint window plus its 500 ms autosave debounce.
 
-use crate::platform::{Clock, NoteId};
+use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 use crate::blocks::{self, Block, Kind};
@@ -14,6 +14,56 @@ slint::include_modules!();
 
 /// Quiet period after the last edit before the note is written to the database.
 pub const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
+
+/// Quiet period after the last move or resize before the position and size are written. Its own
+/// timer: typing never delays it, and dragging never delays the text.
+pub const GEOMETRY_DELAY: Duration = Duration::from_millis(500);
+
+/// A minimized window reports a position around (-32000, -32000); that is not where the note lives.
+fn is_minimized_position(x: i32, y: i32) -> bool {
+    x <= -30000 && y <= -30000
+}
+
+struct GeometrySave {
+    id: NoteId,
+    db: Rc<Db>,
+    ui: slint::Weak<NoteWindow>,
+    /// The last geometry seen while the window was in a normal state.
+    last: Cell<Option<Geometry>>,
+    dirty: Cell<bool>,
+}
+
+impl GeometrySave {
+    /// Where the window is and how big, in logical pixels; the last good value while minimized.
+    fn current(&self) -> Option<Geometry> {
+        let ui = self.ui.upgrade()?;
+        let w = ui.window();
+        let scale = w.scale_factor();
+        let (p, s) = (w.position(), w.size());
+        if is_minimized_position(p.x, p.y) {
+            return self.last.get();
+        }
+        let g = Geometry {
+            x: (p.x as f32 / scale).round() as i32,
+            y: (p.y as f32 / scale).round() as i32,
+            w: (s.width as f32 / scale).round() as u32,
+            h: (s.height as f32 / scale).round() as u32,
+        };
+        self.last.set(Some(g));
+        Some(g)
+    }
+
+    fn flush(&self) {
+        if !self.dirty.replace(false) {
+            return;
+        }
+        let Some(g) = self.current() else { return };
+        if let Err(e) = self.db.save_geometry(self.id, g) {
+            eprintln!("washi: could not save the position of note {}: {e}", self.id);
+            self.dirty.set(true);
+        }
+    }
+}
 
 struct Autosave {
     id: NoteId,
@@ -73,6 +123,10 @@ pub enum NoteEvent {
     ContextMenu { at: (i32, i32) },
     /// The mouse moved over the note (wakes a suspended app).
     PointerMoved,
+    /// The pink tape or top margin was pressed: drag the window.
+    StartMove,
+    /// A resize zone was pressed.
+    StartResize(ResizeEdge),
     New,
     Close,
     Delete,
@@ -158,6 +212,8 @@ pub struct Note {
     doc: Rc<Doc>,
     autosave: Rc<Autosave>,
     timer: Rc<Timer>,
+    geometry: Rc<GeometrySave>,
+    geometry_timer: Rc<Timer>,
 }
 
 impl Note {
@@ -234,6 +290,18 @@ impl Note {
         }
         {
             let on_event = on_event.clone();
+            ui.on_start_move(move || on_event(id, NoteEvent::StartMove));
+        }
+        {
+            let on_event = on_event.clone();
+            ui.on_start_resize(move |code| {
+                if let Some(edge) = ResizeEdge::from_code(code) {
+                    on_event(id, NoteEvent::StartResize(edge));
+                }
+            });
+        }
+        {
+            let on_event = on_event.clone();
             ui.on_new_note(move || on_event(id, NoteEvent::New));
         }
         {
@@ -242,7 +310,33 @@ impl Note {
         }
         ui.on_delete_note(move || on_event(id, NoteEvent::Delete));
         ui.show()?;
-        Ok(Note { id, ui, doc, autosave, timer })
+        let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
+        geometry.current(); // remember where the window opened
+        Ok(Note { id, ui, doc, autosave, timer, geometry, geometry_timer: Rc::new(Timer::default()) })
+    }
+
+    /// The user (or the platform) moved or resized the window: save the new geometry after the
+    /// geometry debounce.
+    pub fn geometry_changed(&self) {
+        self.geometry.dirty.set(true);
+        let g = self.geometry.clone();
+        self.geometry_timer.start(TimerMode::SingleShot, GEOMETRY_DELAY, move || g.flush());
+    }
+
+    /// A restored note must be reachable: if its top strip is on no monitor (it was saved on a
+    /// monitor that is gone), move it onto the primary work area. `areas` are physical pixels.
+    pub fn keep_on_screen(&self, areas: &[ScreenRect]) {
+        let w = self.ui.window();
+        let (p, s) = (w.position(), w.size());
+        let margin = (self.ui.get_window_margin() * w.scale_factor()).round() as i32;
+        let here = ScreenRect::new(p.x, p.y, s.width as i32, s.height as i32);
+        if let Some(r) = crate::placement::recover(here, margin, areas) {
+            w.set_position(slint::PhysicalPosition::new(r.x, r.y));
+            if (r.w, r.h) != (here.w, here.h) {
+                w.set_size(slint::PhysicalSize::new(r.w as u32, r.h as u32));
+            }
+            self.geometry_changed();
+        }
     }
 
     pub fn id(&self) -> NoteId {
@@ -266,15 +360,7 @@ impl Note {
 
     /// Where the window is and how big, in logical pixels.
     pub fn geometry(&self) -> Geometry {
-        let w = self.ui.window();
-        let scale = w.scale_factor();
-        let (p, s) = (w.position(), w.size());
-        Geometry {
-            x: (p.x as f32 / scale).round() as i32,
-            y: (p.y as f32 / scale).round() as i32,
-            w: (s.width as f32 / scale).round() as u32,
-            h: (s.height as f32 / scale).round() as u32,
-        }
+        self.geometry.current().unwrap_or(Geometry { x: 0, y: 0, w: 0, h: 0 })
     }
 
     pub fn always_on_top(&self) -> bool {
@@ -307,6 +393,7 @@ impl Note {
     /// does not blink). Unsaved edits must have been flushed first.
     pub fn pause(&self) {
         self.timer.stop();
+        self.geometry_timer.stop();
         // the text keeps its look (editing or resting) while nobody can see it: no redraw
         self.ui.set_suspended(true);
         self.ui.window().dispatch_event(slint::platform::WindowEvent::WindowActiveChanged(false));
@@ -327,6 +414,8 @@ impl Note {
     pub fn flush(&self) {
         self.timer.stop();
         self.autosave.flush();
+        self.geometry_timer.stop();
+        self.geometry.flush();
     }
 }
 

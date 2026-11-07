@@ -4,7 +4,7 @@
 import { PaperTheme } from "paper-theme.slint";
 
 // Points of the paper, which is turned by the tilt around its own center.
-global PaperGeometry {
+export global PaperGeometry {
     property <float> cs: PaperTheme.paper-tilt.cos();
     property <float> sn: PaperTheme.paper-tilt.sin();
 

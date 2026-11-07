@@ -6,6 +6,7 @@ pub mod blocks;
 pub mod icon;
 pub mod note_window;
 pub mod occlusion;
+pub mod placement;
 pub mod platform;
 pub mod textflow;
 pub mod storage;

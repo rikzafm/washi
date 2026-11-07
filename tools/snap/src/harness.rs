@@ -1,11 +1,11 @@
 use crate::fakes::*;
 use crate::platform;
-use slint::platform::{Key, WindowEvent};
-use slint::ComponentHandle;
+use slint::platform::{Key, WindowAdapter, WindowEvent};
+use slint::{ComponentHandle, PhysicalSize};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
-use washi::platform::{KeyProtector, NoteId, WindowState};
+use washi::platform::{KeyProtector, NoteId, ScreenRect, WindowState};
 use washi::{App, Env, StartError};
 
 /// One app instance's world: a temporary data folder, fakes for Windows, and the running app.
@@ -18,6 +18,7 @@ pub struct Harness {
     pub dialogs: Rc<FakeDialogs>,
     pub startup: Rc<FakeStartup>,
     pub instance: Rc<FakeInstance>,
+    pub control: Rc<FakeWindowControl>,
     app: Option<App>,
     last_ids: Vec<NoteId>,
 }
@@ -43,7 +44,9 @@ impl Harness {
         let dialogs = Rc::new(FakeDialogs::default());
         let startup = Rc::new(FakeStartup::default());
         let instance = Rc::new(FakeInstance::default());
+        let control = Rc::new(FakeWindowControl::default());
         let env = Env {
+            window_control: control.clone(),
             data_dir: dir.path().to_path_buf(),
             protector: Rc::new(FakeProtector::new(seed)),
             clock: Rc::new(FakeClock::new(platform::time_handle())),
@@ -54,7 +57,7 @@ impl Harness {
             startup: startup.clone(),
             instance: instance.clone(),
         };
-        Harness { dir, env, signals, power, menu, dialogs, startup, instance, app: None, last_ids: Vec::new() }
+        Harness { dir, env, signals, power, menu, dialogs, startup, instance, control, app: None, last_ids: Vec::new() }
     }
 
     fn app(&self) -> &App {
@@ -194,6 +197,66 @@ impl Harness {
     pub fn resize_note(&mut self, note: usize, w: u32, h: u32) {
         let id = self.id(note);
         self.app().with_note(id, |n| n.ui().window().set_size(slint::LogicalSize::new(w as f32, h as f32)));
+    }
+
+    /// Position of a note's window on the desktop (physical = logical pixels at scale 1).
+    pub fn window_position(&self, note: usize) -> (i32, i32) {
+        let p = platform::windows()[note].window().position();
+        (p.x, p.y)
+    }
+
+    /// The monitors' work areas from now on (primary first).
+    pub fn set_work_areas(&mut self, areas: Vec<ScreenRect>) {
+        *self.control.areas.borrow_mut() = areas;
+    }
+
+    /// Press at a window position and drag the pointer by `by`. If the press grabbed the note, the
+    /// platform is asked to move or resize it, and then does so like Windows would: the window
+    /// follows the pointer and never gets smaller than its minimum. Returns what was grabbed.
+    pub fn drag(&mut self, note: usize, from: (f32, f32), by: (f32, f32)) -> Option<WindowCommand> {
+        let id = self.id(note);
+        let seen = self.control.log.borrow().len();
+        self.pointer_move(note, from.0, from.1);
+        self.press_button(note, from.0, from.1, false);
+        let grabbed = self.control.log.borrow().get(seen).copied();
+        if let Some(cmd) = grabbed {
+            let w = platform::windows().remove(note);
+            let scale = w.window().scale_factor();
+            let (dx, dy) = ((by.0 * scale).round() as i32, (by.1 * scale).round() as i32);
+            let (p, s, min) = (w.window().position(), w.window().size(), w.min_size());
+            let (mut left, mut top) = (p.x, p.y);
+            let (mut right, mut bottom) = (p.x + s.width as i32, p.y + s.height as i32);
+            match cmd {
+                WindowCommand::Move(_) => {
+                    left += dx;
+                    right += dx;
+                    top += dy;
+                    bottom += dy;
+                }
+                WindowCommand::Resize(_, edge) => {
+                    if edge.moves_left() {
+                        left = (left + dx).min(right - min.width as i32);
+                    }
+                    if edge.moves_right() {
+                        right = (right + dx).max(left + min.width as i32);
+                    }
+                    if edge.moves_top() {
+                        top = (top + dy).min(bottom - min.height as i32);
+                    }
+                    if edge.moves_bottom() {
+                        bottom = (bottom + dy).max(top + min.height as i32);
+                    }
+                }
+            }
+            w.os_place(
+                slint::PhysicalPosition::new(left, top),
+                PhysicalSize::new((right - left) as u32, (bottom - top) as u32),
+            );
+            // what the platform's window procedure reports after a move or resize
+            self.app().geometry_changed(id);
+        }
+        self.release_button(note, from.0, from.1, false);
+        grabbed
     }
 
     /// Size of a note's window (logical pixels).
@@ -376,7 +439,8 @@ impl Harness {
     /// Draw a note if it asked for a repaint; says whether it did (so a second call is `false`).
     pub fn repaint_pending(&self, note: usize) -> bool {
         let w = platform::windows().remove(note);
-        let (pw, ph) = platform::WINDOW_SIZE;
+        let s = w.window().size();
+        let (pw, ph) = (s.width, s.height);
         let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
         w.draw_if_needed(|r| {
             r.render(&mut buf, pw as usize);
@@ -439,7 +503,8 @@ impl Harness {
     /// Render a note's window to RGB bytes (width, height, pixels).
     pub fn render(&self, note: usize) -> (u32, u32, Vec<slint::Rgb8Pixel>) {
         let w = platform::windows().remove(note);
-        let (pw, ph) = platform::WINDOW_SIZE;
+        let s = w.window().size();
+        let (pw, ph) = (s.width, s.height);
         let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
         w.draw_if_needed(|r| {
             r.render(&mut buf, pw as usize);

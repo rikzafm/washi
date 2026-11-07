@@ -123,13 +123,13 @@ fn pending_edits_and_geometry_are_saved_before_suspending() {
     minimize_all(&mut h);
     h.advance(ms(9_800));
     h.type_text(0, "last words"); // autosave is still waiting for its 500 ms
-    h.resize_note(0, 300, 320);
+    h.resize_note(0, 500, 520);
     h.advance(ms(200));
     assert!(h.is_suspended());
     assert_eq!(h.saved_text(0), "last words");
     let id = h.note_id(0);
     let g = h.saved_geometry(id).unwrap();
-    assert_eq!((g.w, g.h), (300, 320));
+    assert_eq!((g.w, g.h), (500, 520));
 }
 
 #[test]
