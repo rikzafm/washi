@@ -9,7 +9,7 @@ Status: accepted (Phase 0 spikes, ticket 01). Spike code: `spikes/` (throwaway, 
 3. **Paper: a live `Path`** computed from bound size and the constant 1.5° tilt. **Shadow: 4 stacked translucent `Path` layers, 2 px growth each**, not 8 x 1 px. The cached-image shadow is the pre-approved fallback if resize pacing proves poor in QA.
 4. **Hover: a parent `TouchArea`'s `has-hover` is enough.** No Rust-side fallback.
 5. **Accessibility: on by default** (`accessibility` cargo feature), re-checked once a screen reader is exercised.
-6. **SQLCipher: not measured.** Blocked by the environment (see below); one action needed from a human.
+6. **SQLCipher: `bundled-sqlcipher-vendored-openssl` works** once Strawberry Perl is first on PATH. Cold release build 5 min 24 s; spike exe 4.01 MB (see below).
 
 ## Method
 
@@ -96,18 +96,28 @@ Total working set rose (22.9 to 30.4 MB for 3 notes), but that is shared pages, 
 
 Clean build of the winit spike: about 97 s without accessibility, 95 s with. These sizes include the spike's extras (system fonts, `usvg`/`png` pulled in by Slint features) and are an upper bound for the product.
 
-### SQLCipher (not measured, blocked)
+### SQLCipher (measured in ticket 05)
 
-`rusqlite` with `bundled-sqlcipher-vendored-openssl` (`spikes/sqlcipher/`) does not build here: `openssl-src` needs a native Windows Perl, and the only Perl installed is Git's Cygwin Perl, which OpenSSL's `Configure` rejects ("This Perl version ... for x86_64-cygwin"). NASM is also absent (the crate falls back to `no-asm`).
+`rusqlite 0.32` with `bundled-sqlcipher-vendored-openssl` (`spikes/sqlcipher/`). With Git's Cygwin Perl first on PATH the build fails, because `openssl-src`'s `Configure` rejects it ("This Perl version ... for x86_64-cygwin"). With **Strawberry Perl (`C:\Strawberry\perl\bin`) first on PATH it builds** from a normal shell; no NASM, so OpenSSL is built `no-asm`.
 
-**Action for a human:** install Strawberry Perl (or ActiveState Perl), then in an "x64 Native Tools" prompt run `cargo build --release` in `spikes/sqlcipher` and record the clean build time and `target/release/spike-sqlcipher.exe` size here. The spike's `main` also checks that the file has no plaintext and cannot be read without the key. If vendored OpenSSL stays painful, the alternative is a prebuilt static OpenSSL (vcpkg) with `bundled-sqlcipher`. Plan §9.2 storage work should not start until this passes.
+| | Result |
+|---|---|
+| Clean release build (cold `target/`, all deps, vendored OpenSSL) | 5 min 24 s |
+| Incremental rebuild of the spike after a source edit | about 2 s |
+| `spike-sqlcipher.exe` (release, same profile) | 4,105,216 bytes (3.91 MiB) |
+| SQLCipher version | 4.5.7 community |
+| File contains the plaintext marker | no |
+| File starts with `SQLite format 3` | no |
+| Opening without the key fails | yes |
+
+So SQLCipher adds about 4 MB to the exe (the spike has nothing else), within G5 together with the 7 MB Slint spike if sizes stack, and the build cost is a one-time 5 minutes. A fix to the spike was needed: `cipher_version` is a pragma, not a SQL function.
 
 ## Consequences
 
 - Ticket 04 (custom layered-window platform) is dropped. The prototype stays in `spikes/slint/src/bin/layered_win.rs` as a verified fallback (alpha, mouse, free-on-minimize work; no keyboard, IME, DPI-change or cursor code).
 - The window shell uses winit APIs: `drag_window`, `drag_resize_window`, min size, `set_minimized`.
 - The note component draws paper and shadow from properties; `spikes/slint/ui/spike.slint` has a working formulation of the tilted rounded-rect path.
-- Open follow-ups: click-through of transparent margins; wake time after restore (G4w); real fonts and SQLite memory; SQLCipher build; shadow fidelity against the mockup.
+- Open follow-ups: click-through of transparent margins; wake time after restore (G4w); real fonts and SQLite memory; shadow fidelity against the mockup.
 
 ## Reproduce
 

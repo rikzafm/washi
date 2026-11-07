@@ -1,0 +1,29 @@
+# Release-binary checks (run by CI, runnable locally). Requires a release build of washi.
+#   1. no GPU renderer in washi's dependency tree
+#   2. dev-only tool crates are not in washi's dependency tree
+#   3. washi.exe is a GUI-subsystem exe (no console window) with the PerMonitorV2 manifest
+$ErrorActionPreference = 'Stop'
+Set-Location (Split-Path $PSScriptRoot -Parent)
+$fail = $false
+
+$tree = cargo tree -p washi -e normal,build --prefix none --format "{p}" 2>&1 | Out-String
+# tiny-skia / image are CPU-only and pulled in by Slint itself; only GPU stacks are forbidden.
+foreach ($bad in 'femtovg', 'skia-safe', 'i-slint-renderer-skia', 'i-slint-renderer-femtovg', 'glutin\S*', 'glow', 'wgpu\S*', 'ash', 'gl', 'opengl\S*', 'vulkano') {
+    if ($tree -match "(?im)^($bad) ") { Write-Host "FAIL: GPU stack crate '$bad' in dependency tree"; $fail = $true }
+}
+foreach ($bad in 'snap', 'uidiff', 'tempfile') {
+    if ($tree -match "(?im)^$bad ") { Write-Host "FAIL: dev-only crate '$bad' in washi's dependency tree"; $fail = $true }
+}
+
+$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'target' }
+$exe = Join-Path $targetDir 'release\washi.exe'
+if (-not (Test-Path $exe)) { Write-Host "FAIL: $exe not built (cargo build --release -p washi)"; exit 1 }
+$bytes = [IO.File]::ReadAllBytes((Resolve-Path $exe))
+$pe = [BitConverter]::ToInt32($bytes, 0x3C)
+$subsystem = [BitConverter]::ToUInt16($bytes, $pe + 24 + 68)
+if ($subsystem -ne 2) { Write-Host "FAIL: PE subsystem is $subsystem, expected 2 (WINDOWS_GUI)"; $fail = $true }
+$text = [Text.Encoding]::ASCII.GetString($bytes)
+if ($text -notmatch 'PerMonitorV2') { Write-Host "FAIL: PerMonitorV2 manifest not found in $exe"; $fail = $true }
+
+if ($fail) { exit 1 }
+Write-Host ("OK: no GPU renderer, no dev crates, GUI subsystem, PerMonitorV2. exe = {0:N2} MB" -f ($bytes.Length / 1MB))

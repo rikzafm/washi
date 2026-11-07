@@ -1,0 +1,13 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Git's Cygwin Perl breaks OpenSSL's Configure; use Strawberry Perl first on PATH.
+      - run: echo "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+        shell: pwsh
+      - run: cargo test --workspace
+      - run: cargo build --release -p washi
+      - run: pwsh tools/check-release.ps1
