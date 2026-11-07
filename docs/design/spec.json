@@ -1,0 +1,443 @@
+{
+  "paper_color": "#FFFFFD",
+  "mockups": {
+    "hover": {
+      "file": "reference/mockup-hover.png",
+      "hover": true,
+      "check": ["paper", "tape_pink", "tape_blue", "title", "heading", "body", "toolbar"]
+    },
+    "idle": {
+      "file": "reference/mockup-idle.png",
+      "hover": false,
+      "check": ["paper", "tape_pink", "tape_blue", "no_toolbar"],
+      "mask": [
+        [128, 180, 360, 220]
+      ]
+    }
+  },
+  "regions": {
+    "paper": {
+      "kind": "paper",
+      "color": "#FFFFFD",
+      "tol": 4
+    },
+    "tape_pink": {
+      "kind": "tape",
+      "rect": [55, 20, 250, 180],
+      "mask": "r-g>=12"
+    },
+    "tape_blue": {
+      "kind": "tape",
+      "rect": [470, 600, 670, 815],
+      "mask": "b-r>=16"
+    },
+    "title": {
+      "kind": "text",
+      "rect": [130, 160, 440, 235],
+      "paper": "#FFFFFD"
+    },
+    "heading": {
+      "kind": "text",
+      "rect": [130, 250, 500, 345],
+      "paper": "#FFFFFD"
+    },
+    "body": {
+      "kind": "text",
+      "rect": [125, 350, 590, 530],
+      "paper": "#FFFFFD"
+    },
+    "toolbar": {
+      "kind": "icons",
+      "rect": [110, 645, 500, 725],
+      "cells": 6,
+      "paper": "#FFFFFD",
+      "fill": {
+        "color": "#F0F0EE"
+      }
+    },
+    "no_toolbar": {
+      "kind": "empty",
+      "rect": [100, 595, 480, 670],
+      "color": "#FFFFFD",
+      "tol": 4
+    }
+  },
+  "scale": {
+    "value": 1.5,
+    "status": "confirmed",
+    "evidence": "At 1.5 the unrotated measurements land on whole logical px: tape 113.0 x 33.1, stripe pitch 16.0, toolbar button 40.04 x 40.04, toolbar icons 16 x 16 (B). At 1.25 they do not (135.6, 39.8, 19.2, 48.06); at 2.0 they are 84.75, 24.85, 12.0, 30.04 (less round). Paper width is 362.9 at 1.5, which matches the 360 minimum width decision; at 2.0 it would be 272. Geometry alone cannot separate 1.5 from 2.0, so the choice rests on that and on 150% being the stated assumption.",
+    "mockup_px_per_logical_px": 1.5
+  },
+  "paper_tilt_deg": {
+    "value": 1.5,
+    "measured": "all four fitted edges give 1.50 (hover and idle)",
+    "direction": "clockwise"
+  },
+  "text_tilt_deg": {
+    "value": 1.45,
+    "text_is_tilted": true,
+    "flag": "The text is NOT level. Baselines slope at 1.45 deg (1.55 on one body line) with the paper, and every line's left ink edge sits at the same distance from the paper's tilted left edge (u = 32 to 34 logical px). The whole text block is rotated with the paper, so the plan's 'only the paper path is tilted' case does not hold. STEP_BY_STEP Step 3: check Slint transform-rotation support for a subtree containing a TextInput in the software renderer before building the note component."
+  },
+  "paper_corner_radius_px": {
+    "value": 1,
+    "note": "Measured 1.18 (hover) and 0.76 (idle) mockup px: effectively square corners (a 1 px AA rounding). Do not round the paper corners."
+  },
+  "default_paper_logical": {
+    "width": 363,
+    "height": 384,
+    "source": "Unrotated paper path: 544.39 x 575.53 mockup px (idle mockup) / 1.5 = 362.9 x 383.7. The hover mockup is 362.9 x 432.6 (height is user-set).",
+    "plan_value_371x391_note": "The plan's 371 x 391 came from the axis-aligned bounding boxes of the TILTED paper (558/1.5, 586/1.5). The true unrotated default is about 363 x 384."
+  },
+  "layout": {
+    "unit": "logical px (mockup px / 1.5), measured in the paper's own rotated frame: u along the top edge from the top-left corner, v down the left edge",
+    "paper": {
+      "default": [363, 384],
+      "min": [360, 360],
+      "minimum_applies_to": "paper, not window",
+      "corner_radius": 1,
+      "color": "#FFFFFD",
+      "tilt_deg": 1.5
+    },
+    "window_margin": {
+      "value": 40,
+      "rule": "fixed transparent margin around the paper (all four sides), the same at every note size",
+      "derived_from": "tape overhang above the paper's tilted bbox is 38.7 (hover pink tape: 58 mockup px), below 34.7, left and right 8.7; shadow reaches about 30 below, 15 right, 13 left, 8 above. 40 covers all of them."
+    },
+    "toolbar": {
+      "band_height": 56,
+      "rule": "band is always reserved at the bottom of the paper; the scrolling text area ends at the band's top edge; the note does not change size when the toolbar appears",
+      "button_size": [40, 40],
+      "button_radius": 10.8,
+      "button_fill": "#F0F0EE",
+      "button_top_to_paper_bottom": 55.8,
+      "button_bottom_inset": 15.8,
+      "first_button_left_inset": 23.2,
+      "icon_size": [16, 16],
+      "icon_centers_u": [98.7, 141.7, 183.7, 226.7, 269.7, 312.3],
+      "icon_cells": 6,
+      "icon_color_active": "#2B2F36",
+      "icon_color_inactive": "#8B919A"
+    },
+    "text": {
+      "left_inset_u": 33,
+      "fixed_insets_not_proportions": true,
+      "title": {
+        "first_baseline_v": 81.0,
+        "ink_height": 36.7
+      },
+      "heading": {
+        "first_baseline_v": 132.4,
+        "ink_height": 22.7,
+        "line_pitch": 29.3
+      },
+      "body": {
+        "first_baseline_v": 198.4,
+        "line_pitch": 29.1,
+        "ink_height_first_line": 26.0
+      },
+      "ink_color": "#2B2F36",
+      "tilt_deg": 1.45,
+      "text_area_ends_above": "toolbar band top"
+    },
+    "tapes": {
+      "size": [113, 33.1],
+      "angle_relative_to_paper_deg": -35.0,
+      "stripe_pitch": 16.0,
+      "stripe_angle_relative_to_tape_deg": 45.0,
+      "pink": {
+        "pinned_to": "top-left corner",
+        "center_offset_from_corner_uv": [37.1, 5.7],
+        "base": "#F7BFCD",
+        "stripe": "#FCDDE5"
+      },
+      "blue": {
+        "pinned_to": "bottom-right corner",
+        "center_offset_from_corner_uv": [-37.0, -9.0],
+        "base": "#B1D9E5",
+        "stripe": "#D7EDF3"
+      },
+      "rule": "fixed size, pinned to the paper corners; they do not scale with the note"
+    },
+    "rules": ["default and minimum paper size: 363 x 384 default, 360 x 360 minimum, applied to the paper (not the window)", "window = paper + a fixed 40 px transparent margin on every side", "toolbar band is 56 px tall at the bottom of the paper, always reserved; text area ends above it", "tapes have a fixed size and are pinned to their paper corners", "insets, font sizes, toolbar geometry and tape size are fixed logical values, not proportions of the note size", "tilt is a constant 1.5 deg at every note size; the text block tilts with the paper", "idle mockup: its leftover caption line is masked out and its text regions are skipped (text positions come from the hover mockup only)"]
+  },
+  "expected": {
+    "hover": {
+      "paper": {
+        "found": true,
+        "bbox": [81, 89, 641, 751],
+        "area_px": 317286,
+        "tilt_deg": 1.5,
+        "tilt_edges_deg": {
+          "top": 1.5,
+          "bottom": 1.5,
+          "left": 1.5,
+          "right": 1.5
+        },
+        "width": 544.392,
+        "height": 648.866,
+        "center": {
+          "x": 361.099,
+          "y": 419.994
+        },
+        "corners": {
+          "tl": [97.488, 88.548],
+          "tr": [641.694, 102.798],
+          "bl": [80.505, 737.192],
+          "br": [624.709, 751.44]
+        },
+        "corner_radius": 1.178,
+        "corner_radii": {
+          "tl": null,
+          "tr": 1.038,
+          "bl": 1.318,
+          "br": null
+        }
+      },
+      "tape_pink": {
+        "found": true,
+        "bbox": [69, 31, 237, 166],
+        "area_px": 8377,
+        "centroid": {
+          "x": 152.927,
+          "y": 98.592
+        },
+        "angle_deg": -33.508,
+        "length": 169.494,
+        "width": 49.674,
+        "base": "#F4BBCA",
+        "stripe": "#FBDCE4",
+        "stripe_angle_deg": 11.45,
+        "stripe_pitch": 23.991,
+        "stripe_pitch_along_axis": 33.954
+      },
+      "tape_blue": {
+        "found": true,
+        "bbox": [485, 669, 654, 803],
+        "area_px": 8367,
+        "centroid": {
+          "x": 569.644,
+          "y": 736.481
+        },
+        "angle_deg": -33.5,
+        "length": 169.826,
+        "width": 49.806,
+        "base": "#AFD8E4",
+        "stripe": "#D7EDF3",
+        "stripe_angle_deg": 11.4,
+        "stripe_pitch": 23.981,
+        "stripe_pitch_along_axis": 33.973
+      },
+      "title": {
+        "rect": [130, 160, 440, 235],
+        "line_count": 1,
+        "lines": [
+          {
+            "bbox": [145, 164, 402, 221],
+            "baseline": 211.0,
+            "baseline_left": 211.38,
+            "baseline_right": 217.885,
+            "ink_height": 55.0,
+            "ink_area": 2636.571,
+            "coverage": 0.187,
+            "ink_color": "#2B2F36",
+            "baseline_slope_deg": 1.45
+          }
+        ],
+        "baseline_slope_deg": 1.45
+      },
+      "heading": {
+        "rect": [130, 250, 500, 345],
+        "line_count": 2,
+        "lines": [
+          {
+            "bbox": [141, 261, 478, 300],
+            "baseline": 288.0,
+            "baseline_left": 288.278,
+            "baseline_right": 296.809,
+            "ink_height": 34.0,
+            "ink_area": 2825.628,
+            "coverage": 0.247,
+            "ink_color": "#2B2F36",
+            "baseline_slope_deg": 1.45
+          },
+          {
+            "bbox": [139, 304, 233, 335],
+            "baseline": 332.0,
+            "baseline_left": 332.228,
+            "baseline_right": 334.607,
+            "ink_height": 31.0,
+            "ink_area": 1114.577,
+            "coverage": 0.382,
+            "ink_color": "#2B2F36",
+            "baseline_slope_deg": null
+          }
+        ],
+        "baseline_slope_deg": 1.45
+      },
+      "body": {
+        "rect": [125, 350, 590, 530],
+        "line_count": 4,
+        "lines": [
+          {
+            "bbox": [139, 361, 557, 404],
+            "baseline": 387.0,
+            "baseline_left": 387.354,
+            "baseline_right": 397.935,
+            "ink_height": 39.0,
+            "ink_area": 2046.554,
+            "coverage": 0.126,
+            "ink_color": "#2B2F36",
+            "baseline_slope_deg": 1.45
+          },
+          {
+            "bbox": [138, 400, 571, 441],
+            "baseline": 429.0,
+            "baseline_left": 429.329,
+            "baseline_right": 440.289,
+            "ink_height": 33.0,
+            "ink_area": 2019.968,
+            "coverage": 0.141,
+            "ink_color": "#2B2F36",
+            "baseline_slope_deg": 1.45
+          },
+          {
+            "bbox": [137, 449, 550, 499],
+            "baseline": 474.0,
+            "baseline_left": 474.304,
+            "baseline_right": 484.758,
+            "ink_height": 44.0,
+            "ink_area": 2044.294,
+            "coverage": 0.112,
+            "ink_color": "#2B2F36",
+            "baseline_slope_deg": 1.55
+          },
+          {
+            "bbox": [136, 492, 237, 523],
+            "baseline": 518.0,
+            "baseline_left": 518.278,
+            "baseline_right": 520.835,
+            "ink_height": 30.0,
+            "ink_area": 473.624,
+            "coverage": 0.156,
+            "ink_color": "#2B2F36",
+            "baseline_slope_deg": null
+          }
+        ],
+        "baseline_slope_deg": 1.45
+      },
+      "toolbar": {
+        "rect": [110, 645, 500, 725],
+        "cell_count": 6,
+        "cells": [
+          {
+            "bbox": [136, 673, 160, 697],
+            "color": "#2B2F36",
+            "active": true
+          },
+          {
+            "bbox": [204, 675, 221, 698],
+            "color": "#8B919A",
+            "active": false
+          },
+          {
+            "bbox": [262, 676, 289, 705],
+            "color": "#8C929A",
+            "active": false
+          },
+          {
+            "bbox": [322, 676, 358, 703],
+            "color": "#8C929B",
+            "active": false
+          },
+          {
+            "bbox": [391, 680, 418, 701],
+            "color": "#8A9099",
+            "active": false
+          },
+          {
+            "bbox": [454, 679, 483, 705],
+            "color": "#8A9099",
+            "active": false
+          }
+        ],
+        "active_fill": {
+          "rect": [117.4, 654.467, 177.467, 714.533],
+          "color": "#F0F0EE",
+          "radius": 16.208
+        }
+      }
+    },
+    "idle": {
+      "paper": {
+        "found": true,
+        "bbox": [82, 105, 640, 693],
+        "area_px": 282676,
+        "tilt_deg": 1.5,
+        "tilt_edges_deg": {
+          "top": 1.5,
+          "bottom": 1.5,
+          "left": 1.5,
+          "right": 1.5
+        },
+        "width": 544.393,
+        "height": 575.532,
+        "center": {
+          "x": 361.117,
+          "y": 398.883
+        },
+        "corners": {
+          "tl": [96.545, 104.092],
+          "tr": [640.754, 118.341],
+          "bl": [81.482, 679.427],
+          "br": [625.687, 693.674]
+        },
+        "corner_radius": 0.761,
+        "corner_radii": {
+          "tl": null,
+          "tr": 0.307,
+          "bl": 1.214,
+          "br": null
+        }
+      },
+      "tape_pink": {
+        "found": true,
+        "bbox": [68, 47, 236, 180],
+        "area_px": 8365,
+        "centroid": {
+          "x": 152.002,
+          "y": 114.103
+        },
+        "angle_deg": -33.495,
+        "length": 169.497,
+        "width": 49.619,
+        "base": "#F7BFCD",
+        "stripe": "#FCDDE5",
+        "stripe_angle_deg": 11.45,
+        "stripe_pitch": 23.993,
+        "stripe_pitch_along_axis": 33.964
+      },
+      "tape_blue": {
+        "found": true,
+        "bbox": [486, 614, 655, 748],
+        "area_px": 8364,
+        "centroid": {
+          "x": 570.57,
+          "y": 680.96
+        },
+        "angle_deg": -33.52,
+        "length": 169.774,
+        "width": 49.787,
+        "base": "#B1D9E5",
+        "stripe": "#D7EDF3",
+        "stripe_angle_deg": 11.55,
+        "stripe_pitch": 24.011,
+        "stripe_pitch_along_axis": 33.915
+      },
+      "no_toolbar": {
+        "rect": [100, 595, 480, 670],
+        "non_paper_px": 0,
+        "bbox": null
+      }
+    }
+  }
+}
