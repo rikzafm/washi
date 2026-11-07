@@ -6,6 +6,7 @@ use washi::win::*;
 use washi::{App, Env};
 
 fn main() {
+    washi::trace::mark("process-start");
     let dialogs = Rc::new(Win32Dialogs);
     // WASHI_DATA_DIR points the app at a throwaway profile (tools/memprobe.ps1, tools/capture.ps1).
     let data_dir = match (std::env::var_os("WASHI_DATA_DIR"), std::env::var_os("APPDATA")) {
@@ -33,6 +34,8 @@ fn main() {
     match App::launch(env) {
         Ok(Some(app)) => {
             app.watch_window_state();
+            washi::trace::mark("notes-shown");
+            slint::Timer::single_shot(std::time::Duration::ZERO, || washi::trace::mark("first-turn"));
             let _ = slint::run_event_loop_until_quit();
             app.quit(); // final flush
         }

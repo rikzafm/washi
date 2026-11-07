@@ -145,6 +145,7 @@ impl SuspendController {
     }
 
     fn start_grace(self: &Rc<Self>, picture: Picture) {
+        crate::trace::mark(&format!("grace-start {:?}", picture));
         *self.picture.borrow_mut() = Some(picture);
         self.phase.set(Phase::Grace);
         let weak = Rc::downgrade(self);
@@ -168,6 +169,7 @@ impl SuspendController {
     }
 
     fn suspend(&self, host: &dyn SuspendHost) {
+        crate::trace::mark("suspend-begin");
         host.save_all();
         self.timer.stop();
         self.cover_check.stop();
@@ -176,12 +178,16 @@ impl SuspendController {
         self.power.release_memory();
         self.power.set_efficiency_mode(true);
         self.phase.set(Phase::Suspended);
+        crate::trace::mark("suspend-end");
     }
 
     fn wake_up(&self, host: &dyn SuspendHost) {
+        crate::trace::mark("wake-begin");
         self.power.set_efficiency_mode(false);
         self.phase.set(Phase::Active);
         host.resume();
+        // the event loop's next turn is where the repaint requested by `resume` is drawn
+        Timer::single_shot(Duration::ZERO, || crate::trace::mark("wake-next-turn"));
     }
 
     /// Hover over a note, or Windows asking a note to paint: show up if suspended.

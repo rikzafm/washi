@@ -15,6 +15,7 @@ pub mod platform;
 pub mod textflow;
 pub mod storage;
 pub mod suspend;
+pub mod trace;
 pub mod win;
 
 pub use app::{App, Env, StartError};
