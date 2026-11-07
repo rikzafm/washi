@@ -422,6 +422,7 @@ impl Note {
         self.doc.load(text);
         self.doc.relayout(&self.ui);
         self.ui.set_text(self.doc.text().as_str().into());
+        self.ui.set_window_title(window_title(text).into());
     }
 
     pub fn text(&self) -> String {

@@ -26,7 +26,7 @@ fn typed_text_is_back_after_restart() {
     h.advance(ms(500));
     h.restart().unwrap();
     assert_eq!(h.open_note_count(), 1);
-    assert_eq!(h.note_text(0), "buy washi tape");
+    assert_eq!(h.note_text(0), "# buy washi tape");
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn autosave_waits_500ms_after_the_last_edit() {
     h.advance(ms(400));
     assert_eq!(h.saved_text(0), "", "800 ms after first edit but only 400 ms after the last");
     h.advance(ms(100));
-    assert_eq!(h.saved_text(0), "ab");
+    assert_eq!(h.saved_text(0), "# ab");
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn closing_the_note_saves_immediately_and_quits() {
     h.type_text(0, "unsaved");
     h.close_note(0);
     assert!(h.has_quit(), "closing the last note quits Washi");
-    assert_eq!(h.saved_text_of_only_note(), "unsaved");
+    assert_eq!(h.saved_text_of_only_note(), "# unsaved");
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn quitting_saves_immediately_and_keeps_the_note_open() {
     h.type_text(0, "unsaved");
     h.quit();
     h.restart().unwrap();
-    assert_eq!(h.note_text(0), "unsaved");
+    assert_eq!(h.note_text(0), "# unsaved");
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn canary_never_reaches_disk_in_plaintext() {
 
     // ...and the text is really in there (so the checks above mean something).
     h.restart().unwrap();
-    assert_eq!(h.note_text(0), CANARY);
+    assert_eq!(h.note_text(0), format!("# {CANARY}"));
 }
 
 #[test]

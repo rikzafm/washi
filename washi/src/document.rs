@@ -229,6 +229,10 @@ impl Document {
 
     /// The stored text (inverse of [`Document::parse`]).
     pub fn to_text(&self) -> String {
+        // a note nobody wrote in is stored as before: no content at all
+        if self.is_empty() && self.blocks[0].style == Style::NONE {
+            return String::new();
+        }
         let mut out = String::new();
         for (i, b) in self.blocks.iter().enumerate() {
             if i > 0 {
@@ -465,6 +469,15 @@ mod tests {
         let d = Document::from_blocks(vec![Block::new(Kind::Title, "t"), Block::new(Kind::Body, "x").with_style(all)]);
         assert_eq!(d.to_text(), "# t\n<u>~~***x***~~</u>");
         assert_eq!(Document::parse(&d.to_text()), d);
+    }
+
+    #[test]
+    fn an_empty_note_is_stored_as_no_text() {
+        assert_eq!(Document::new().to_text(), "");
+        assert_eq!(Document::parse(&Document::new().to_text()), Document::new());
+        let mut styled = Document::new();
+        styled.toggle_style(0, Style::BOLD);
+        assert_eq!(Document::parse(&styled.to_text()), styled);
     }
 
     #[test]

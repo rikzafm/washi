@@ -50,7 +50,7 @@ fn new_note_from_the_menu_is_empty_and_the_old_note_is_kept() {
     h.type_text(0, "first");
     h.right_click(0, Some(&["New note"]));
     assert_eq!(h.open_note_count(), 2);
-    assert_eq!(h.note_text(0), "first");
+    assert_eq!(h.note_text(0), "# first");
     assert_eq!(h.note_text(1), "");
     assert_eq!(h.note_size(1), h.note_size(0), "default size");
 }
@@ -126,7 +126,7 @@ fn choosing_a_closed_note_reopens_it_at_its_saved_size() {
 
     h.right_click(0, Some(&["Open note", "come back to me"]));
     assert_eq!(h.open_note_count(), 2);
-    assert_eq!(h.note_text(1), "come back to me");
+    assert_eq!(h.note_text(1), "# come back to me");
     assert_eq!(h.note_size(1), (300, 260));
 
     // It is open again, so it is no longer listed.
@@ -141,7 +141,7 @@ fn delete_asks_and_keeps_the_note_when_declined() {
     h.dialogs.confirm_answer.set(false);
     h.right_click(1, Some(&["Delete"]));
     assert_eq!(h.open_note_count(), 2);
-    assert_eq!(h.note_text(1), "keep me");
+    assert_eq!(h.note_text(1), "# keep me");
     h.press_ctrl(1, 'd');
     assert_eq!(h.open_note_count(), 2, "Ctrl+D asks too");
 }
@@ -215,8 +215,8 @@ fn restart_reopens_exactly_the_notes_that_were_open() {
 
     h.restart().unwrap();
     assert_eq!(h.open_note_count(), 2);
-    assert_eq!(h.note_text(0), "alpha");
-    assert_eq!(h.note_text(1), "gamma");
+    assert_eq!(h.note_text(0), "# alpha");
+    assert_eq!(h.note_text(1), "# gamma");
     h.right_click(0, None);
     assert_eq!(labels(&h.last_menu()[1].children), ["beta"]);
 }

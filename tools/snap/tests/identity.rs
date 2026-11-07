@@ -95,7 +95,7 @@ fn second_launch_opens_a_new_note_in_the_running_app_and_exits() {
 
     assert!(h.launch_again(), "the second launch hands off and exits");
     assert_eq!(h.open_note_count(), 2);
-    assert_eq!(h.note_text(0), "first");
+    assert_eq!(h.note_text(0), "# first");
     assert_eq!(h.note_text(1), "");
 
     assert!(h.launch_again());

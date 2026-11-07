@@ -130,6 +130,37 @@ impl Harness {
         });
     }
 
+    /// Press and release one special key (arrows, Home, End, Delete ...).
+    pub fn press(&mut self, note: usize, key: Key) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            w.dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+        });
+    }
+
+    /// Press one key several times.
+    pub fn press_n(&mut self, note: usize, key: Key, times: usize) {
+        for _ in 0..times {
+            self.press(note, key);
+        }
+    }
+
+    /// Paste text (line breaks included): it goes on the clipboard, then Ctrl+V.
+    pub fn paste(&mut self, note: usize, text: &str) {
+        platform::set_clipboard(text);
+        self.press_ctrl(note, 'v');
+    }
+
+    /// The pieces of the empty-note hint currently shown, joined (empty when not shown).
+    pub fn hint_shown(&self, note: usize) -> String {
+        use slint::Model;
+        self.app()
+            .with_note(self.id(note), |n| n.ui().get_runs().iter().filter(|r| r.hint).map(|r| r.text.to_string()).collect::<Vec<_>>().join(""))
+            .unwrap()
+    }
+
     pub fn press_backspace(&mut self, note: usize) {
         let id = self.id(note);
         self.app().with_note(id, |n| {
