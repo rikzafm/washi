@@ -1,0 +1,81 @@
+import "../../fonts/ShadowsIntoLight.ttf";
+import "../../fonts/ShadowsIntoLight-Bold.ttf";
+import "../../fonts/ShadowsIntoLight-Italic.ttf";
+import "../../fonts/ShadowsIntoLight-BoldItalic.ttf";
+import { Theme } from "theme.slint";
+
+export enum BlockKind { title, heading, body }
+
+export struct BlockData {
+    kind: BlockKind,
+    text: string,
+}
+
+/// One word at rest: upright, at its level place (x, y) plus the offset (dx, dy) that puts it on the tilted baseline.
+export struct RunData {
+    text: string,
+    x: length,
+    y: length,
+    dx: length,
+    dy: length,
+    width: length,
+    size: length,
+    pitch: length,
+    bold: bool,
+}
+
+// One paragraph: an editable text field styled by its kind.
+export component BlockView inherits Rectangle {
+    in property <BlockKind> kind: body;
+    in property <string> text;
+    in property <bool> autofocus: false;
+    /// Space above the block, in logical px (set by the stack from the kinds around it).
+    in property <length> gap-before: 0px;
+    /// The level text field is drawn only while editing; at rest the stepped words are.
+    in property <bool> show-input: true;
+    callback edited(string);
+    callback focus-changed(bool);
+    /// Bumped to make the field state its focus again (after a suspension).
+    in property <int> resync: 0;
+    changed resync => { root.focus-changed(input.has-focus); }
+
+    property <length> size: kind == BlockKind.title ? Theme.title-size
+        : kind == BlockKind.heading ? Theme.heading-size : Theme.body-size;
+    property <length> pitch: kind == BlockKind.title ? Theme.title-pitch
+        : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch;
+
+    property <bool> focused: input.has-focus;
+    property <bool> reported: false;
+    // Tell the layer about focus changes, once each (Slint raises no change for the initial state).
+    function report() {
+        if (input.has-focus != root.reported) {
+            root.reported = input.has-focus;
+            root.focus-changed(root.reported);
+        }
+    }
+    changed focused => { root.report(); }
+
+    preferred-height: root.gap-before + input.preferred-height;
+
+    input := TextInput {
+        x: 0;
+        y: root.gap-before;
+        width: parent.width;
+        wrap: word-wrap;
+        single-line: false;
+        text: root.text;
+        font-family: Theme.handwriting;
+        font-size: root.size;
+        font-weight: root.kind == BlockKind.heading ? 700 : 400;
+        line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
+        color: Theme.ink;
+        // hidden, not removed: a click still lands in the field and starts editing
+        opacity: root.show-input ? 1 : 0;
+        edited => { root.edited(self.text); }
+    }
+
+    init => {
+        if (root.autofocus) { input.focus(); }
+        root.report();
+    }
+}

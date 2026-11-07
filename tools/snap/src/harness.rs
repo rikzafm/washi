@@ -121,7 +121,7 @@ impl Harness {
     /// Put text into the note without typing it (fixtures).
     pub fn set_note_text(&mut self, note: usize, text: &str) {
         let id = self.id(note);
-        self.app().with_note(id, |n| n.ui().set_text(text.into()));
+        self.app().with_note(id, |n| n.set_text(text));
     }
 
     pub fn press_enter(&mut self, note: usize) {
@@ -380,6 +380,24 @@ impl Harness {
             let button = if right { slint::platform::PointerEventButton::Right } else { slint::platform::PointerEventButton::Left };
             n.ui().window().dispatch_event(WindowEvent::PointerReleased { position, button });
         });
+    }
+
+    /// How much of the resting tilt the text still carries: 1 at rest, 0 while editing.
+    pub fn text_tilt_scale(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.ui().get_text_tilt_scale()).unwrap()
+    }
+
+    /// The resting words: (text, level x, level y, dx, dy, width) in logical px of the paper's frame.
+    pub fn text_runs(&self, note: usize) -> Vec<(String, f32, f32, f32, f32, f32)> {
+        use slint::Model;
+        self.app()
+            .with_note(self.id(note), |n| n.ui().get_runs().iter().map(|r| (r.text.to_string(), r.x, r.y, r.dx, r.dy, r.width)).collect())
+            .unwrap()
+    }
+
+    /// The window loses (or regains) the system focus: no field has the keyboard focus then.
+    pub fn set_window_active(&mut self, note: usize, active: bool) {
+        self.app().with_note(self.id(note), |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(active)));
     }
 
     /// Opacity of the toolbar (0 hidden, 1 shown).
