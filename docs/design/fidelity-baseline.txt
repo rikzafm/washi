@@ -5,15 +5,15 @@
 # is a regression. A listed group that passes is an error too: delete its line, so the gain cannot
 # be lost again. Each Stage D ticket (paper, tapes, text, toolbar) deletes the lines it fixes.
 #
-# State now: paper, shadow, tapes and the transparent surround are done (ticket 07). Text is still
-# the walking-skeleton text box.
+# State now: paper, shadow, tapes and the transparent surround are done (ticket 07); text styles are in
+# (ticket 08). What is left in hover:title/body is ink height and coverage of some lines (the mockup's
+# lines are spaced by whole device pixels and drawn by a browser); invariants:fonts compares a longer
+# heading line against the default one.
 
 hover:title
-hover:heading
 hover:body
 hover:image
 
 idle:image
 
-invariants:insets
 invariants:fonts

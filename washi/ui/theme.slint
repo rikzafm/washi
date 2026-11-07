@@ -1,0 +1,37 @@
+// Design tokens: fixed logical values measured from the mockups (docs/design/spec.json),
+// never proportions of the note size.
+
+export global Theme {
+    // The text lies tilted with the paper (PaperTheme.paper-tilt) at rest, clockwise.
+    out property <angle> text-tilt: 1.45deg;
+    // The text settles flat over this long when editing starts, and back when it ends.
+    out property <duration> settle: 120ms;
+    // At rest the text is drawn in pieces at most this wide, each on the tilted baseline.
+    out property <length> step-width: 16px;
+
+    out property <color> ink: #2B2F36;
+    out property <string> handwriting: "Shadows Into Light";
+
+    // Text block: inset from the paper edges (paper's own frame).
+    out property <length> text-inset-left: 32px;
+    out property <length> text-inset-right: 40px;
+    out property <length> text-inset-top: 38.2px;
+    // Space kept clear between the text area and the toolbar band's top edge.
+    out property <length> text-bottom-gap: 16px;
+
+    // Natural line height of the handwriting font in em: (ascent + descent) / units per em.
+    out property <float> handwriting-line-em: 1.6064;
+
+    // Title
+    out property <length> title-size: 37.3px;
+    out property <length> title-pitch: 60px;
+    // Space above the first heading / first body block
+    out property <length> heading-gap: 10px;
+    out property <length> body-gap: 8.1px;
+    // Heading (bold face)
+    out property <length> heading-size: 24px;
+    out property <length> heading-pitch: 29.3px;
+    // Body
+    out property <length> body-size: 22.65px;
+    out property <length> body-pitch: 29.1px;
+}

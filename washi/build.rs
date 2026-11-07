@@ -3,7 +3,9 @@
 mod icon;
 
 fn main() {
-    slint_build::compile("ui/note.slint").unwrap();
+    // Fonts imported by the .slint files are embedded in the binary (not read from disk at run time).
+    let config = slint_build::CompilerConfiguration::new().embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
+    slint_build::compile_with_config("ui/note.slint", config).unwrap();
     // The app icon (drawn from spec values by src/icon.rs) becomes the .exe's icon resource.
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         let res = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("washi-icon.res");

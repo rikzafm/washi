@@ -1,5 +1,11 @@
+import { Theme } from "theme.slint";
+import { BlockData, RunData } from "block.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
+import { TextLayer } from "text.slint";
+
+export { BlockData, BlockKind, RunData } from "block.slint";
+export { Theme } from "theme.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
 
 export component NoteWindow inherits Window {
@@ -18,8 +24,24 @@ export component NoteWindow inherits Window {
     min-width: PaperTheme.paper-min-width + 2 * PaperTheme.margin;
     min-height: PaperTheme.paper-min-height + 2 * PaperTheme.margin;
 
-    in-out property <string> text;
-    callback edited(string);
+    /// The note's stored text, kept by the app; `blocks` is the same text split into styled blocks.
+    in property <string> text;
+    in property <[BlockData]> blocks;
+    /// The same text as upright words on the tilted baseline (shown at rest), laid out by Rust.
+    in property <[RunData]> runs;
+    /// The paper (window minus margins) changed size: Rust lays the words out again.
+    callback paper-resized(length, length);
+    changed width => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
+    changed height => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
+    /// 1 at rest (words on the tilted baseline), 0 while editing (level).
+    out property <float> text-tilt-scale: text-layer.tilt-scale;
+    /// The block whose field has the focus (-1 none). Rust clears it when it replaces the blocks.
+    in-out property <int> text-focused-block <=> text-layer.focused-block;
+    /// Suspended (covered, minimized): the look must not change, so no redraw is asked for.
+    in property <bool> suspended: false;
+    in-out property <int> text-resync: 0;
+    /// Block `i` was edited to this text.
+    callback block-edited(int, string);
     /// Right click on the paper, in window coordinates.
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
@@ -63,28 +85,29 @@ export component NoteWindow inherits Window {
             }
 
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
+            // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             Rectangle {
-                x: PaperTheme.margin + PaperTheme.text-left-inset;
-                y: root.paper-top + PaperTheme.text-top-inset;
-                width: root.width - 2 * (PaperTheme.margin + PaperTheme.text-left-inset);
-                height: root.paper-bottom - ToolbarMetrics.band-height - self.y;
+                x: root.margin;
+                y: root.paper-top;
+                width: root.width - 2 * root.margin;
+                // The tilted band's top edge rises by half the paper width times sin(tilt) at the left;
+                // text may not reach into it, and a level clip cannot follow the tilt.
+                height: root.paper-bottom - ToolbarMetrics.band-height - Theme.text-bottom-gap - root.paper-top - (root.width - 2 * root.margin) / 2 * root.tilt.sin();
                 clip: true;
 
-                input := TextInput {
+                text-layer := TextLayer {
                     x: 0px;
                     y: 0px;
-                    width: parent.width;
-                    height: parent.height;
-                    wrap: word-wrap;
-                    single-line: false;
-                    font-size: 14px;
-                    color: #222222;
-                    text <=> root.text;
-                    edited => { root.edited(self.text); }
+                    width: root.width - 2 * root.margin;
+                    height: root.paper-bottom - root.paper-top;
+                    blocks: root.blocks;
+                    runs: root.runs;
+                    suspended: root.suspended;
+                    resync: root.text-resync;
+                    block-edited(i, t) => { root.block-edited(i, t); }
                 }
             }
         }
-
         // Drawn in the paper's frame, which tilts with the paper. Above the editor, so its buttons
         // get the clicks while shown; while hidden it takes no part in hit testing at all.
         toolbar := Toolbar {
@@ -105,6 +128,4 @@ export component NoteWindow inherits Window {
 
     // The tapes lie over the paper.
     Tapes { width: root.width; height: root.height; }
-
-    init => { input.focus(); }
 }

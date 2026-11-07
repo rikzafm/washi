@@ -1,5 +1,5 @@
 # Endfield Note
-## **Thermite Cutter : POG & Akekuri**
+## **Thermite Cutter : POG & Akekuri with Never Rest and White Night Nova**
 Currently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box
 Line 1 of a long note that keeps going so the text has to scroll: Never Rest, White Night Nova, Thermite Cutter, and a few more words.
 Line 2 of a long note that keeps going so the text has to scroll: Never Rest, White Night Nova, Thermite Cutter, and a few more words.
