@@ -61,6 +61,10 @@ struct Inner {
     import_timer: slint::Timer,
     /// Retries `attach_windows` until every note window exists (startup only).
     attach_timer: slint::Timer,
+    /// Hands idle memory back a moment after the notes settle (see `schedule_trim`).
+    trim_timer: slint::Timer,
+    /// Set by the real app (`watch_window_state`); the test harness never trims.
+    trim_enabled: Cell<bool>,
 }
 
 /// A picture on its way into a note.
@@ -73,6 +77,8 @@ struct Import {
 
 /// How often the worker threads' results are looked for while a picture is being prepared.
 const IMPORT_POLL: Duration = Duration::from_millis(20);
+/// Quiet time after the last window opened before the working set is trimmed once.
+const TRIM_DELAY: Duration = Duration::from_millis(1500);
 
 #[derive(Clone)]
 pub struct App(Rc<Inner>);
@@ -131,7 +137,7 @@ impl App {
             rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
-        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, imports: RefCell::new(Vec::new()), import_timer: slint::Timer::default(), attach_timer: slint::Timer::default() });
+        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, imports: RefCell::new(Vec::new()), import_timer: slint::Timer::default(), attach_timer: slint::Timer::default(), trim_timer: slint::Timer::default(), trim_enabled: Cell::new(false) });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
         let app = App(inner);
@@ -165,6 +171,7 @@ impl App {
         }
         self.0.notes.borrow_mut().push(Rc::new(note));
         self.0.suspend.evaluate();
+        self.schedule_trim();
         Ok(())
     }
 
@@ -237,6 +244,7 @@ impl App {
     /// Real app: have the platform tell us about minimize, restore, focus, activation and
     /// paint requests as they happen (no polling, so a suspended app sleeps until a message).
     pub fn watch_window_state(&self) {
+        self.0.trim_enabled.set(true);
         // Slint creates the native windows only once its event loop runs, a few milliseconds after
         // this call: poll until every note has its handle, then stop (no timer is left behind).
         let weak = Rc::downgrade(&self.0);
@@ -276,8 +284,27 @@ impl App {
         if all {
             crate::trace::mark("windows-attached");
             self.0.suspend.evaluate();
+            self.schedule_trim();
         }
         all
+    }
+
+    /// Opening windows leaves freed heap pages and one-time start-up pages in the working set.
+    /// Shortly after the last window opened, compact the heap and trim the working set once; what
+    /// the app needs while idle is faulted back in (a soft fault), the rest stays out. One-shot:
+    /// no timer is left running.
+    fn schedule_trim(&self) {
+        if !self.0.trim_enabled.get() {
+            return;
+        }
+        let weak = Rc::downgrade(&self.0);
+        self.0.trim_timer.start(slint::TimerMode::SingleShot, TRIM_DELAY, move || {
+            if let Some(inner) = weak.upgrade() {
+                if !inner.suspend.is_suspended() {
+                    inner.env.power.release_memory();
+                }
+            }
+        });
     }
 
     pub fn is_suspended(&self) -> bool {

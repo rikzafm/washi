@@ -41,6 +41,19 @@ struct Picture {
     background: bool,
 }
 
+impl Picture {
+    /// Whether `other` shows the same hidden notes for the grace period. Focus never matters (a
+    /// minimized note stays hidden whoever holds the foreground, and Windows moves the foreground
+    /// to the next window a moment after a minimize), and the background flag only matters when
+    /// some note relies on being covered.
+    fn same_view(&self, other: &Picture) -> bool {
+        let relies_on_cover = self.notes.iter().any(|(_, s)| !s.minimized);
+        self.notes.len() == other.notes.len()
+            && self.notes.iter().zip(&other.notes).all(|((a, x), (b, y))| a == b && x.minimized == y.minimized && x.covered == y.covered)
+            && (!relies_on_cover || self.background == other.background)
+    }
+}
+
 /// True when none of Washi can be seen: every open note is minimized, or Washi is in the
 /// background and every note is minimized or fully covered.
 pub fn should_suspend(notes: &[(NoteId, WindowState)], app_in_background: bool) -> bool {
@@ -116,7 +129,7 @@ impl SuspendController {
                 if !hidden {
                     self.timer.stop();
                     self.phase.set(Phase::Active);
-                } else if self.picture.borrow().as_ref() != Some(&picture) {
+                } else if !self.picture.borrow().as_ref().is_some_and(|p| p.same_view(&picture)) {
                     self.start_grace(picture);
                 }
             }
