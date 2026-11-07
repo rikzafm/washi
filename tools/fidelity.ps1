@@ -22,8 +22,8 @@ if (Test-Path 'C:\Strawberry\perl\bin') { $env:PATH = 'C:\Strawberry\perl\bin;' 
 $sw = [Diagnostics.Stopwatch]::StartNew()
 
 # paper sizes (logical px) of the two mockups and of the large snap used for the invariants
-$hoverPaper = '363x433'   # hover mockup: 362.9 x 432.6
-$idlePaper = '363x384'    # idle mockup: 362.9 x 383.7
+$hoverPaper = '362.9x432.6' # hover mockup: 362.9 x 432.6
+$idlePaper = '362.9x383.7'  # idle mockup: 362.9 x 383.7
 $largePaper = '545x576'   # 1.5 x the default
 $largeCanvas = '1000x1040'
 $baseline = 'docs/design/fidelity-baseline.txt'

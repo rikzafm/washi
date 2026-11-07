@@ -1,4 +1,6 @@
-// Walking-skeleton note: unstyled paper. Real styling arrives with the paper/theme tickets.
+import { PaperTheme } from "paper-theme.slint";
+import { Paper, Tapes } from "paper.slint";
+
 export component NoteWindow inherits Window {
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
     in property <string> window-title: "Washi";
@@ -7,11 +9,13 @@ export component NoteWindow inherits Window {
     title: window-title;
     always-on-top: pinned;
     icon: app-icon;
-    preferred-width: 431px;
-    preferred-height: 451px;
-    min-width: 200px;
-    min-height: 200px;
-    background: #fdfaf0;
+    // The window is the paper plus a fixed transparent margin on every side.
+    no-frame: true;
+    background: transparent;
+    preferred-width: PaperTheme.paper-default-width + 2 * PaperTheme.margin;
+    preferred-height: PaperTheme.paper-default-height + 2 * PaperTheme.margin;
+    min-width: PaperTheme.paper-min-width + 2 * PaperTheme.margin;
+    min-height: PaperTheme.paper-min-height + 2 * PaperTheme.margin;
 
     in-out property <string> text;
     callback edited(string);
@@ -34,6 +38,9 @@ export component NoteWindow inherits Window {
         }
     }
 
+    // Shadow and paper (the look: see paper.slint).
+    Paper { width: root.width; height: root.height; }
+
     FocusScope {
         key-pressed(e) => {
             if (e.modifiers.control && !e.modifiers.shift && !e.modifiers.alt) {
@@ -45,10 +52,10 @@ export component NoteWindow inherits Window {
         }
 
         input := TextInput {
-            x: 30px;
-            y: 30px;
-            width: root.width - 60px;
-            height: root.height - 60px;
+            x: PaperTheme.margin + PaperTheme.text-left-inset;
+            y: PaperTheme.margin + PaperTheme.text-top-inset;
+            width: root.width - 2 * (PaperTheme.margin + PaperTheme.text-left-inset);
+            height: root.height - 2 * PaperTheme.margin - PaperTheme.text-top-inset - PaperTheme.toolbar-band;
             wrap: word-wrap;
             single-line: false;
             font-size: 14px;
@@ -57,6 +64,9 @@ export component NoteWindow inherits Window {
             edited => { root.edited(self.text); }
         }
     }
+
+    // The tapes lie over the paper.
+    Tapes { width: root.width; height: root.height; }
 
     init => { input.focus(); }
 }

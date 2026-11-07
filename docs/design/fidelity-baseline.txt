@@ -5,28 +5,19 @@
 # is a regression. A listed group that passes is an error too: delete its line, so the gain cannot
 # be lost again. Each Stage D ticket (paper, tapes, text, toolbar) deletes the lines it fixes.
 #
-# State now: the note is still the walking-skeleton text box (no paper, tapes, tilt or toolbar).
+# State now: paper, shadow, tapes and the transparent surround are done (ticket 07). Text and
+# toolbar are still the walking-skeleton text box.
 
-hover:paper
-hover:shadow
-hover:tape_pink
-hover:tape_blue
 hover:title
 hover:heading
 hover:body
 hover:toolbar
 hover:image
 
-idle:paper
-idle:shadow
-idle:tape_pink
+# The idle mockup's blue tape reaches 4 px (mockup px) below the 40 px window margin; the pink tape
+# of both mockups needs the paper moved down by 1.8 px (PaperTheme.paper-shift-y), which uses up
+# the bottom margin. Both fit with a 42 px margin (spec layout.window_margin): decision needed.
 idle:tape_blue
-idle:no_toolbar
 idle:image
 
-invariants:tilt
-invariants:tapes
 invariants:insets
-invariants:fonts
-invariants:toolbar
-invariants:text area

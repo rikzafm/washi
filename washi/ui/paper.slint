@@ -1,0 +1,83 @@
+// The note's physical look: a paper drawn live as a tilted rectangle (so the tilt is exactly
+// 1.5 deg at any size), the soft shadow drawn from the same shape, and the two washi tapes.
+// Both components fill the window; the paper sits in the window minus PaperTheme.margin.
+import { PaperTheme } from "paper-theme.slint";
+
+// Points of the paper, which is turned by the tilt around its own center.
+global PaperGeometry {
+    property <float> cs: PaperTheme.paper-tilt.cos();
+    property <float> sn: PaperTheme.paper-tilt.sin();
+
+    // (lx, ly) is measured from the paper's center (cx, cy) along the paper's own axes.
+    pure public function x(cx: length, cy: length, lx: length, ly: length) -> length {
+        return cx + lx * cs - ly * sn;
+    }
+    pure public function y(cx: length, cy: length, lx: length, ly: length) -> length {
+        return cy + lx * sn + ly * cs;
+    }
+    pure function pt(cx: length, cy: length, lx: length, ly: length) -> string {
+        return (x(cx, cy, lx, ly) / 1px) + " " + (y(cx, cy, lx, ly) / 1px);
+    }
+    // Outline of the tilted rectangle of half size (hw, hh) around (cx, cy).
+    pure public function quad(cx: length, cy: length, hw: length, hh: length) -> string {
+        return "M " + pt(cx, cy, -hw, -hh) + " L " + pt(cx, cy, hw, -hh) + " L " + pt(cx, cy, hw, hh)
+            + " L " + pt(cx, cy, -hw, hh) + " Z";
+    }
+}
+
+export component Paper {
+    property <length> paper-w: root.width - 2 * PaperTheme.margin;
+    property <length> paper-h: root.height - 2 * PaperTheme.margin;
+
+    for growth[i] in PaperTheme.shadow-growths: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: PaperGeometry.quad(
+            root.width / 2, root.height / 2 + PaperTheme.paper-shift-y + PaperTheme.shadow-offset-y,
+            root.paper-w / 2 + growth, root.paper-h / 2 + growth);
+        fill: PaperTheme.shadow-colors[i];
+    }
+
+    Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: PaperGeometry.quad(root.width / 2, root.height / 2 + PaperTheme.paper-shift-y, root.paper-w / 2, root.paper-h / 2);
+        fill: PaperTheme.paper-color;
+    }
+}
+
+// One tape: a pre-rotated image of fixed size, centered on a point given in the paper's frame
+// relative to the paper's center.
+component Tape {
+    in property <image> source;
+    in property <length> center-x;
+    in property <length> center-y;
+    width: img.source.width / PaperTheme.tape-image-scale * 1px;
+    height: img.source.height / PaperTheme.tape-image-scale * 1px;
+    x: root.center-x - root.width / 2;
+    y: root.center-y - root.height / 2;
+    img := Image { width: parent.width; height: parent.height; source: root.source; }
+}
+
+// The two tapes, pinned at fixed offsets from the paper's top-left and bottom-right corners.
+export component Tapes {
+    property <length> cx: root.width / 2;
+    property <length> cy: root.height / 2 + PaperTheme.paper-shift-y;
+    property <length> hw: (root.width - 2 * PaperTheme.margin) / 2;
+    property <length> hh: (root.height - 2 * PaperTheme.margin) / 2;
+
+    Tape {
+        source: @image-url("assets/tape-pink.png");
+        center-x: PaperGeometry.x(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
+        center-y: PaperGeometry.y(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
+    }
+    Tape {
+        source: @image-url("assets/tape-blue.png");
+        center-x: PaperGeometry.x(root.cx, root.cy, root.hw + PaperTheme.tape-blue-offset-u, root.hh + PaperTheme.tape-blue-offset-v);
+        center-y: PaperGeometry.y(root.cx, root.cy, root.hw + PaperTheme.tape-blue-offset-u, root.hh + PaperTheme.tape-blue-offset-v);
+    }
+}
