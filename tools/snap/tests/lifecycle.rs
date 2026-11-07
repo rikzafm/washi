@@ -30,7 +30,7 @@ fn right_click_anywhere_opens_the_menu() {
     }
     assert_eq!(h.menu.shown.borrow().len(), 3);
     let items = h.last_menu();
-    assert_eq!(labels(&items), ["New note", "Open note", "Close", "Delete"]);
+    assert_eq!(labels(&items), ["New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows"]);
     assert!(!items[1].enabled, "no closed notes yet, so nothing to open");
 }
 

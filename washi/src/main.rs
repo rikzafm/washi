@@ -7,25 +7,34 @@ use washi::{App, Env};
 
 fn main() {
     let dialogs = Rc::new(Win32Dialogs);
-    let Some(appdata) = std::env::var_os("APPDATA") else {
-        dialogs.error("Washi could not find your AppData folder.");
-        return;
+    // WASHI_DATA_DIR points the app at a throwaway profile (tools/memprobe.ps1, tools/capture.ps1).
+    let data_dir = match (std::env::var_os("WASHI_DATA_DIR"), std::env::var_os("APPDATA")) {
+        (Some(dir), _) => std::path::PathBuf::from(dir),
+        (None, Some(appdata)) => std::path::PathBuf::from(appdata).join("Washi"),
+        (None, None) => {
+            dialogs.error("Washi could not find your AppData folder.");
+            return;
+        }
     };
     let env = Env {
-        data_dir: std::path::PathBuf::from(appdata).join("Washi"),
+        data_dir,
         protector: Rc::new(DpapiProtector),
         clock: Rc::new(SystemClock::new()),
         signals: Rc::new(Win32Signals::default()),
         power: Rc::new(Win32Power),
         menu: Rc::new(Win32ContextMenu),
+        startup: Rc::new(Win32Startup),
+        instance: Rc::new(Win32Instance),
         dialogs: dialogs.clone(),
     };
-    match App::start(env) {
-        Ok(app) => {
+    set_app_identity();
+    match App::launch(env) {
+        Ok(Some(app)) => {
             app.watch_window_state();
             let _ = slint::run_event_loop_until_quit();
             app.quit(); // final flush
         }
+        Ok(None) => {} // handed off to the running Washi
         Err(e) => dialogs.error(&e.to_string()),
     }
 }

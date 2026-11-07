@@ -1,6 +1,6 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
-use crate::note_window::{Note, NoteEvent};
+use crate::note_window::{note_title, Note, NoteEvent};
 use crate::platform::*;
 use crate::suspend::{SuspendController, SuspendHost};
 use crate::storage::{keystore, Db, DbError, Geometry, KeyStoreError, NoteRow};
@@ -20,6 +20,8 @@ pub struct Env {
     pub signals: Rc<dyn WindowSignals>,
     pub power: Rc<dyn ProcessPower>,
     pub menu: Rc<dyn ContextMenu>,
+    pub startup: Rc<dyn StartupRegistration>,
+    pub instance: Rc<dyn SingleInstance>,
     pub dialogs: Rc<dyn Dialogs>,
 }
 
@@ -58,6 +60,8 @@ const MENU_NEW: u32 = 1;
 const MENU_OPEN: u32 = 2;
 const MENU_CLOSE: u32 = 3;
 const MENU_DELETE: u32 = 4;
+const MENU_TOP: u32 = 5;
+const MENU_STARTUP: u32 = 6;
 /// Closed notes in the "Open note" submenu get `MENU_OPEN_BASE + position`.
 const MENU_OPEN_BASE: u32 = 1000;
 
@@ -65,6 +69,32 @@ const MENU_OPEN_BASE: u32 = 1000;
 const NEW_NOTE_OFFSET: i32 = 30;
 
 impl App {
+    /// The real entry point: make sure this is the only Washi, then start. `Ok(None)` means
+    /// Washi was already running, has been asked to open a new note, and this process should exit.
+    pub fn launch(env: Env) -> Result<Option<App>, StartError> {
+        if env.instance.acquire() == Launch::HandedOff {
+            return Ok(None);
+        }
+        let instance = env.instance.clone();
+        let app = App::start(env)?;
+        let weak = Rc::downgrade(&app.0);
+        instance.listen(Rc::new(move || {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).new_note_on_request();
+            }
+        }));
+        Ok(Some(app))
+    }
+
+    /// A later launch asked for a note: open an empty one next to the newest open note.
+    fn new_note_on_request(&self) {
+        let last = self.0.notes.borrow().last().map(|n| n.id());
+        match last {
+            Some(id) => self.new_note_from(id),
+            None => {} // Washi is quitting; nothing to attach to.
+        }
+    }
+
     pub fn start(env: Env) -> Result<App, StartError> {
         std::fs::create_dir_all(&env.data_dir).map_err(StartError::Io)?;
         let now = env.clock.unix_millis();
@@ -76,7 +106,7 @@ impl App {
         let mut rows = db.open_notes().map_err(StartError::Db)?;
         if rows.is_empty() {
             let id = db.create_note(now).map_err(StartError::Db)?;
-            rows.push(NoteRow { id, content: String::new(), geometry: None });
+            rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
         let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend });
@@ -98,7 +128,7 @@ impl App {
                 App(inner).handle(id, ev);
             }
         });
-        let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, on_event)
+        let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, row.always_on_top, on_event)
             .map_err(StartError::Ui)?;
         if let Some(hwnd) = note.hwnd() {
             self.0.env.signals.attach(row.id, hwnd);
@@ -221,7 +251,7 @@ impl App {
         if let Some(g) = geometry {
             let _ = self.0.db.save_geometry(id, g);
         }
-        if let Err(e) = self.open_row(&NoteRow { id, content: String::new(), geometry }) {
+        if let Err(e) = self.open_row(&NoteRow { id, content: String::new(), geometry, always_on_top: false }) {
             self.0.env.dialogs.error(&e.to_string());
         }
     }
@@ -239,6 +269,14 @@ impl App {
         }
     }
 
+    /// Keep a note's window above the others (or not), and remember it.
+    pub fn set_always_on_top(&self, id: NoteId, on: bool) {
+        self.with_note(id, |n| n.set_always_on_top(on));
+        if let Err(e) = self.0.db.set_always_on_top(id, on) {
+            eprintln!("washi: could not save always-on-top for note {id}: {e}");
+        }
+    }
+
     fn show_menu(&self, id: NoteId, at: (i32, i32)) {
         let closed = self.0.db.closed_notes().unwrap_or_default();
         let item = |id, label: &str, enabled, children| MenuItem {
@@ -248,6 +286,8 @@ impl App {
             enabled,
             children,
         };
+        let toggle = |id, label: &str, checked| MenuItem { checked, ..item(id, label, true, vec![]) };
+        let pinned = self.with_note(id, |n| n.always_on_top()).unwrap_or(false);
         let open_children: Vec<MenuItem> = closed
             .iter()
             .enumerate()
@@ -258,11 +298,18 @@ impl App {
             item(MENU_OPEN, "Open note", !open_children.is_empty(), open_children),
             item(MENU_CLOSE, "Close", true, vec![]),
             item(MENU_DELETE, "Delete", true, vec![]),
+            toggle(MENU_TOP, "Always on top", pinned),
+            toggle(MENU_STARTUP, "Start with Windows", self.0.env.startup.is_enabled()),
         ];
         match self.0.env.menu.show(&items, at) {
             Some(MENU_NEW) => self.new_note_from(id),
             Some(MENU_CLOSE) => self.close_note(id),
             Some(MENU_DELETE) => self.delete_note(id),
+            Some(MENU_TOP) => self.set_always_on_top(id, !pinned),
+            Some(MENU_STARTUP) => {
+                let startup = &self.0.env.startup;
+                startup.set_enabled(!startup.is_enabled());
+            }
             Some(c) if c >= MENU_OPEN_BASE => {
                 if let Some(note) = closed.get((c - MENU_OPEN_BASE) as usize) {
                     self.reopen_note(note.id);
@@ -338,16 +385,5 @@ impl SuspendHost for Inner {
 
 /// Menu title of a note: its first line, cut to about 40 characters.
 fn title_of(content: &str) -> String {
-    const MAX: usize = 40;
-    let line = content
-        .split(['\n', '\r', '\u{2028}', '\u{2029}'])
-        .map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-    if line.is_empty() {
-        return "(empty note)".into();
-    }
-    if line.chars().count() <= MAX {
-        return line.into();
-    }
-    let cut: String = line.chars().take(MAX).collect();
-    format!("{}…", cut.trim_end())
+    note_title(content).unwrap_or_else(|| "(empty note)".into())
 }
