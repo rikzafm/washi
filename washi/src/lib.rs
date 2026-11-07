@@ -4,6 +4,7 @@
 pub mod app;
 pub mod document;
 pub mod icon;
+pub mod images;
 pub mod note_window;
 pub mod occlusion;
 pub mod placement;
