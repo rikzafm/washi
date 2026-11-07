@@ -3,17 +3,19 @@
 
 use std::path::PathBuf;
 use std::time::Duration;
+pub use zeroize::Zeroizing;
 
 /// Stable id of a note (the `notes.id` row).
 pub type NoteId = i64;
 
 /// Wraps and unwraps the database key with a secret tied to the OS user (DPAPI on Windows).
 pub trait KeyProtector {
-    /// Produce a fresh random 256-bit key.
-    fn generate_key(&self) -> [u8; 32];
+    /// Produce a fresh random 256-bit key, or fail if the OS random generator does.
+    fn generate_key(&self) -> Result<Zeroizing<[u8; 32]>, ProtectError>;
     fn protect(&self, raw: &[u8]) -> Result<Vec<u8>, ProtectError>;
-    /// Must fail (never return garbage) if `wrapped` was altered.
-    fn unprotect(&self, wrapped: &[u8]) -> Result<Vec<u8>, ProtectError>;
+    /// Must fail (never return garbage) if `wrapped` was altered. The key material is wiped when
+    /// the result is dropped.
+    fn unprotect(&self, wrapped: &[u8]) -> Result<Zeroizing<Vec<u8>>, ProtectError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +65,10 @@ pub trait WindowSignals {
     /// procedure) so a suspended app wakes without polling. Fakes ignore this: tests call the
     /// app directly.
     fn set_notifier(&self, _notify: std::rc::Rc<dyn Fn(SignalEvent)>) {}
+    /// Windows is ending the session (shutdown, restart, sign-out). `handler` runs on the UI
+    /// thread, synchronously inside the platform's message, and must finish its saving before it
+    /// returns: the process may be gone right after. Fakes keep it for tests to call.
+    fn set_session_end_handler(&self, _handler: std::rc::Rc<dyn Fn()>) {}
 }
 
 /// Efficiency mode and memory release (suspension, a later ticket).
@@ -189,6 +195,9 @@ pub trait WindowControl {
     fn begin_resize(&self, note: NoteId, hwnd: Option<isize>, edge: ResizeEdge);
     /// Work areas (screens minus taskbars) of all connected monitors, primary first.
     fn work_areas(&self) -> Vec<ScreenRect>;
+    /// The given notes (id and native handle, if any) ordered by their windows' stacking on the
+    /// desktop, bottom first. Notes the platform cannot place keep their given order, below the rest.
+    fn stacking_order(&self, notes: &[(NoteId, Option<isize>)]) -> Vec<NoteId>;
 }
 
 /// The picture on the clipboard, if any (Ctrl+V pastes it into a note).

@@ -43,6 +43,7 @@ Tip: use a throwaway profile so your own notes stay untouched:
 
 - [ ] Japanese (Microsoft IME): composition shows inline in the note, candidates window opens next to the caret, commit inserts the text.
 - [ ] Chinese (Pinyin): same.
+- [ ] Note shortcuts (Ctrl+B/I/U/N/W/D/Z/Y, Ctrl+Shift+X/L) work with a non-Latin layout active (Japanese IME off/on, Russian, Greek). Known limitation: Slint key events carry only the produced text, no physical key. Washi accepts both the letter and the control code Windows sends for Ctrl+letter (for example U+0002 for Ctrl+B), which covers layouts that still produce control codes; a layout that reports its own letter (for example "и" for Ctrl+B) cannot trigger the shortcut. The toolbar buttons and the right-click menu always work.
 - [ ] Emoji picker (Win+.) and emoji fallback rendering. Pasting rich text from a browser gives plain text.
 - [ ] Clipboard: copy and paste in the text, paste a screenshot (inserts an image paragraph), "Export as Markdown..." writes the .md and PNGs and the .md opens correctly in a Markdown viewer.
 

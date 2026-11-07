@@ -8,6 +8,8 @@ use zeroize::Zeroizing;
 pub enum KeyStoreError {
     /// `key.bin` could not be unwrapped: altered, truncated, or from another Windows user/machine.
     Unreadable(String),
+    /// The operating system could not produce random bytes for a new key.
+    Generate(String),
     Io(std::io::Error),
 }
 
@@ -19,6 +21,7 @@ impl std::fmt::Display for KeyStoreError {
                 "Washi could not read its encryption key (key.bin). It may be damaged, or it \
                  belongs to a different Windows account or computer. ({why})"
             ),
+            KeyStoreError::Generate(why) => write!(f, "Washi could not create an encryption key: {why}"),
             KeyStoreError::Io(e) => write!(f, "Washi could not access its key file: {e}"),
         }
     }
@@ -36,9 +39,7 @@ impl From<std::io::Error> for KeyStoreError {
 pub fn load_or_create(key_path: &Path, protector: &dyn KeyProtector) -> Result<Zeroizing<[u8; 32]>, KeyStoreError> {
     match std::fs::read(key_path) {
         Ok(wrapped) => {
-            let raw = Zeroizing::new(
-                protector.unprotect(&wrapped).map_err(|e| KeyStoreError::Unreadable(e.0))?,
-            );
+            let raw = protector.unprotect(&wrapped).map_err(|e| KeyStoreError::Unreadable(e.0))?;
             let key: [u8; 32] = raw
                 .as_slice()
                 .try_into()
@@ -46,7 +47,7 @@ pub fn load_or_create(key_path: &Path, protector: &dyn KeyProtector) -> Result<Z
             Ok(Zeroizing::new(key))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let key = Zeroizing::new(protector.generate_key());
+            let key = protector.generate_key().map_err(|e| KeyStoreError::Generate(e.0))?;
             let wrapped = protector.protect(key.as_slice()).map_err(|e| KeyStoreError::Unreadable(e.0))?;
             let tmp = key_path.with_extension("bin.tmp");
             std::fs::write(&tmp, wrapped)?;

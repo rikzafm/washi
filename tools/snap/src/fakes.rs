@@ -10,21 +10,30 @@ use washi::platform::*;
 /// Reversible fake of DPAPI: XOR plus a checksum byte, so any altered byte fails to unwrap.
 pub struct FakeProtector {
     seed: u8,
+    rng_fails: bool,
 }
 
 impl FakeProtector {
     pub fn new(seed: u8) -> Self {
-        FakeProtector { seed }
+        FakeProtector { seed, rng_fails: false }
+    }
+
+    /// A protector whose random generator is broken: `generate_key` fails.
+    pub fn with_broken_rng() -> Self {
+        FakeProtector { seed: 0, rng_fails: true }
     }
 }
 
 impl KeyProtector for FakeProtector {
-    fn generate_key(&self) -> [u8; 32] {
-        let mut k = [0u8; 32];
+    fn generate_key(&self) -> Result<Zeroizing<[u8; 32]>, ProtectError> {
+        if self.rng_fails {
+            return Err(ProtectError("the random generator failed".into()));
+        }
+        let mut k = Zeroizing::new([0u8; 32]);
         for (i, b) in k.iter_mut().enumerate() {
             *b = self.seed.wrapping_mul(31).wrapping_add((i as u8).wrapping_mul(7)).wrapping_add(1);
         }
-        k
+        Ok(k)
     }
 
     fn protect(&self, raw: &[u8]) -> Result<Vec<u8>, ProtectError> {
@@ -34,13 +43,13 @@ impl KeyProtector for FakeProtector {
         Ok(out)
     }
 
-    fn unprotect(&self, wrapped: &[u8]) -> Result<Vec<u8>, ProtectError> {
+    fn unprotect(&self, wrapped: &[u8]) -> Result<Zeroizing<Vec<u8>>, ProtectError> {
         let (&sum, body) = wrapped.split_last().ok_or_else(|| ProtectError("empty blob".into()))?;
         let raw: Vec<u8> = body.iter().map(|b| b ^ 0xA5).collect();
         if raw.iter().fold(0u8, |a, b| a.wrapping_add(*b)) != sum {
             return Err(ProtectError("blob was altered".into()));
         }
-        Ok(raw)
+        Ok(Zeroizing::new(raw))
     }
 }
 
@@ -69,9 +78,23 @@ impl Clock for FakeClock {
 pub struct FakeSignals {
     pub states: RefCell<HashMap<NoteId, WindowState>>,
     pub background: Cell<bool>,
+    session_end: RefCell<Option<Rc<dyn Fn()>>>,
+}
+
+impl FakeSignals {
+    /// Windows is ending the session (WM_QUERYENDSESSION / WM_ENDSESSION).
+    pub fn end_session(&self) {
+        let handler = self.session_end.borrow().clone();
+        if let Some(handler) = handler {
+            handler();
+        }
+    }
 }
 
 impl WindowSignals for FakeSignals {
+    fn set_session_end_handler(&self, handler: Rc<dyn Fn()>) {
+        *self.session_end.borrow_mut() = Some(handler);
+    }
     fn window_state(&self, note: NoteId) -> WindowState {
         self.states.borrow().get(&note).copied().unwrap_or_default()
     }
@@ -178,6 +201,8 @@ pub enum WindowCommand {
 pub struct FakeWindowControl {
     pub log: RefCell<Vec<WindowCommand>>,
     pub areas: RefCell<Vec<ScreenRect>>,
+    /// Bottom-to-top order the fake desktop reports; empty means "as asked".
+    pub stacking: RefCell<Vec<NoteId>>,
 }
 
 impl Default for FakeWindowControl {
@@ -186,6 +211,7 @@ impl Default for FakeWindowControl {
             log: RefCell::new(Vec::new()),
             // one 1920 x 1080 monitor with a 40 px taskbar
             areas: RefCell::new(vec![ScreenRect::new(0, 0, 1920, 1040)]),
+            stacking: RefCell::new(Vec::new()),
         }
     }
 }
@@ -199,6 +225,12 @@ impl WindowControl for FakeWindowControl {
     }
     fn work_areas(&self) -> Vec<ScreenRect> {
         self.areas.borrow().clone()
+    }
+    fn stacking_order(&self, notes: &[(NoteId, Option<isize>)]) -> Vec<NoteId> {
+        let set = self.stacking.borrow();
+        let mut out: Vec<NoteId> = notes.iter().map(|(id, _)| *id).filter(|id| !set.contains(id)).collect();
+        out.extend(set.iter().copied().filter(|id| notes.iter().any(|(n, _)| n == id)));
+        out
     }
 }
 

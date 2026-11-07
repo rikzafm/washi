@@ -170,9 +170,9 @@ impl Db {
         Ok(())
     }
 
-    /// Notes with `is_open = 1`, oldest first.
+    /// Notes with `is_open = 1`, bottom of the stack first (then oldest first).
     pub fn open_notes(&self) -> Result<Vec<NoteRow>, DbError> {
-        let mut stmt = self.conn.prepare(&format!("{} WHERE is_open = 1 ORDER BY id", Self::ROW))?;
+        let mut stmt = self.conn.prepare(&format!("{} WHERE is_open = 1 ORDER BY z_order, id", Self::ROW))?;
         let rows = stmt.query_map([], Self::row)?.collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
@@ -191,6 +191,15 @@ impl Db {
             .query_map([], |r| Ok(ClosedNote { id: r.get(0)?, preview: r.get(1)? }))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    /// Remember the stacking of the open notes: `bottom_to_top[0]` is the lowest window.
+    pub fn save_stacking(&self, bottom_to_top: &[NoteId]) -> Result<(), DbError> {
+        let mut stmt = self.conn.prepare("UPDATE notes SET z_order = ?1 WHERE id = ?2")?;
+        for (rank, id) in bottom_to_top.iter().enumerate() {
+            stmt.execute(rusqlite::params![rank as i64, id])?;
+        }
+        Ok(())
     }
 
     pub fn save_geometry(&self, id: NoteId, g: Geometry) -> Result<(), DbError> {
