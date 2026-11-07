@@ -6,5 +6,6 @@
 pub mod fakes;
 mod harness;
 pub mod platform;
+pub mod shot;
 
 pub use harness::Harness;

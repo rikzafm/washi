@@ -5,6 +5,16 @@
 //!
 //! --font-match scores every .ttf in the font dir (default `fonts/`) against the hover mockup for each
 //! role and prints the report as JSON; exit code 1 when a role's best IoU is below 0.85.
+//! `uidiff --compare <mockup.png> <snap.png> --mockup <name> --out <dir> [--no-register] [--scale 1.5] [--baseline <file>]`
+//! `uidiff --invariants <default.png> <large.png> --out <dir> [--scale 1.5] [--baseline <file>]`
+//! `uidiff --index <dir>`
+//!
+//! --compare registers the snap on the mockup's paper centre, prints the PASS/FAIL delta table and
+//! hints, and writes heatmap, overlay, side-by-side, flicker GIF, 4x crops of failures and a report.
+//! --invariants checks what must not change between a default-size snap (laid out like the hover
+//! mockup) and a larger one. --baseline names a file of known failures (`<report>:<group>`): those
+//! do not fail the run, anything else does, and so does a listed group that passes now.
+//! --index writes index.html next to the report folders under <dir>.
 //! --measure prints the measurements of the spec regions that apply to the mockup as JSON.
 //! The mockup defaults to the one whose file name matches the PNG, else every region is measured.
 //! --update-expected measures every mockup and stores the results in the spec's "expected" section.
@@ -13,7 +23,7 @@ use std::path::{Path, PathBuf};
 use uidiff::{measure_mockup, measure_regions, Image, Spec};
 
 fn usage() -> ! {
-    eprintln!("usage: uidiff --measure <png> [--spec <spec.json>] [--mockup <name>]\n       uidiff --update-expected [--spec <spec.json>]\n       uidiff --font-match [--fonts <dir>] [--spec <spec.json>]");
+    eprintln!("usage: uidiff --compare <mockup.png> <snap.png> --mockup <name> [--out <dir>] [--no-register] [--scale <n>] [--baseline <file>]\n       uidiff --invariants <default.png> <large.png> [--out <dir>] [--scale <n>] [--baseline <file>]\n       uidiff --index <dir>\n       uidiff --measure <png> [--spec <spec.json>] [--mockup <name>]\n       uidiff --update-expected [--spec <spec.json>]\n       uidiff --font-match [--fonts <dir>] [--spec <spec.json>]");
     std::process::exit(2)
 }
 
@@ -70,6 +80,9 @@ fn run() -> Result<(), String> {
     let mut spec_path = PathBuf::from("docs/design/spec.json");
     let (mut measure, mut mockup, mut update) = (None, None, false);
     let (mut font_match, mut fonts_dir) = (false, PathBuf::from("fonts"));
+    let (mut compare_args, mut invariant_args, mut index_dir): (Option<(PathBuf, PathBuf)>, Option<(PathBuf, PathBuf)>, Option<PathBuf>) = (None, None, None);
+    let mut only: Vec<String> = vec![];
+    let (mut out_dir, mut register, mut scale, mut baseline) = (None::<PathBuf>, true, 1.5f64, None::<PathBuf>);
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -85,6 +98,36 @@ fn run() -> Result<(), String> {
                 i += 1;
                 mockup = Some(args.get(i).ok_or("--mockup needs a name")?.clone());
             }
+            "--compare" | "--invariants" => {
+                let pair = (PathBuf::from(args.get(i + 1).ok_or("needs two PNG paths")?), PathBuf::from(args.get(i + 2).ok_or("needs two PNG paths")?));
+                if args[i] == "--compare" {
+                    compare_args = Some(pair);
+                } else {
+                    invariant_args = Some(pair);
+                }
+                i += 2;
+            }
+            "--index" => {
+                i += 1;
+                index_dir = Some(PathBuf::from(args.get(i).ok_or("--index needs a directory")?));
+            }
+            "--out" => {
+                i += 1;
+                out_dir = Some(PathBuf::from(args.get(i).ok_or("--out needs a directory")?));
+            }
+            "--no-register" => register = false,
+            "--only" => {
+                i += 1;
+                only = args.get(i).ok_or("--only needs a comma-separated list of groups")?.split(',').map(|s| s.trim().to_string()).collect();
+            }
+            "--scale" => {
+                i += 1;
+                scale = args.get(i).ok_or("--scale needs a number")?.parse().map_err(|_| "--scale needs a number")?;
+            }
+            "--baseline" => {
+                i += 1;
+                baseline = Some(PathBuf::from(args.get(i).ok_or("--baseline needs a file")?));
+            }
             "--update-expected" => update = true,
             "--font-match" => font_match = true,
             "--fonts" => {
@@ -95,8 +138,67 @@ fn run() -> Result<(), String> {
         }
         i += 1;
     }
+    if let Some(dir) = index_dir {
+        let path = uidiff::index::write_index(&dir)?;
+        println!("{}", path.display());
+        return Ok(());
+    }
     let (spec, mut raw) = load_spec(&spec_path)?;
     let dir = spec_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+
+    let known = match &baseline {
+        Some(p) => uidiff::report::parse_baseline(&std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?),
+        None => vec![],
+    };
+
+    if let Some((mock_png, snap_png)) = compare_args {
+        let stem = mock_png.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        let name = mockup.clone().or_else(|| spec.mockups.iter().find(|(_, m)| m.file.ends_with(&stem)).map(|(n, _)| n.clone())).ok_or("--compare needs --mockup <name>")?;
+        let (mock, snap) = (Image::load_png(&mock_png)?, Image::load_png(&snap_png)?);
+        let opts = uidiff::compare::Options { register, scale };
+        let mut c = uidiff::compare::compare(&spec, &name, &mock, &snap, &opts)?;
+        if !only.is_empty() {
+            c.rows.retain(|r| only.contains(&r.group));
+        }
+        let verdict = uidiff::report::judge(&name, &c.rows, &known);
+        println!("{}", uidiff::report::table_text(&c.rows, &verdict));
+        let hints = uidiff::report::hints_text(&c.rows);
+        if !hints.is_empty() {
+            println!("hints:\n{hints}");
+        }
+        println!("registration shift: ({}, {}) px; {} px ({:.2}%) differ by more than delta-E 5", c.shift.0, c.shift.1, c.diff_pixels, c.diff_pct);
+        if let Some(dir) = &out_dir {
+            let images = uidiff::report::write_images(dir, &c)?;
+            let refs: Vec<&str> = images.iter().map(String::as_str).collect();
+            let extra = format!("Mockup `{}` vs snapshot `{}`; registration shift ({}, {}) px.\n\n", mock_png.display(), snap_png.display(), c.shift.0, c.shift.1);
+            uidiff::report::write_report(dir, &name, &format!("Compare: {name}"), &c.rows, &verdict, &extra, &refs)?;
+            println!("reports in {}", dir.display());
+        }
+        println!("{}", uidiff::report::summary_line(&name, &c.rows, &verdict));
+        return if verdict.ok() { Ok(()) } else { Err("comparison failed".into()) };
+    }
+
+    if let Some((default_png, large_png)) = invariant_args {
+        let hover = spec.mockups.get("hover").ok_or("spec has no hover mockup")?;
+        let mock = Image::load_png(&dir.join(&hover.file))?;
+        let (default, large) = (Image::load_png(&default_png)?, Image::load_png(&large_png)?);
+        let mut rows = uidiff::invariants::check(&spec, &mock, &default, &large, &uidiff::invariants::Options { scale })?;
+        if !only.is_empty() {
+            rows.retain(|r| only.contains(&r.group));
+        }
+        let verdict = uidiff::report::judge("invariants", &rows, &known);
+        println!("{}", uidiff::report::table_text(&rows, &verdict));
+        let hints = uidiff::report::hints_text(&rows);
+        if !hints.is_empty() {
+            println!("hints:\n{hints}");
+        }
+        if let Some(out) = &out_dir {
+            let extra = format!("Default-size snap `{}` vs larger snap `{}`.\n\n", default_png.display(), large_png.display());
+            uidiff::report::write_report(out, "invariants", "Size invariants", &rows, &verdict, &extra, &[])?;
+        }
+        println!("{}", uidiff::report::summary_line("invariants", &rows, &verdict));
+        return if verdict.ok() { Ok(()) } else { Err("invariants failed".into()) };
+    }
 
     if font_match {
         let report = uidiff::fontmatch::run(&spec, &raw, &dir, &fonts_dir)?;

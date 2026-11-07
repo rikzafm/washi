@@ -115,6 +115,12 @@ impl Harness {
         });
     }
 
+    /// Put text into the note without typing it (fixtures).
+    pub fn set_note_text(&mut self, note: usize, text: &str) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| n.ui().set_text(text.into()));
+    }
+
     pub fn press_enter(&mut self, note: usize) {
         let id = self.id(note);
         self.app().with_note(id, |n| {

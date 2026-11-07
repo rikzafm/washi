@@ -7,6 +7,7 @@ description = "Measure and compare tool for the Washi reference mockups"
 
 [dependencies]
 png = "0.17"
+gif = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software", "unstable-fontique-011"] }
@@ -17,3 +18,6 @@ opt-level = 2
 
 [dev-dependencies]
 sha2 = "0.10"
+
+# standalone: keeps its own lockfile and target dir, whatever directory the checkout sits in
+[workspace]

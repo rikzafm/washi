@@ -41,6 +41,62 @@ impl Image {
         top * (1.0 - ty) + bot * ty
     }
 
+    /// Copy of the rect [x0,y0,x1,y1) clipped to the image (at least 1x1).
+    pub fn crop(&self, r: [i64; 4]) -> Image {
+        let x0 = r[0].clamp(0, self.w as i64 - 1) as usize;
+        let y0 = r[1].clamp(0, self.h as i64 - 1) as usize;
+        let x1 = (r[2].clamp(0, self.w as i64) as usize).max(x0 + 1);
+        let y1 = (r[3].clamp(0, self.h as i64) as usize).max(y0 + 1);
+        let mut out = Image::new(x1 - x0, y1 - y0, [0, 0, 0]);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                out.set(x - x0, y - y0, self.get(x, y));
+            }
+        }
+        out
+    }
+
+    /// Nearest-neighbour enlargement.
+    pub fn zoom(&self, k: usize) -> Image {
+        let mut out = Image::new(self.w * k, self.h * k, [0, 0, 0]);
+        for y in 0..out.h {
+            for x in 0..out.w {
+                out.set(x, y, self.get(x / k, y / k));
+            }
+        }
+        out
+    }
+
+    /// `self` and `other` next to each other with a gap.
+    pub fn beside(&self, other: &Image, gap: usize, gap_color: Rgb) -> Image {
+        let mut out = Image::new(self.w + gap + other.w, self.h.max(other.h), gap_color);
+        for y in 0..self.h {
+            for x in 0..self.w {
+                out.set(x, y, self.get(x, y));
+            }
+        }
+        for y in 0..other.h {
+            for x in 0..other.w {
+                out.set(self.w + gap + x, y, other.get(x, y));
+            }
+        }
+        out
+    }
+
+    /// Row-major RGB bytes.
+    pub fn rgb_bytes(&self) -> Vec<u8> {
+        self.px.iter().flat_map(|c| c.iter().copied()).collect()
+    }
+
+    pub fn save_png(&self, path: &std::path::Path) -> Result<(), String> {
+        let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), self.w as u32, self.h as u32);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().map_err(|e| e.to_string())?;
+        w.write_image_data(&self.rgb_bytes()).map_err(|e| e.to_string())
+    }
+
     pub fn load_png(path: &std::path::Path) -> Result<Image, String> {
         let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut decoder = png::Decoder::new(file);
