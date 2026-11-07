@@ -85,14 +85,18 @@ impl WindowSignals for FakeSignals {
 pub struct FakePower {
     pub efficiency: Cell<bool>,
     pub releases: Cell<u32>,
+    /// Every call in order: `release_memory`, `efficiency_on`, `efficiency_off`.
+    pub log: RefCell<Vec<String>>,
 }
 
 impl ProcessPower for FakePower {
     fn set_efficiency_mode(&self, on: bool) {
         self.efficiency.set(on);
+        self.log.borrow_mut().push(if on { "efficiency_on" } else { "efficiency_off" }.into());
     }
     fn release_memory(&self) {
         self.releases.set(self.releases.get() + 1);
+        self.log.borrow_mut().push("release_memory".into());
     }
 }
 

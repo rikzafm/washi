@@ -25,6 +25,7 @@ fn main() {
     set_app_identity();
     match App::launch(env) {
         Ok(Some(app)) => {
+            app.watch_window_state();
             let _ = slint::run_event_loop_until_quit();
             app.quit(); // final flush
         }

@@ -2,6 +2,7 @@
 
 use crate::note_window::{note_title, Note, NoteEvent};
 use crate::platform::*;
+use crate::suspend::{SuspendController, SuspendHost};
 use crate::storage::{keystore, Db, DbError, Geometry, KeyStoreError, NoteRow};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -49,6 +50,10 @@ struct Inner {
     db: Rc<Db>,
     notes: RefCell<Vec<Rc<Note>>>,
     quit: Cell<bool>,
+    suspend: Rc<SuspendController>,
+    /// Real app only: polls the window state (see `watch_window_state`).
+    watch: slint::Timer,
+    watching: Cell<bool>,
 }
 
 #[derive(Clone)]
@@ -106,10 +111,15 @@ impl App {
             let id = db.create_note(now).map_err(StartError::Db)?;
             rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
         }
-        let app = App(Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false) }));
+        let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
+        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, watch: slint::Timer::default(), watching: Cell::new(false) });
+        let host: Rc<dyn SuspendHost> = inner.clone();
+        inner.suspend.attach(Rc::downgrade(&host));
+        let app = App(inner);
         for row in &rows {
             app.open_row(row)?;
         }
+        app.0.suspend.evaluate();
         Ok(app)
     }
 
@@ -123,7 +133,11 @@ impl App {
         });
         let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, row.always_on_top, on_event)
             .map_err(StartError::Ui)?;
+        if let Some(hwnd) = note.hwnd() {
+            self.0.env.signals.attach(row.id, hwnd);
+        }
         self.0.notes.borrow_mut().push(Rc::new(note));
+        self.0.suspend.evaluate();
         Ok(())
     }
 
@@ -133,6 +147,7 @@ impl App {
             NoteEvent::New => self.new_note_from(id),
             NoteEvent::Delete => self.delete_note(id),
             NoteEvent::ContextMenu { at } => self.show_menu(id, at),
+            NoteEvent::PointerMoved => self.0.suspend.poke(),
         }
     }
 
@@ -166,6 +181,27 @@ impl App {
 
     pub fn pragma(&self, name: &str) -> String {
         self.0.db.pragma_string(name).unwrap_or_default()
+    }
+
+    /// The platform saw a note minimize, restore, gain focus or get covered or uncovered.
+    pub fn window_state_changed(&self) {
+        self.0.suspend.evaluate();
+    }
+
+    /// Windows asked a note to paint (for example because it was uncovered).
+    pub fn paint_requested(&self, _id: NoteId) {
+        self.0.suspend.poke();
+    }
+
+    /// Real app: Slint reports no minimize/restore events, so look at the windows every
+    /// `WATCH_INTERVAL`. The poll stops while suspended (zero CPU) and restarts on wake.
+    pub fn watch_window_state(&self) {
+        self.0.watching.set(true);
+        self.0.start_watch();
+    }
+
+    pub fn is_suspended(&self) -> bool {
+        self.0.suspend.is_suspended()
     }
 
     pub fn has_quit(&self) -> bool {
@@ -288,7 +324,9 @@ impl App {
             (at.map(|i| notes.remove(i)), notes.is_empty())
         };
         if let Some(note) = note {
+            self.0.env.signals.detach(id);
             slint::Timer::single_shot(Duration::ZERO, move || drop(note));
+            self.0.suspend.evaluate();
             if now_empty {
                 self.0.quit.set(true);
                 let _ = slint::quit_event_loop();
@@ -303,6 +341,56 @@ impl App {
             let _ = self.0.db.save_geometry(n.id(), n.geometry());
         }
         self.0.quit.set(true);
+    }
+}
+
+/// How often the real app looks for minimize/restore.
+const WATCH_INTERVAL: Duration = Duration::from_millis(500);
+
+impl Inner {
+    fn start_watch(&self) {
+        if !self.watching.get() {
+            return;
+        }
+        let suspend = self.suspend.clone();
+        self.watch.start(slint::TimerMode::Repeated, WATCH_INTERVAL, move || suspend.evaluate());
+    }
+}
+
+impl SuspendHost for Inner {
+    fn open_notes(&self) -> Vec<NoteId> {
+        self.notes.borrow().iter().map(|n| n.id()).collect()
+    }
+
+    fn save_all(&self) {
+        let notes: Vec<_> = self.notes.borrow().clone();
+        for n in notes {
+            n.flush();
+            if let Err(e) = self.db.save_geometry(n.id(), n.geometry()) {
+                eprintln!("washi: could not save the position of note {}: {e}", n.id());
+            }
+        }
+    }
+
+    fn stop_timers(&self) {
+        let notes: Vec<_> = self.notes.borrow().clone();
+        for n in notes {
+            n.pause();
+        }
+        self.watch.stop();
+    }
+
+    fn release_caches(&self) {
+        // No decoded images or app-level caches exist yet; SQLite's are the big one.
+        self.db.shrink_memory();
+    }
+
+    fn resume(&self) {
+        self.start_watch();
+        let notes: Vec<_> = self.notes.borrow().clone();
+        for n in notes {
+            n.resume(self.env.signals.window_state(n.id()).focused);
+        }
     }
 }
 

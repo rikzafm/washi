@@ -98,6 +98,14 @@ impl Db {
         Ok(migrations::schema_version(&self.conn)?)
     }
 
+    /// Hand SQLite's page and statement caches back to the heap (suspension).
+    pub fn shrink_memory(&self) {
+        if let Err(e) = self.conn.execute_batch("PRAGMA shrink_memory") {
+            eprintln!("washi: shrink_memory failed: {e}");
+        }
+        self.conn.flush_prepared_statement_cache();
+    }
+
     pub fn pragma_string(&self, name: &str) -> Result<String, DbError> {
         Ok(self.conn.query_row(&format!("PRAGMA {name}"), [], |r| {
             r.get::<_, rusqlite::types::Value>(0).map(|v| match v {

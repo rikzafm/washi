@@ -17,6 +17,8 @@ export component NoteWindow inherits Window {
     callback edited(string);
     /// Right click on the paper, in window coordinates.
     callback context-menu(length, length);
+    /// The mouse moved over the paper (the app wakes from suspension).
+    callback pointer-moved();
     callback new-note();
     callback close-note();
     callback delete-note();
@@ -25,6 +27,7 @@ export component NoteWindow inherits Window {
     // right click anywhere reaches this.
     TouchArea {
         pointer-event(e) => {
+            if (e.kind == PointerEventKind.move) { root.pointer-moved(); }
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
                 root.context-menu(self.mouse-x, self.mouse-y);
             }
