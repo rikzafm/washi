@@ -39,6 +39,7 @@ export component BlockView inherits Rectangle {
     in property <string> text;
     in property <bool> bold: false;
     in property <image> img;
+    changed img => { }
     in property <int> img-w: 0;
     in property <int> img-h: 0;
     /// Ctrl+V: true when the note took it (the clipboard held a picture).
@@ -88,6 +89,10 @@ export component BlockView inherits Rectangle {
         height: root.image-height;
         source: root.img;
         image-fit: fill;
+        // Evaluated as soon as it changes (the event loop runs change handlers right after the
+        // timer that suspended the app), so freed pixels are let go at once, not at the next redraw,
+        // which a minimized window never gets.
+        changed source => { }
     }
 
     input := TextInput {
