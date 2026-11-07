@@ -11,6 +11,11 @@ export struct BlockData {
     text: string,
     /// Drawn in the bold face (headings, and blocks with the bold flag).
     bold: bool,
+    /// An image block: the picture (empty while the note is suspended) and its size in pixels,
+    /// which sets the block's height (the text-area width times the aspect ratio).
+    img: image,
+    img-w: int,
+    img-h: int,
     italic: bool,
 }
 
@@ -45,6 +50,12 @@ export component BlockView inherits Rectangle {
     in property <BlockKind> kind: body;
     in property <string> text;
     in property <bool> bold: false;
+    in property <image> img;
+    changed img => { }
+    in property <int> img-w: 0;
+    in property <int> img-h: 0;
+    /// Ctrl+V: true when the note took it (the clipboard held a picture).
+    callback paste-image() -> bool;
     in property <bool> italic: false;
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
@@ -83,7 +94,21 @@ export component BlockView inherits Rectangle {
     }
     changed focused => { root.report(); }
 
-    preferred-height: root.gap-before + input.preferred-height;
+    property <length> image-height: root.img-w > 0 ? root.width * root.img-h / root.img-w : 0px;
+    preferred-height: root.gap-before + (root.kind == BlockKind.image ? root.image-height : input.preferred-height);
+
+    if root.kind == BlockKind.image: Image {
+        x: 0;
+        y: root.gap-before;
+        width: parent.width;
+        height: root.image-height;
+        source: root.img;
+        image-fit: fill;
+        // Evaluated as soon as it changes (the event loop runs change handlers right after the
+        // timer that suspended the app), so freed pixels are let go at once, not at the next redraw,
+        // which a minimized window never gets.
+        changed source => { }
+    }
 
     input := TextInput {
         x: 0;
@@ -107,6 +132,9 @@ export component BlockView inherits Rectangle {
             if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset); }
         }
         key-pressed(e) => {
+            if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift && (e.text == "v" || e.text == "\u{16}") && root.paste-image()) {
+                return accept;
+            }
             // Ctrl+Z undoes, Ctrl+Y (or Ctrl+Shift+Z) redoes: the note keeps the history, not the field
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta) {
                 if (!e.modifiers.shift && (e.text == "z" || e.text == "\u{1a}")) {

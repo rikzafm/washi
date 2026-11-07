@@ -85,6 +85,11 @@ export component NoteWindow inherits Window {
     callback new-note();
     callback close-note();
     callback delete-note();
+    /// The toolbar's image button was clicked.
+    callback insert-image();
+    /// Ctrl+V: true when the note took it because the clipboard held a picture.
+    callback paste-image() -> bool;
+    out property <int> last-focused-block <=> text-layer.last-focused;
 
     // The toolbar shows while the pointer is over the note (anywhere, text included) or holds one
     // of its buttons. Keyboard focus never shows it. The band is reserved either way.
@@ -123,6 +128,7 @@ export component NoteWindow inherits Window {
                     if (e.text == "n" || e.text == "\u{e}") { root.new-note(); return accept; }
                     if (e.text == "w" || e.text == "\u{17}") { root.close-note(); return accept; }
                     if (e.text == "d" || e.text == "\u{4}") { root.delete-note(); return accept; }
+                    if ((e.text == "v" || e.text == "\u{16}") && root.paste-image()) { return accept; }
                     if (e.text == "b" || e.text == "\u{2}") { root.format(0); return accept; }
                     if (e.text == "i" || e.text == "\u{9}") { root.format(1); return accept; }
                     if (e.text == "u" || e.text == "\u{15}") { root.format(2); return accept; }
@@ -160,6 +166,7 @@ export component NoteWindow inherits Window {
                     focus-block: root.focus-block;
                     focus-offset: root.focus-offset;
                     focus-serial: root.focus-serial;
+                    paste-image => { return root.paste-image(); }
                     block-edited(i, t, c) => { root.block-edited(i, t, c); }
                     block-key(i, k, o) => { return root.block-key(i, k, o); }
                     caret-moved(i, o) => { root.caret-moved(i, o); }
@@ -209,7 +216,7 @@ export component NoteWindow inherits Window {
             underline-active: root.fmt-underline;
             strike-active: root.fmt-strike;
             list-active: root.fmt-list;
-            activated(k) => { if (k < 5) { root.format(k); } }
+            activated(k) => { if (k < 5) { root.format(k); } else { root.insert-image(); } }
             opacity: (paper-touch.has-hover || self.any-pressed) ? 1 : 0;
             visible: self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }

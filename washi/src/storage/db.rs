@@ -48,6 +48,14 @@ pub struct Geometry {
     pub h: u32,
 }
 
+/// An image as stored: encoded bytes plus what the database knows about them.
+pub struct StoredImage {
+    pub mime: String,
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+}
+
 /// A closed note as listed in the "Open note" menu.
 pub struct ClosedNote {
     pub id: NoteId,
@@ -190,6 +198,50 @@ impl Db {
             "UPDATE notes SET x = ?1, y = ?2, w = ?3, h = ?4 WHERE id = ?5",
             rusqlite::params![g.x, g.y, g.w, g.h, id],
         )?;
+        Ok(())
+    }
+
+    /// Store an encoded image for a note; returns the id the note text refers to (`![](img:ID)`).
+    pub fn add_image(&self, note: NoteId, mime: &str, width: u32, height: u32, data: &[u8]) -> Result<i64, DbError> {
+        self.conn.execute(
+            "INSERT INTO note_images(note_id, mime, width, height, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![note, mime, width, height, data],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// A stored image, if there is one with this id.
+    pub fn image(&self, id: i64) -> Result<Option<StoredImage>, DbError> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row("SELECT mime, width, height, data FROM note_images WHERE id = ?1", [id], |r| {
+                Ok(StoredImage { mime: r.get(0)?, width: r.get(1)?, height: r.get(2)?, data: r.get(3)? })
+            })
+            .optional()?)
+    }
+
+    /// Width and height of a stored image, without reading its bytes.
+    pub fn image_size(&self, id: i64) -> Result<Option<(u32, u32)>, DbError> {
+        use rusqlite::OptionalExtension;
+        Ok(self
+            .conn
+            .query_row("SELECT width, height FROM note_images WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?)
+    }
+
+    pub fn image_count(&self) -> Result<usize, DbError> {
+        Ok(self.conn.query_row("SELECT count(*) FROM note_images", [], |r| r.get::<_, i64>(0))? as usize)
+    }
+
+    /// Remove the images of a note that its text no longer refers to (an image that was deleted
+    /// from the text stays stored until now, so that undo can bring it back).
+    pub fn prune_images(&self, note: NoteId, keep: &[i64]) -> Result<(), DbError> {
+        let mut stmt = self.conn.prepare("SELECT id FROM note_images WHERE note_id = ?1")?;
+        let ids = stmt.query_map([note], |r| r.get::<_, i64>(0))?.collect::<Result<Vec<_>, _>>()?;
+        for id in ids.into_iter().filter(|id| !keep.contains(id)) {
+            self.conn.execute("DELETE FROM note_images WHERE id = ?1", [id])?;
+        }
         Ok(())
     }
 

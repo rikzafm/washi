@@ -155,6 +155,18 @@ impl Dialogs for FakeDialogs {
     }
 }
 
+/// The clipboard's picture, set by tests.
+#[derive(Default)]
+pub struct FakeClipboard {
+    pub image: RefCell<Option<washi::images::Rgba>>,
+}
+
+impl ImageClipboard for FakeClipboard {
+    fn image(&self) -> Option<washi::images::Rgba> {
+        self.image.borrow().clone()
+    }
+}
+
 /// What the platform was asked to do with a note's window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowCommand {

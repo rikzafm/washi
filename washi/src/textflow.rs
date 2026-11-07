@@ -274,6 +274,21 @@ pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
 /// [`layout`], and the bars that go with it: underlines and strike-throughs (a bar per line, in
 /// pieces like the words) and a bullet for each list item.
 pub fn layout_all(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> (Vec<Run>, Vec<Rule>) {
+    layout_all_with_images(blocks, paper, t, &|_| None)
+}
+
+/// The height of an image at the width it is shown: the text-area width times its aspect ratio.
+pub fn image_height(width: f64, pixels: (u32, u32)) -> f64 {
+    if pixels.0 == 0 {
+        0.0
+    } else {
+        width * pixels.1 as f64 / pixels.0 as f64
+    }
+}
+
+/// Like [`layout_all`], where `image_size` gives an image block's size in pixels. An image block is as
+/// wide as the text area and as tall as its aspect ratio makes it (a missing size: one body line).
+pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<Run>, Vec<Rule>) {
     let avail = paper.0 - t.inset_left - t.inset_right;
     let mut runs = vec![];
     let mut rules = vec![];
@@ -282,6 +297,10 @@ pub fn layout_all(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> (Vec<Run>,
         let st = t.style(b.kind);
         if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
             top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
+        }
+        if b.kind == Kind::Image {
+            top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
+            continue;
         }
         let italic = b.style.contains(Flags::ITALIC);
         let m = Measure::new(b.is_bold(), italic, st.size);
@@ -331,6 +350,11 @@ pub fn layout_all(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> (Vec<Run>,
 /// Vertical extent of the text in the paper's frame: the top of every block, and the bottom of the
 /// last line (what the note scrolls through).
 pub fn extent(blocks: &[Block], paper_w: f64, t: &Tokens) -> (Vec<f64>, f64) {
+    extent_with_images(blocks, paper_w, t, &|_| None)
+}
+
+/// [`extent`] with the sizes of the images (see [`layout_all_with_images`]).
+pub fn extent_with_images(blocks: &[Block], paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<f64>, f64) {
     let avail = paper_w - t.inset_left - t.inset_right;
     let mut tops = vec![];
     let mut top = t.inset_top;
@@ -340,6 +364,10 @@ pub fn extent(blocks: &[Block], paper_w: f64, t: &Tokens) -> (Vec<f64>, f64) {
             top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
         }
         tops.push(top);
+        if b.kind == Kind::Image {
+            top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
+            continue;
+        }
         let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), st.size);
         top += wrap(&b.text, avail, &m).len() as f64 * st.pitch;
     }
@@ -348,8 +376,13 @@ pub fn extent(blocks: &[Block], paper_w: f64, t: &Tokens) -> (Vec<f64>, f64) {
 
 /// The top and bottom of the line holding the caret (byte `offset` of block `block`), in the paper's frame.
 pub fn caret_span(blocks: &[Block], block: usize, offset: usize, paper_w: f64, t: &Tokens) -> Option<(f64, f64)> {
+    caret_span_with_images(blocks, block, offset, paper_w, t, &|_| None)
+}
+
+/// [`caret_span`] with the sizes of the images.
+pub fn caret_span_with_images(blocks: &[Block], block: usize, offset: usize, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Option<(f64, f64)> {
     let b = blocks.get(block)?;
-    let (tops, _) = extent(blocks, paper_w, t);
+    let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
     let pitch = t.style(b.kind).pitch;
     let y = tops[block] + caret_line(b, offset, paper_w, t).line as f64 * pitch;
     Some((y, y + pitch))

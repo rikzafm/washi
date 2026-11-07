@@ -25,6 +25,10 @@ export component TextLayer inherits Rectangle {
     in property <int> focus-block: -1;
     in property <int> focus-offset: 0;
     in property <int> focus-serial: 0;
+    /// Ctrl+V in a field: true when the note took it (a picture on the clipboard).
+    callback paste-image() -> bool;
+    /// The block that last had the focus (-1 none yet): where the image button inserts.
+    in-out property <int> last-focused: -1;
 
     // The block whose field has the focus, -1 for none. (Not a count: blocks that vanish with the
     // model never report losing the focus.)
@@ -68,6 +72,10 @@ export component TextLayer inherits Rectangle {
             kind: b.kind;
             text: b.text;
             bold: b.bold;
+            img: b.img;
+            img-w: b.img-w;
+            img-h: b.img-h;
+            paste-image => { return root.paste-image(); }
             italic: b.italic;
             autofocus: i == 0;
             show-input: root.flat >= 1;
@@ -82,7 +90,7 @@ export component TextLayer inherits Rectangle {
             key(k, o) => { return root.block-key(i, k, o); }
             caret-moved(o) => { root.caret-moved(i, o); }
             focus-changed(f) => {
-                if (f) { root.focused-block = i; root.focus-entered(i); } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
+                if (f) { root.focused-block = i; root.last-focused = i; root.focus-entered(i); } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
             }
         }
     }

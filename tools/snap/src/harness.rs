@@ -16,6 +16,7 @@ pub struct Harness {
     pub power: Rc<FakePower>,
     pub menu: Rc<FakeMenu>,
     pub dialogs: Rc<FakeDialogs>,
+    pub clipboard: Rc<FakeClipboard>,
     pub startup: Rc<FakeStartup>,
     pub instance: Rc<FakeInstance>,
     pub control: Rc<FakeWindowControl>,
@@ -42,6 +43,7 @@ impl Harness {
         let power = Rc::new(FakePower::default());
         let menu = Rc::new(FakeMenu::default());
         let dialogs = Rc::new(FakeDialogs::default());
+        let clipboard = Rc::new(FakeClipboard::default());
         let startup = Rc::new(FakeStartup::default());
         let instance = Rc::new(FakeInstance::default());
         let control = Rc::new(FakeWindowControl::default());
@@ -54,17 +56,18 @@ impl Harness {
             power: power.clone(),
             menu: menu.clone(),
             dialogs: dialogs.clone(),
+            clipboard: clipboard.clone(),
             startup: startup.clone(),
             instance: instance.clone(),
         };
-        Harness { dir, env, signals, power, menu, dialogs, startup, instance, control, app: None, last_ids: Vec::new() }
+        Harness { dir, env, signals, power, menu, dialogs, clipboard, startup, instance, control, app: None, last_ids: Vec::new() }
     }
 
-    fn app(&self) -> &App {
+    pub(crate) fn app(&self) -> &App {
         self.app.as_ref().expect("app is not running")
     }
 
-    fn id(&self, note: usize) -> NoteId {
+    pub(crate) fn id(&self, note: usize) -> NoteId {
         self.app().note_ids()[note]
     }
 
@@ -645,7 +648,7 @@ impl Harness {
         std::fs::write(p, b).unwrap();
     }
 
-    fn path(&self, name: &str) -> PathBuf {
+    pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.dir.path().join(name)
     }
 }
