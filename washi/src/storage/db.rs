@@ -36,6 +36,7 @@ pub struct NoteRow {
     pub id: NoteId,
     pub content: String,
     pub geometry: Option<Geometry>,
+    pub always_on_top: bool,
 }
 
 /// Window position and size in logical pixels.
@@ -137,14 +138,20 @@ impl Db {
         Ok(())
     }
 
-    const ROW: &'static str = "SELECT id, content, x, y, w, h FROM notes";
+    const ROW: &'static str = "SELECT id, content, x, y, w, h, always_on_top FROM notes";
 
     fn row(r: &rusqlite::Row) -> rusqlite::Result<NoteRow> {
         let geometry = match (r.get::<_, Option<i32>>(2)?, r.get::<_, Option<i32>>(3)?, r.get::<_, Option<u32>>(4)?, r.get::<_, Option<u32>>(5)?) {
             (Some(x), Some(y), Some(w), Some(h)) => Some(Geometry { x, y, w, h }),
             _ => None,
         };
-        Ok(NoteRow { id: r.get(0)?, content: r.get(1)?, geometry })
+        Ok(NoteRow { id: r.get(0)?, content: r.get(1)?, geometry, always_on_top: r.get::<_, i64>(6)? != 0 })
+    }
+
+    pub fn set_always_on_top(&self, id: NoteId, on: bool) -> Result<(), DbError> {
+        self.conn
+            .execute("UPDATE notes SET always_on_top = ?1 WHERE id = ?2", rusqlite::params![on as i64, id])?;
+        Ok(())
     }
 
     /// Notes with `is_open = 1`, oldest first.

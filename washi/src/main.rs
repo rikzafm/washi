@@ -18,13 +18,17 @@ fn main() {
         signals: Rc::new(Win32Signals::default()),
         power: Rc::new(Win32Power),
         menu: Rc::new(Win32ContextMenu),
+        startup: Rc::new(Win32Startup),
+        instance: Rc::new(Win32Instance),
         dialogs: dialogs.clone(),
     };
-    match App::start(env) {
-        Ok(app) => {
+    set_app_identity();
+    match App::launch(env) {
+        Ok(Some(app)) => {
             let _ = slint::run_event_loop_until_quit();
             app.quit(); // final flush
         }
+        Ok(None) => {} // handed off to the running Washi
         Err(e) => dialogs.error(&e.to_string()),
     }
 }

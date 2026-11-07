@@ -33,6 +33,34 @@ impl Autosave {
     }
 }
 
+/// A note's title: its first non-blank line, cut to about 40 characters. `None` for an empty note.
+pub fn note_title(content: &str) -> Option<String> {
+    const MAX: usize = 40;
+    let line = content
+        .split(['\n', '\r', '\u{2028}', '\u{2029}'])
+        .map(str::trim)
+        .find(|l| !l.is_empty())?;
+    if line.chars().count() <= MAX {
+        return Some(line.into());
+    }
+    let cut: String = line.chars().take(MAX).collect();
+    Some(format!("{}…", cut.trim_end()))
+}
+
+/// Window title: the note's title, or "Washi" when the note is empty.
+pub fn window_title(content: &str) -> String {
+    note_title(content).unwrap_or_else(|| "Washi".into())
+}
+
+fn app_icon() -> slint::Image {
+    const SIZE: u32 = 48;
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(SIZE, SIZE);
+    for (dst, src) in buf.make_mut_bytes().chunks_mut(4).zip(crate::icon::rgba(SIZE).chunks(4)) {
+        dst.copy_from_slice(src);
+    }
+    slint::Image::from_rgba8(buf)
+}
+
 /// What a note window asks the app to do.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NoteEvent {
@@ -60,10 +88,14 @@ impl Note {
         db: Rc<Db>,
         clock: Rc<dyn Clock>,
         geometry: Option<Geometry>,
+        always_on_top: bool,
         on_event: Rc<dyn Fn(NoteId, NoteEvent)>,
     ) -> Result<Note, slint::PlatformError> {
         let ui = NoteWindow::new()?;
         ui.set_text(content.into());
+        ui.set_window_title(window_title(content).into());
+        ui.set_pinned(always_on_top);
+        ui.set_app_icon(app_icon());
         if let Some(g) = geometry {
             ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
             ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
@@ -71,8 +103,11 @@ impl Note {
         let autosave = Rc::new(Autosave { id, db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
         {
-            let (autosave, timer) = (autosave.clone(), timer.clone());
-            ui.on_edited(move |_| {
+            let (autosave, timer, weak) = (autosave.clone(), timer.clone(), ui.as_weak());
+            ui.on_edited(move |text| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_window_title(window_title(&text).into());
+                }
                 autosave.dirty.set(true);
                 let a = autosave.clone();
                 timer.start(TimerMode::SingleShot, AUTOSAVE_DELAY, move || a.flush());
@@ -128,6 +163,19 @@ impl Note {
             w: (s.width as f32 / scale).round() as u32,
             h: (s.height as f32 / scale).round() as u32,
         }
+    }
+
+    pub fn always_on_top(&self) -> bool {
+        self.ui.get_pinned()
+    }
+
+    pub fn set_always_on_top(&self, on: bool) {
+        self.ui.set_pinned(on);
+    }
+
+    /// The title the window (and its taskbar button) currently shows.
+    pub fn title(&self) -> String {
+        self.ui.get_window_title().to_string()
     }
 
     pub fn text(&self) -> String {

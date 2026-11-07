@@ -1,6 +1,12 @@
 // Walking-skeleton note: unstyled paper. Real styling arrives with the paper/theme tickets.
 export component NoteWindow inherits Window {
-    title: "Washi";
+    // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
+    in property <string> window-title: "Washi";
+    in property <bool> pinned: false;
+    in property <image> app-icon;
+    title: window-title;
+    always-on-top: pinned;
+    icon: app-icon;
     preferred-width: 431px;
     preferred-height: 451px;
     min-width: 200px;

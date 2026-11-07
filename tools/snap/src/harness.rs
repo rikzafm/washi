@@ -16,6 +16,8 @@ pub struct Harness {
     pub power: Rc<FakePower>,
     pub menu: Rc<FakeMenu>,
     pub dialogs: Rc<FakeDialogs>,
+    pub startup: Rc<FakeStartup>,
+    pub instance: Rc<FakeInstance>,
     app: Option<App>,
     last_ids: Vec<NoteId>,
 }
@@ -39,6 +41,8 @@ impl Harness {
         let power = Rc::new(FakePower::default());
         let menu = Rc::new(FakeMenu::default());
         let dialogs = Rc::new(FakeDialogs::default());
+        let startup = Rc::new(FakeStartup::default());
+        let instance = Rc::new(FakeInstance::default());
         let env = Env {
             data_dir: dir.path().to_path_buf(),
             protector: Rc::new(FakeProtector::new(seed)),
@@ -47,8 +51,10 @@ impl Harness {
             power: power.clone(),
             menu: menu.clone(),
             dialogs: dialogs.clone(),
+            startup: startup.clone(),
+            instance: instance.clone(),
         };
-        Harness { dir, env, signals, power, menu, dialogs, app: None, last_ids: Vec::new() }
+        Harness { dir, env, signals, power, menu, dialogs, startup, instance, app: None, last_ids: Vec::new() }
     }
 
     fn app(&self) -> &App {
@@ -63,7 +69,8 @@ impl Harness {
 
     pub fn start(&mut self) -> Result<(), StartError> {
         self.app = None;
-        let app = App::start(self.env.clone())?;
+        self.instance.process_exited(); // a fresh process: nothing else is running
+        let app = App::launch(self.env.clone())?.expect("the first launch cannot hand off");
         // Give every window the focus a real one would have.
         for id in app.note_ids() {
             app.with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(true)));
@@ -77,6 +84,11 @@ impl Harness {
         self.quit();
         self.app = None;
         self.start()
+    }
+
+    /// Launch Washi again while it runs. True if that launch handed off and exited.
+    pub fn launch_again(&mut self) -> bool {
+        App::launch(self.env.clone()).expect("second launch").is_none()
     }
 
     pub fn quit(&mut self) {
@@ -205,6 +217,20 @@ impl Harness {
     }
 
     // ---- check ----
+
+    /// The title a note's window (and taskbar button) shows.
+    pub fn window_title(&self, note: usize) -> String {
+        self.app().with_note(self.id(note), |n| n.title()).unwrap()
+    }
+
+    pub fn always_on_top(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.always_on_top()).unwrap()
+    }
+
+    /// Whether "Start with Windows" is registered.
+    pub fn startup_registered(&self) -> bool {
+        self.startup.enabled.get()
+    }
 
     pub fn open_note_count(&self) -> usize {
         self.app().note_ids().len()
