@@ -17,3 +17,9 @@ Numbers are `tools/fidelity.ps1` rows; "mockup px" are physical pixels at the 1.
 | 8 | tape_blue | bbox y1 (idle) | -4 | Not fixed: the idle mockup's blue tape ends 4 mockup px below the window bottom (margin 38.2 after the shift). Needs a 42 px margin; kept in the baseline |
 
 Final: paper, shadow, tape_pink, tape_blue pass on hover; on idle everything but tape_blue y1 passes; invariants `tilt` and `tapes` pass (1.5 deg at 1.5x paper size, tape size and corner offsets within 1 px).
+
+### Decision: 42 px window margin (supersedes iterations 1 and 8)
+
+| # | Region | Property | Before -> after | Change |
+|---|---|---|---|---|
+| 9 | tape_pink, tape_blue | bbox y0 / y1, both mockups | idle blue y1 -4 (known failure) | `layout.window_margin` 40 -> 42 (spec, `PaperTheme.margin`, snap `WINDOW_MARGIN`); `paper-shift-y` removed, the paper is centered again. Both tapes fit in the window; `idle:tape_blue` leaves the baseline |

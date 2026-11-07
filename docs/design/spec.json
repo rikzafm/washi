@@ -99,9 +99,9 @@
       "tilt_deg": 1.5
     },
     "window_margin": {
-      "value": 40,
+      "value": 42,
       "rule": "fixed transparent margin around the paper (all four sides), the same at every note size",
-      "derived_from": "tape overhang above the paper's tilted bbox is 38.7 (hover pink tape: 58 mockup px), below 34.7, left and right 8.7; shadow reaches about 30 below, 15 right, 13 left, 8 above. 40 covers all of them."
+      "derived_from": "tape overhang above the paper's tilted bbox is 38.7 (hover pink tape: 58 mockup px), below 34.7, left and right 8.7; shadow reaches about 30 below, 15 right, 13 left, 8 above. 40 covers all of them; 42 is needed once the tape images are drawn in full: the tilt lifts the pink tape about 3 px (logical) above the unrotated paper box and the idle mockup's blue tape ends about 3 px below it."
     },
     "toolbar": {
       "band_height": 56,

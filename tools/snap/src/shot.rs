@@ -8,7 +8,7 @@ use slint::{LogicalPosition, PhysicalSize};
 use std::time::Duration;
 
 /// Transparent margin around the paper inside the window, in logical px (spec: layout.window_margin).
-pub const WINDOW_MARGIN: f64 = 40.0;
+pub const WINDOW_MARGIN: f64 = 42.0;
 
 pub struct Options {
     /// Content of the note.

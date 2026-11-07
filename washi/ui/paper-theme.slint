@@ -4,7 +4,7 @@
 // values inline in a component.
 export global PaperTheme {
     // layout.window_margin: fixed transparent margin around the paper, all four sides
-    out property <length> margin: 40px;
+    out property <length> margin: 42px;
     // layout.paper: minimum paper size (the window is the paper plus the margin)
     out property <length> paper-min-width: 360px;
     out property <length> paper-min-height: 360px;
@@ -21,12 +21,6 @@ export global PaperTheme {
     out property <length> text-left-inset: 33px;
     out property <length> text-top-inset: 24px;
     out property <length> toolbar-band: 56px;
-
-    // The paper is drawn this far below the window's vertical center. The tilt lifts the top-left
-    // corner above the window's top edge and the pink tape pinned there reaches about 3 px
-    // (logical) beyond it, while the blue tape at the bottom stays inside: the fixed 40 px margin
-    // is in effect split 42 / 38.
-    out property <length> paper-shift-y: 1.8px;
 
     // Shadow: stacked copies of the paper shape, shifted down by shadow-offset-y. Copy i is grown
     // by shadow-growths[i] on every side and filled with shadow-colors[i]; widest copy first.

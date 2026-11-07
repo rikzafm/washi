@@ -34,9 +34,9 @@ export component NoteWindow inherits Window {
     out property <bool> toolbar-visible: toolbar.visible;
     property <length> margin: PaperTheme.margin;
     property <angle> tilt: PaperTheme.paper-tilt;
-    // The paper's untilted box in the window (see PaperTheme.paper-shift-y).
-    property <length> paper-top: PaperTheme.margin + PaperTheme.paper-shift-y;
-    property <length> paper-bottom: root.height - PaperTheme.margin + PaperTheme.paper-shift-y;
+    // The paper's untilted box in the window (the margin on every side).
+    property <length> paper-top: PaperTheme.margin;
+    property <length> paper-bottom: root.height - PaperTheme.margin;
 
     // Shadow and paper (the look: see paper.slint). Behind everything.
     Paper { width: root.width; height: root.height; }

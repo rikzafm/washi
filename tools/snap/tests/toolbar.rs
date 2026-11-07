@@ -15,9 +15,9 @@ fn note() -> Harness {
     h
 }
 
-/// A point on the first toolbar button, in window coordinates (an untilted 431 x 451 window:
-/// margin 40, band 56 at the bottom of the paper, first button 23 px from the paper's left edge).
-const BUTTON: (f32, f32) = (40.0 + 23.2 + 20.0, 451.0 - 40.0 - 56.0 + 20.0);
+/// A point on the first toolbar button, in window coordinates (an untilted 447 x 468 window:
+/// margin 42, band 56 at the bottom of the paper, first button 23 px from the paper's left edge).
+const BUTTON: (f32, f32) = (42.0 + 23.2 + 20.0, 468.0 - 42.0 - 56.0 + 20.0);
 
 #[test]
 fn the_toolbar_is_hidden_until_the_pointer_is_over_the_note() {
@@ -126,7 +126,7 @@ fn the_note_keeps_its_size_and_layout_when_the_toolbar_appears() {
     assert_eq!(h.note_size(0), size);
     let (w, _, hover) = h.render(0);
     // only pixels inside the band (and the transparent margin below it is untouched) may change
-    let band_top = (451 - 40 - 56 - 10) as usize; // slack for the tilt (about 9 px across the paper)
+    let band_top = (468 - 42 - 56 - 10) as usize; // slack for the tilt (about 9 px across the paper)
     let changed: Vec<usize> = (0..idle.len()).filter(|&i| idle[i] != hover[i]).collect();
     assert!(!changed.is_empty(), "the toolbar drew nothing");
     assert!(changed.iter().all(|&i| i / w as usize >= band_top), "something outside the band changed");

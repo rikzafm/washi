@@ -35,7 +35,7 @@ export component Paper {
         viewbox-width: root.width / 1px;
         viewbox-height: root.height / 1px;
         commands: PaperGeometry.quad(
-            root.width / 2, root.height / 2 + PaperTheme.paper-shift-y + PaperTheme.shadow-offset-y,
+            root.width / 2, root.height / 2 + PaperTheme.shadow-offset-y,
             root.paper-w / 2 + growth, root.paper-h / 2 + growth);
         fill: PaperTheme.shadow-colors[i];
     }
@@ -45,7 +45,7 @@ export component Paper {
         height: root.height;
         viewbox-width: root.width / 1px;
         viewbox-height: root.height / 1px;
-        commands: PaperGeometry.quad(root.width / 2, root.height / 2 + PaperTheme.paper-shift-y, root.paper-w / 2, root.paper-h / 2);
+        commands: PaperGeometry.quad(root.width / 2, root.height / 2, root.paper-w / 2, root.paper-h / 2);
         fill: PaperTheme.paper-color;
     }
 }
@@ -66,7 +66,7 @@ component Tape {
 // The two tapes, pinned at fixed offsets from the paper's top-left and bottom-right corners.
 export component Tapes {
     property <length> cx: root.width / 2;
-    property <length> cy: root.height / 2 + PaperTheme.paper-shift-y;
+    property <length> cy: root.height / 2;
     property <length> hw: (root.width - 2 * PaperTheme.margin) / 2;
     property <length> hh: (root.height - 2 * PaperTheme.margin) / 2;
 

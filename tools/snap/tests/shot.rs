@@ -52,11 +52,11 @@ fn the_window_is_the_paper_plus_a_40_px_margin_and_the_margin_is_transparent() {
     let (x0, y0, x1, y1) = paper_bbox(&s);
     assert!(((x1 - x0) as i64 - 559).abs() <= 3, "width {}", x1 - x0);
     assert!(((y1 - y0) as i64 - 590).abs() <= 3, "height {}", y1 - y0);
-    // the window (443 x 464 logical = 665 x 696 px) is centred on the canvas, so is the paper
+    // the window (447 x 468 logical = 671 x 702 px) is centred on the canvas, so is the paper
     assert!(((x0 + x1) as i64 - 720).abs() <= 3 && ((y0 + y1) as i64 - 840).abs() <= 6, "{:?}", (x0, y0, x1, y1));
     // the corners of the window show the desk through it: no opaque rectangle behind the paper
-    let (wx, wy) = ((720 - 665) / 2, (840 - 696) / 2);
-    for (x, y) in [(wx + 1, wy + 1), (wx + 663, wy + 1), (wx + 1, wy + 694), (wx + 663, wy + 694)] {
+    let (wx, wy) = ((720 - 671) / 2, (840 - 702) / 2);
+    for (x, y) in [(wx + 1, wy + 1), (wx + 669, wy + 1), (wx + 1, wy + 700), (wx + 669, wy + 700)] {
         assert_eq!(s.pixel(x, y), DESK, "window corner {x},{y}");
     }
 
