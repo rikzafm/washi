@@ -1,0 +1,14 @@
+[package]
+name = "uidiff"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Measure and compare tool for the Washi reference mockups"
+
+[dependencies]
+png = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+sha2 = "0.10"
