@@ -70,6 +70,30 @@ pub trait ContextMenu {
     fn show(&self, items: &[MenuItem], at: (i32, i32)) -> Option<u32>;
 }
 
+/// The "Start with Windows" setting: a per-user registration that launches Washi at sign-in
+/// (the `Run` registry value on Windows).
+pub trait StartupRegistration {
+    fn is_enabled(&self) -> bool;
+    fn set_enabled(&self, on: bool);
+}
+
+/// What a launch found when it looked for an already running Washi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Launch {
+    /// This process is the one running Washi.
+    First,
+    /// Washi was already running and has been asked to open a new note; this process should exit.
+    HandedOff,
+}
+
+/// One running Washi per user. A later launch hands off to the first.
+pub trait SingleInstance {
+    fn acquire(&self) -> Launch;
+    /// First instance only: `on_request` runs on the UI thread each time a later launch asks
+    /// for a new note.
+    fn listen(&self, on_request: std::rc::Rc<dyn Fn()>);
+}
+
 /// Message boxes and file pickers.
 pub trait Dialogs {
     fn confirm(&self, message: &str) -> bool;

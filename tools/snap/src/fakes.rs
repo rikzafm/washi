@@ -154,3 +154,49 @@ impl Dialogs for FakeDialogs {
         self.save_path.borrow().clone()
     }
 }
+
+/// Stands in for the `Run` registry value: a flag that outlives the app, like the registry does.
+#[derive(Default)]
+pub struct FakeStartup {
+    pub enabled: Cell<bool>,
+}
+
+impl StartupRegistration for FakeStartup {
+    fn is_enabled(&self) -> bool {
+        self.enabled.get()
+    }
+    fn set_enabled(&self, on: bool) {
+        self.enabled.set(on);
+    }
+}
+
+/// Stands in for the named mutex and the wake-up event between Washi processes.
+#[derive(Default)]
+pub struct FakeInstance {
+    claimed: Cell<bool>,
+    listener: RefCell<Option<Rc<dyn Fn()>>>,
+}
+
+impl FakeInstance {
+    /// The running process ended: the next launch is the first again.
+    pub fn process_exited(&self) {
+        self.claimed.set(false);
+        *self.listener.borrow_mut() = None;
+    }
+}
+
+impl SingleInstance for FakeInstance {
+    fn acquire(&self) -> Launch {
+        if !self.claimed.replace(true) {
+            return Launch::First;
+        }
+        let listener = self.listener.borrow().clone();
+        if let Some(wake) = listener {
+            wake();
+        }
+        Launch::HandedOff
+    }
+    fn listen(&self, on_request: Rc<dyn Fn()>) {
+        *self.listener.borrow_mut() = Some(on_request);
+    }
+}
