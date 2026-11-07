@@ -20,3 +20,4 @@ idle:tape_blue
 idle:image
 
 invariants:insets
+invariants:fonts
