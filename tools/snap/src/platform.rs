@@ -1,27 +1,125 @@
 //! The stand-in Slint platform: no screen, no event loop. Windows are software-rendered
 //! on demand and time is whatever the test says it is.
+//!
+//! A stand-in window behaves like a native one in the ways the app depends on: it remembers its
+//! position (the app saves it), and it never becomes smaller than the minimum size the Slint
+//! component asks for (Windows enforces that for a real window).
 
-use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
-use slint::platform::{Platform, WindowAdapter};
-use slint::PhysicalSize;
+use slint::platform::software_renderer::{RepaintBufferType, SoftwareRenderer};
+use slint::platform::{Platform, Renderer, WindowAdapter, WindowProperties};
+use slint::{PhysicalPosition, PhysicalSize, Window, WindowPosition, WindowSize};
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-pub const WINDOW_SIZE: (u32, u32) = (431, 451);
-
 thread_local! {
     static INSTALLED: Cell<bool> = const { Cell::new(false) };
     static NOW: Rc<Cell<Duration>> = Rc::new(Cell::new(Duration::ZERO));
-    static WINDOWS: RefCell<Vec<Weak<MinimalSoftwareWindow>>> = const { RefCell::new(Vec::new()) };
+    static WINDOWS: RefCell<Vec<Weak<StandInWindow>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// One note's window on the stand-in platform.
+pub struct StandInWindow {
+    window: Window,
+    renderer: SoftwareRenderer,
+    needs_redraw: Cell<bool>,
+    size: Cell<PhysicalSize>,
+    position: Cell<PhysicalPosition>,
+    /// Minimum size (logical px) the component asked for.
+    min: Cell<Option<(f32, f32)>>,
+    /// Preferred size (logical px) the component asked for: what a native window opens with
+    /// when nobody chose a size.
+    preferred: Cell<Option<(f32, f32)>>,
+    size_chosen: Cell<bool>,
+}
+
+impl StandInWindow {
+    fn new() -> Rc<Self> {
+        Rc::new_cyclic(|w: &Weak<Self>| StandInWindow {
+            window: Window::new(w.clone()),
+            renderer: SoftwareRenderer::new_with_repaint_buffer_type(RepaintBufferType::NewBuffer),
+            needs_redraw: Cell::new(false),
+            size: Cell::new(PhysicalSize::new(0, 0)),
+            position: Cell::new(PhysicalPosition::new(0, 0)),
+            min: Cell::new(None),
+            preferred: Cell::new(None),
+            size_chosen: Cell::new(false),
+        })
+    }
+
+    /// Draw if the window asked for a repaint (see `MinimalSoftwareWindow::draw_if_needed`).
+    pub fn draw_if_needed(&self, render: impl FnOnce(&SoftwareRenderer)) -> bool {
+        if self.needs_redraw.replace(false) {
+            render(&self.renderer);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The smallest size (physical px) this window may have.
+    pub fn min_size(&self) -> PhysicalSize {
+        let s = self.window.scale_factor();
+        let (w, h) = self.min.get().unwrap_or((0.0, 0.0));
+        PhysicalSize::new((w * s).ceil() as u32, (h * s).ceil() as u32)
+    }
+
+    /// What the operating system does at the end of a drag: place and size the window (the size
+    /// is held to the minimum, as Windows does) and tell Slint about the new size.
+    pub fn os_place(&self, position: PhysicalPosition, size: PhysicalSize) {
+        self.position.set(position);
+        self.set_size(WindowSize::Physical(size));
+    }
+}
+
+impl WindowAdapter for StandInWindow {
+    fn window(&self) -> &Window {
+        &self.window
+    }
+    fn renderer(&self) -> &dyn Renderer {
+        &self.renderer
+    }
+    fn size(&self) -> PhysicalSize {
+        self.size.get()
+    }
+    fn set_visible(&self, visible: bool) -> Result<(), slint::PlatformError> {
+        if visible && !self.size_chosen.get() {
+            if let Some((w, h)) = self.preferred.get() {
+                self.set_size(WindowSize::Logical(slint::LogicalSize::new(w, h)));
+            }
+        }
+        Ok(())
+    }
+    fn set_size(&self, size: WindowSize) {
+        self.size_chosen.set(true);
+        let sf = self.window.scale_factor();
+        let min = self.min_size();
+        let p = size.to_physical(sf);
+        let p = PhysicalSize::new(p.width.max(min.width), p.height.max(min.height));
+        self.size.set(p);
+        self.window.dispatch_event(slint::platform::WindowEvent::Resized { size: p.to_logical(sf) });
+    }
+    fn position(&self) -> Option<PhysicalPosition> {
+        Some(self.position.get())
+    }
+    fn set_position(&self, position: WindowPosition) {
+        self.position.set(position.to_physical(self.window.scale_factor()));
+    }
+    fn request_redraw(&self) {
+        self.needs_redraw.set(true);
+    }
+    fn update_window_properties(&self, properties: WindowProperties<'_>) {
+        let c = properties.layout_constraints();
+        self.min.set(c.min.map(|m| (m.width, m.height)));
+        self.preferred.set(Some((c.preferred.width, c.preferred.height)));
+    }
 }
 
 struct StandIn;
 
 impl Platform for StandIn {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-        let w = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-        w.set_size(PhysicalSize::new(WINDOW_SIZE.0, WINDOW_SIZE.1));
+        let w = StandInWindow::new();
         WINDOWS.with(|ws| ws.borrow_mut().push(Rc::downgrade(&w)));
         Ok(w)
     }
@@ -51,7 +149,7 @@ pub fn advance(by: Duration) {
 }
 
 /// Live windows in creation order.
-pub fn windows() -> Vec<Rc<MinimalSoftwareWindow>> {
+pub fn windows() -> Vec<Rc<StandInWindow>> {
     WINDOWS.with(|ws| {
         let mut ws = ws.borrow_mut();
         ws.retain(|w| w.strong_count() > 0);

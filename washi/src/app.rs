@@ -23,6 +23,7 @@ pub struct Env {
     pub startup: Rc<dyn StartupRegistration>,
     pub instance: Rc<dyn SingleInstance>,
     pub dialogs: Rc<dyn Dialogs>,
+    pub window_control: Rc<dyn WindowControl>,
 }
 
 #[derive(Debug)]
@@ -130,6 +131,10 @@ impl App {
         });
         let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, row.always_on_top, on_event)
             .map_err(StartError::Ui)?;
+        if row.geometry.is_some() {
+            // a note saved on a monitor that is gone comes back on the main screen
+            note.keep_on_screen(&self.0.env.window_control.work_areas());
+        }
         if let Some(hwnd) = note.hwnd() {
             self.0.env.signals.attach(row.id, hwnd);
         }
@@ -145,7 +150,20 @@ impl App {
             NoteEvent::Delete => self.delete_note(id),
             NoteEvent::ContextMenu { at } => self.show_menu(id, at),
             NoteEvent::PointerMoved => self.0.suspend.poke(),
+            NoteEvent::StartMove => {
+                let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
+                self.0.env.window_control.begin_move(id, hwnd);
+            }
+            NoteEvent::StartResize(edge) => {
+                let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
+                self.0.env.window_control.begin_resize(id, hwnd, edge);
+            }
         }
+    }
+
+    /// The platform saw a note move or resize: remember where it is once the user stops.
+    pub fn geometry_changed(&self, id: NoteId) {
+        self.with_note(id, |n| n.geometry_changed());
     }
 
     pub fn env(&self) -> &Env {
@@ -199,6 +217,7 @@ impl App {
                 match ev {
                     SignalEvent::StateChanged => App(inner).window_state_changed(),
                     SignalEvent::Paint(id) => App(inner).paint_requested(id),
+                    SignalEvent::Geometry(id) => App(inner).geometry_changed(id),
                 }
             }
         }));

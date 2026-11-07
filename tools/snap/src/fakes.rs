@@ -155,6 +155,41 @@ impl Dialogs for FakeDialogs {
     }
 }
 
+/// What the platform was asked to do with a note's window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowCommand {
+    Move(NoteId),
+    Resize(NoteId, ResizeEdge),
+}
+
+/// Records native drag requests and reports a screen layout the test can change.
+pub struct FakeWindowControl {
+    pub log: RefCell<Vec<WindowCommand>>,
+    pub areas: RefCell<Vec<ScreenRect>>,
+}
+
+impl Default for FakeWindowControl {
+    fn default() -> Self {
+        FakeWindowControl {
+            log: RefCell::new(Vec::new()),
+            // one 1920 x 1080 monitor with a 40 px taskbar
+            areas: RefCell::new(vec![ScreenRect::new(0, 0, 1920, 1040)]),
+        }
+    }
+}
+
+impl WindowControl for FakeWindowControl {
+    fn begin_move(&self, note: NoteId, _hwnd: Option<isize>) {
+        self.log.borrow_mut().push(WindowCommand::Move(note));
+    }
+    fn begin_resize(&self, note: NoteId, _hwnd: Option<isize>, edge: ResizeEdge) {
+        self.log.borrow_mut().push(WindowCommand::Resize(note, edge));
+    }
+    fn work_areas(&self) -> Vec<ScreenRect> {
+        self.areas.borrow().clone()
+    }
+}
+
 /// Stands in for the `Run` registry value: a flag that outlives the app, like the registry does.
 #[derive(Default)]
 pub struct FakeStartup {

@@ -26,6 +26,7 @@ fn main() {
         startup: Rc::new(Win32Startup),
         instance: Rc::new(Win32Instance),
         dialogs: dialogs.clone(),
+        window_control: Rc::new(Win32WindowControl),
     };
     set_app_identity();
     match App::launch(env) {

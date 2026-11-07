@@ -3,7 +3,7 @@
 
 use crate::{platform, Harness};
 use slint::platform::software_renderer::PremultipliedRgbaColor;
-use slint::platform::WindowEvent;
+use slint::platform::{WindowAdapter, WindowEvent};
 use slint::{LogicalPosition, PhysicalSize};
 use std::time::Duration;
 
@@ -65,7 +65,8 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
     h.start().map_err(|e| e.to_string())?;
     h.set_note_text(0, &o.text);
 
-    let win = platform::windows().pop().ok_or("the note has no window")?;
+    let adapter = platform::windows().pop().ok_or("the note has no window")?;
+    let win = adapter.window();
     let (lw, lh) = (o.paper.0 + 2.0 * WINDOW_MARGIN, o.paper.1 + 2.0 * WINDOW_MARGIN);
     let (pw, ph) = ((lw * o.scale).round() as u32, (lh * o.scale).round() as u32);
     win.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: o.scale as f32 });
@@ -79,7 +80,7 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
 
     let mut buf = vec![PremultipliedRgbaColor::default(); (pw * ph) as usize];
     win.request_redraw();
-    win.draw_if_needed(|r| {
+    adapter.draw_if_needed(|r| {
         r.render(&mut buf, pw as usize);
     });
 

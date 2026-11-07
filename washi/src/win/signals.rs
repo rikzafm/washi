@@ -4,13 +4,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Mutex;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, GW_HWNDPREV,
-    WM_ACTIVATE, WM_ACTIVATEAPP, WM_NCDESTROY, WM_PAINT, WM_SIZE,
+    WM_ACTIVATE, WM_ACTIVATEAPP, WM_MOVE, WM_NCDESTROY, WM_PAINT, WM_SIZE,
 };
 
 const SUBCLASS_ID: usize = 0x5741_5348; // "WASH"
@@ -54,7 +55,15 @@ impl Win32Signals {
 /// for the event loop (coalesced) and lets Windows carry on.
 unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, note: usize) -> LRESULT {
     match msg {
-        WM_SIZE | WM_ACTIVATE | WM_ACTIVATEAPP => post(SignalEvent::StateChanged),
+        WM_SIZE | WM_MOVE | WM_ACTIVATE | WM_ACTIVATEAPP => {
+            if msg == WM_SIZE || msg == WM_ACTIVATE || msg == WM_ACTIVATEAPP {
+                post(SignalEvent::StateChanged);
+            }
+            // a minimized window "moves" to (-32000, -32000): not a place worth saving
+            if (msg == WM_SIZE || msg == WM_MOVE) && IsIconic(hwnd) == 0 {
+                post_geometry(note as NoteId);
+            }
+        }
         WM_PAINT => post(SignalEvent::Paint(note as NoteId)),
         WM_NCDESTROY => {
             RemoveWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID);
@@ -64,8 +73,34 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
+/// Notes that moved or resized and have not been reported yet (coalesced per note).
+static GEOMETRY_PENDING: Mutex<Vec<NoteId>> = Mutex::new(Vec::new());
+
+fn post_geometry(note: NoteId) {
+    let first = {
+        let Ok(mut pending) = GEOMETRY_PENDING.lock() else { return };
+        if pending.contains(&note) {
+            return;
+        }
+        pending.push(note);
+        pending.len() == 1
+    };
+    if first {
+        let _ = slint::invoke_from_event_loop(|| {
+            let notes = GEOMETRY_PENDING.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
+            let notify = NOTIFIER.with(|n| n.borrow().clone());
+            if let Some(notify) = notify {
+                for note in notes {
+                    notify(SignalEvent::Geometry(note));
+                }
+            }
+        });
+    }
+}
+
 fn post(ev: SignalEvent) {
     let queued = match ev {
+        SignalEvent::Geometry(note) => return post_geometry(note),
         SignalEvent::StateChanged => &STATE_QUEUED,
         SignalEvent::Paint(note) => {
             LAST_PAINT_NOTE.store(note, Ordering::Release);
@@ -78,7 +113,7 @@ fn post(ev: SignalEvent) {
     let _ = slint::invoke_from_event_loop(move || {
         queued.store(false, Ordering::Release);
         let ev = match ev {
-            SignalEvent::StateChanged => ev,
+            SignalEvent::StateChanged | SignalEvent::Geometry(_) => ev,
             SignalEvent::Paint(_) => SignalEvent::Paint(LAST_PAINT_NOTE.load(Ordering::Acquire)),
         };
         let notify = NOTIFIER.with(|n| n.borrow().clone());

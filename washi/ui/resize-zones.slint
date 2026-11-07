@@ -24,9 +24,9 @@ component Zone inherits TouchArea {
     in property <int> direction;
     callback start(int);
     callback right-click(length, length);
-    callback moved();
+    callback pointer-over();
     pointer-event(e) => {
-        if (e.kind == PointerEventKind.move) { root.moved(); }
+        if (e.kind == PointerEventKind.move) { root.pointer-over(); }
         if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) { root.start(root.direction); }
         if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
             root.right-click(root.x + self.mouse-x, root.y + self.mouse-y);
@@ -38,9 +38,9 @@ component Zone inherits TouchArea {
 component MoveArea inherits TouchArea {
     callback start();
     callback right-click(length, length);
-    callback moved();
+    callback pointer-over();
     pointer-event(e) => {
-        if (e.kind == PointerEventKind.move) { root.moved(); }
+        if (e.kind == PointerEventKind.move) { root.pointer-over(); }
         if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) { root.start(); }
         if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
             root.right-click(root.x + self.mouse-x, root.y + self.mouse-y);
@@ -54,7 +54,7 @@ export component WindowHandles {
     callback start-move();
     callback start-resize(int);
     callback right-click(length, length);
-    callback moved();
+    callback pointer-over();
 
     property <length> l: PaperTheme.margin;
     property <length> t: PaperTheme.margin;
@@ -82,7 +82,7 @@ export component WindowHandles {
         height: root.tape-h;
         start => { root.start-move(); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     MoveArea {
         x: root.l + root.th;
@@ -91,7 +91,7 @@ export component WindowHandles {
         height: PaperTheme.text-top-inset - root.th / 2;
         start => { root.start-move(); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
 
     // Resizing: four edges, four corners (above the move areas where they overlap).
@@ -104,7 +104,7 @@ export component WindowHandles {
         mouse-cursor: ns-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     Zone { // east
         direction: 2;
@@ -115,7 +115,7 @@ export component WindowHandles {
         mouse-cursor: ew-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     Zone { // south
         direction: 4;
@@ -126,7 +126,7 @@ export component WindowHandles {
         mouse-cursor: ns-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     Zone { // west
         direction: 6;
@@ -137,7 +137,7 @@ export component WindowHandles {
         mouse-cursor: ew-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     Zone { // north-west
         direction: 7;
@@ -148,7 +148,7 @@ export component WindowHandles {
         mouse-cursor: nwse-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     Zone { // north-east
         direction: 1;
@@ -159,7 +159,7 @@ export component WindowHandles {
         mouse-cursor: nesw-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     Zone { // south-east
         direction: 3;
@@ -170,7 +170,7 @@ export component WindowHandles {
         mouse-cursor: nwse-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
     Zone { // south-west
         direction: 5;
@@ -181,6 +181,6 @@ export component WindowHandles {
         mouse-cursor: nesw-resize;
         start(d) => { root.start-resize(d); }
         right-click(x, y) => { root.right-click(x, y); }
-        moved => { root.moved(); }
+        pointer-over => { root.pointer-over(); }
     }
 }
