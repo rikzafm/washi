@@ -103,6 +103,15 @@ impl Harness {
         });
     }
 
+    pub fn press_enter(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            w.dispatch_event(WindowEvent::KeyPressed { text: Key::Return.into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: Key::Return.into() });
+        });
+    }
+
     pub fn press_backspace(&mut self, note: usize) {
         let id = self.id(note);
         self.app().with_note(id, |n| {
@@ -120,6 +129,79 @@ impl Harness {
         self.last_ids = self.app().note_ids();
         let id = self.last_ids[note];
         self.app().close_note(id);
+        self.settle();
+    }
+
+    /// Right-click on the paper. The menu answers with `choose` (a label path) or is dismissed.
+    pub fn right_click(&mut self, note: usize, choose: Option<&[&str]>) {
+        *self.menu.next_path.borrow_mut() = choose.map(|p| p.iter().map(|s| s.to_string()).collect());
+        self.menu.next_choice.set(None);
+        self.click_right(note, 5.0, 5.0);
+        self.settle();
+    }
+
+    /// Right-click at a window position without queuing any menu answer.
+    pub fn click_right(&mut self, note: usize, x: f32, y: f32) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let position = slint::LogicalPosition::new(x, y);
+            w.dispatch_event(WindowEvent::PointerMoved { position });
+            let button = slint::platform::PointerEventButton::Right;
+            w.dispatch_event(WindowEvent::PointerPressed { position, button });
+            w.dispatch_event(WindowEvent::PointerReleased { position, button });
+        });
+    }
+
+    /// Press `Ctrl+<letter>` in the note.
+    pub fn press_ctrl(&mut self, note: usize, letter: char) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let ctrl: slint::SharedString = Key::Control.into();
+            w.dispatch_event(WindowEvent::KeyPressed { text: ctrl.clone() });
+            w.dispatch_event(WindowEvent::KeyPressed { text: letter.to_string().into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: letter.to_string().into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: ctrl });
+        });
+        self.settle();
+    }
+
+    /// Let deferred work (releasing closed windows) run.
+    pub fn settle(&mut self) {
+        platform::advance(Duration::ZERO);
+    }
+
+    /// Resize a note's window (logical pixels).
+    pub fn resize_note(&mut self, note: usize, w: u32, h: u32) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| n.ui().window().set_size(slint::LogicalSize::new(w as f32, h as f32)));
+    }
+
+    /// Size of a note's window (logical pixels).
+    pub fn note_size(&self, note: usize) -> (u32, u32) {
+        let g = self.app().with_note(self.id(note), |n| n.geometry()).unwrap();
+        (g.w, g.h)
+    }
+
+    /// The items of the most recently shown menu.
+    pub fn last_menu(&self) -> Vec<washi::platform::MenuItem> {
+        self.menu.shown.borrow().last().cloned().expect("no menu was shown")
+    }
+
+    /// Windows that still exist (open notes, plus any not yet released).
+    pub fn window_count(&self) -> usize {
+        platform::windows().len()
+    }
+
+    /// Id of an open note.
+    pub fn note_id(&self, note: usize) -> NoteId {
+        self.id(note)
+    }
+
+    /// Whether a note is gone from the database.
+    pub fn is_deleted(&self, id: NoteId) -> bool {
+        self.app().saved_text(id).is_none()
     }
 
     // ---- check ----
@@ -185,7 +267,9 @@ impl Harness {
         std::fs::write(self.path("key.bin"), wrapped).unwrap();
     }
 
-    pub fn damage_database_header(&self) {
+    pub fn damage_database_header(&mut self) {
+        // Close the app first: closing the database checkpoints the WAL back over the header.
+        self.app = None;
         let p = self.path("notes.db");
         let mut b = std::fs::read(&p).unwrap();
         for byte in b.iter_mut().take(32) {

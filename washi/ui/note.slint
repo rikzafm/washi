@@ -9,17 +9,44 @@ export component NoteWindow inherits Window {
 
     in-out property <string> text;
     callback edited(string);
+    /// Right click on the paper, in window coordinates.
+    callback context-menu(length, length);
+    callback new-note();
+    callback close-note();
+    callback delete-note();
 
-    input := TextInput {
-        x: 30px;
-        y: 30px;
-        width: parent.width - 60px;
-        height: parent.height - 60px;
-        wrap: word-wrap;
-        font-size: 14px;
-        color: #222222;
-        text <=> root.text;
-        edited => { root.edited(self.text); }
+    // Behind the editor: the paper and tapes. The editor ignores the right button, so a
+    // right click anywhere reaches this.
+    TouchArea {
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+                root.context-menu(self.mouse-x, self.mouse-y);
+            }
+        }
+    }
+
+    FocusScope {
+        key-pressed(e) => {
+            if (e.modifiers.control && !e.modifiers.shift && !e.modifiers.alt) {
+                if (e.text == "n" || e.text == "\u{e}") { root.new-note(); return accept; }
+                if (e.text == "w" || e.text == "\u{17}") { root.close-note(); return accept; }
+                if (e.text == "d" || e.text == "\u{4}") { root.delete-note(); return accept; }
+            }
+            reject
+        }
+
+        input := TextInput {
+            x: 30px;
+            y: 30px;
+            width: root.width - 60px;
+            height: root.height - 60px;
+            wrap: word-wrap;
+            single-line: false;
+            font-size: 14px;
+            color: #222222;
+            text <=> root.text;
+            edited => { root.edited(self.text); }
+        }
     }
 
     init => { input.focus(); }

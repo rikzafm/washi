@@ -35,6 +35,23 @@ impl From<rusqlite::Error> for DbError {
 pub struct NoteRow {
     pub id: NoteId,
     pub content: String,
+    pub geometry: Option<Geometry>,
+}
+
+/// Window position and size in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Geometry {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// A closed note as listed in the "Open note" menu.
+pub struct ClosedNote {
+    pub id: NoteId,
+    /// The first part of the note's content, enough to build a title.
+    pub preview: String,
 }
 
 pub struct Db {
@@ -120,12 +137,53 @@ impl Db {
         Ok(())
     }
 
+    const ROW: &'static str = "SELECT id, content, x, y, w, h FROM notes";
+
+    fn row(r: &rusqlite::Row) -> rusqlite::Result<NoteRow> {
+        let geometry = match (r.get::<_, Option<i32>>(2)?, r.get::<_, Option<i32>>(3)?, r.get::<_, Option<u32>>(4)?, r.get::<_, Option<u32>>(5)?) {
+            (Some(x), Some(y), Some(w), Some(h)) => Some(Geometry { x, y, w, h }),
+            _ => None,
+        };
+        Ok(NoteRow { id: r.get(0)?, content: r.get(1)?, geometry })
+    }
+
     /// Notes with `is_open = 1`, oldest first.
     pub fn open_notes(&self) -> Result<Vec<NoteRow>, DbError> {
-        let mut stmt = self.conn.prepare("SELECT id, content FROM notes WHERE is_open = 1 ORDER BY id")?;
+        let mut stmt = self.conn.prepare(&format!("{} WHERE is_open = 1 ORDER BY id", Self::ROW))?;
+        let rows = stmt.query_map([], Self::row)?.collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn note(&self, id: NoteId) -> Result<Option<NoteRow>, DbError> {
+        use rusqlite::OptionalExtension;
+        Ok(self.conn.query_row(&format!("{} WHERE id = ?1", Self::ROW), [id], Self::row).optional()?)
+    }
+
+    /// Closed notes, most recently edited first.
+    pub fn closed_notes(&self) -> Result<Vec<ClosedNote>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, substr(content, 1, 200) FROM notes WHERE is_open = 0 ORDER BY updated_at DESC, id DESC",
+        )?;
         let rows = stmt
-            .query_map([], |r| Ok(NoteRow { id: r.get(0)?, content: r.get(1)? }))?
+            .query_map([], |r| Ok(ClosedNote { id: r.get(0)?, preview: r.get(1)? }))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
+    }
+
+    pub fn save_geometry(&self, id: NoteId, g: Geometry) -> Result<(), DbError> {
+        self.conn.execute(
+            "UPDATE notes SET x = ?1, y = ?2, w = ?3, h = ?4 WHERE id = ?5",
+            rusqlite::params![g.x, g.y, g.w, g.h, id],
+        )?;
+        Ok(())
+    }
+
+    /// Permanently remove a note and its images. `secure_delete` zero-fills the freed pages and
+    /// the checkpoint empties the write-ahead log, so nothing of the note is left in the files.
+    pub fn delete_note(&self, id: NoteId) -> Result<(), DbError> {
+        self.conn.execute("DELETE FROM note_images WHERE note_id = ?1", [id])?;
+        self.conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
+        self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(())
     }
 }

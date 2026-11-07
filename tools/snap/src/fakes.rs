@@ -96,16 +96,33 @@ impl ProcessPower for FakePower {
     }
 }
 
-/// Records the menus shown and answers with a queued choice.
+/// Records the menus shown and answers with a queued choice: either a raw item id, or a path
+/// of labels (e.g. `["Open note", "shopping list"]`) looked up in the menu actually shown.
 #[derive(Default)]
 pub struct FakeMenu {
     pub shown: RefCell<Vec<Vec<MenuItem>>>,
     pub next_choice: Cell<Option<u32>>,
+    pub next_path: RefCell<Option<Vec<String>>>,
+}
+
+fn find<'a>(items: &'a [MenuItem], path: &[String]) -> Option<&'a MenuItem> {
+    let (first, rest) = path.split_first()?;
+    let it = items.iter().find(|i| &i.label == first)?;
+    if rest.is_empty() {
+        Some(it)
+    } else {
+        find(&it.children, rest)
+    }
 }
 
 impl ContextMenu for FakeMenu {
     fn show(&self, items: &[MenuItem], _at: (i32, i32)) -> Option<u32> {
         self.shown.borrow_mut().push(items.to_vec());
+        if let Some(path) = self.next_path.borrow_mut().take() {
+            let it = find(items, &path).unwrap_or_else(|| panic!("no menu item {path:?} in {items:?}"));
+            assert!(it.enabled, "menu item {path:?} is disabled");
+            return Some(it.id);
+        }
         self.next_choice.take()
     }
 }

@@ -1,8 +1,8 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
-use crate::note_window::Note;
+use crate::note_window::{Note, NoteEvent};
 use crate::platform::*;
-use crate::storage::{keystore, Db, DbError, KeyStoreError};
+use crate::storage::{keystore, Db, DbError, Geometry, KeyStoreError, NoteRow};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -45,12 +45,22 @@ impl std::error::Error for StartError {}
 struct Inner {
     env: Env,
     db: Rc<Db>,
-    notes: RefCell<Vec<Note>>,
+    notes: RefCell<Vec<Rc<Note>>>,
     quit: Cell<bool>,
 }
 
 #[derive(Clone)]
 pub struct App(Rc<Inner>);
+
+const MENU_NEW: u32 = 1;
+const MENU_OPEN: u32 = 2;
+const MENU_CLOSE: u32 = 3;
+const MENU_DELETE: u32 = 4;
+/// Closed notes in the "Open note" submenu get `MENU_OPEN_BASE + position`.
+const MENU_OPEN_BASE: u32 = 1000;
+
+/// A new note opens this far (logical px, right and down) from the note it was made from.
+const NEW_NOTE_OFFSET: i32 = 30;
 
 impl App {
     pub fn start(env: Env) -> Result<App, StartError> {
@@ -64,24 +74,36 @@ impl App {
         let mut rows = db.open_notes().map_err(StartError::Db)?;
         if rows.is_empty() {
             let id = db.create_note(now).map_err(StartError::Db)?;
-            rows.push(crate::storage::NoteRow { id, content: String::new() });
+            rows.push(NoteRow { id, content: String::new(), geometry: None });
         }
         let app = App(Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false) }));
-        for row in rows {
-            let note = app.open_note(row.id, &row.content)?;
-            app.0.notes.borrow_mut().push(note);
+        for row in &rows {
+            app.open_row(row)?;
         }
         Ok(app)
     }
 
-    fn open_note(&self, id: NoteId, content: &str) -> Result<Note, StartError> {
+    /// Show a window for a stored note.
+    fn open_row(&self, row: &NoteRow) -> Result<(), StartError> {
         let weak = Rc::downgrade(&self.0);
-        let on_close: Rc<dyn Fn(NoteId)> = Rc::new(move |id| {
+        let on_event: Rc<dyn Fn(NoteId, NoteEvent)> = Rc::new(move |id, ev| {
             if let Some(inner) = weak.upgrade() {
-                App(inner).window_close_requested(id);
+                App(inner).handle(id, ev);
             }
         });
-        Note::open(id, content, self.0.db.clone(), self.0.env.clock.clone(), on_close).map_err(StartError::Ui)
+        let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, on_event)
+            .map_err(StartError::Ui)?;
+        self.0.notes.borrow_mut().push(Rc::new(note));
+        Ok(())
+    }
+
+    fn handle(&self, id: NoteId, ev: NoteEvent) {
+        match ev {
+            NoteEvent::WindowClosed | NoteEvent::Close => self.close_note(id),
+            NoteEvent::New => self.new_note_from(id),
+            NoteEvent::Delete => self.delete_note(id),
+            NoteEvent::ContextMenu { at } => self.show_menu(id, at),
+        }
     }
 
     pub fn env(&self) -> &Env {
@@ -93,12 +115,19 @@ impl App {
     }
 
     pub fn with_note<R>(&self, id: NoteId, f: impl FnOnce(&Note) -> R) -> Option<R> {
-        self.0.notes.borrow().iter().find(|n| n.id() == id).map(f)
+        // Clone the handle out first: `f` may trigger window callbacks that re-enter the app.
+        let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
+        note.map(|n| f(&n))
     }
 
-    /// The text last written to the database for a note.
+    /// The text last written to the database for a note (`None` once it was deleted).
     pub fn saved_text(&self, id: NoteId) -> Option<String> {
         self.0.db.content(id).ok().flatten()
+    }
+
+    /// Position and size last written to the database for a note.
+    pub fn saved_geometry(&self, id: NoteId) -> Option<Geometry> {
+        self.0.db.note(id).ok().flatten().and_then(|r| r.geometry)
     }
 
     pub fn schema_version(&self) -> u32 {
@@ -113,36 +142,110 @@ impl App {
         self.0.quit.get()
     }
 
-    /// The user closed a note window: save it now, mark it closed, drop the window afterwards.
-    fn window_close_requested(&self, id: NoteId) {
-        self.mark_closed(id);
-        let app = self.clone();
-        slint::Timer::single_shot(Duration::ZERO, move || app.remove_note(id));
-    }
-
-    /// Close a note immediately (saves first). Closing the last note quits Washi.
+    /// Close a note: save it, remember where it was, mark it closed and release its window.
+    /// Closing the last open note quits Washi.
     pub fn close_note(&self, id: NoteId) {
-        self.mark_closed(id);
-        self.remove_note(id);
-    }
-
-    fn mark_closed(&self, id: NoteId) {
-        self.with_note(id, |n| n.flush());
+        self.with_note(id, |n| {
+            n.flush();
+            if let Err(e) = self.0.db.save_geometry(id, n.geometry()) {
+                eprintln!("washi: could not save the position of note {id}: {e}");
+            }
+        });
         if let Err(e) = self.0.db.set_open(id, false) {
             eprintln!("washi: could not mark note {id} closed: {e}");
         }
+        self.remove_note(id);
     }
 
-    fn remove_note(&self, id: NoteId) {
-        let removed = {
-            let mut notes = self.0.notes.borrow_mut();
-            let before = notes.len();
-            notes.retain(|n| n.id() != id);
-            before != notes.len()
+    /// Delete a note for good, after asking.
+    pub fn delete_note(&self, id: NoteId) {
+        if !self.0.env.dialogs.confirm("Delete this note permanently? This cannot be undone.") {
+            return;
+        }
+        if let Err(e) = self.0.db.delete_note(id) {
+            self.0.env.dialogs.error(&format!("Washi could not delete the note: {e}"));
+            return;
+        }
+        self.remove_note(id);
+    }
+
+    /// Open an empty note, offset from `from`.
+    pub fn new_note_from(&self, from: NoteId) {
+        let geometry = self
+            .with_note(from, |n| n.geometry())
+            .map(|g| Geometry { x: g.x + NEW_NOTE_OFFSET, y: g.y + NEW_NOTE_OFFSET, ..g });
+        let id = match self.0.db.create_note(self.0.env.clock.unix_millis()) {
+            Ok(id) => id,
+            Err(e) => return self.0.env.dialogs.error(&format!("Washi could not create a note: {e}")),
         };
-        if removed && self.0.notes.borrow().is_empty() {
-            self.0.quit.set(true);
-            let _ = slint::quit_event_loop();
+        if let Some(g) = geometry {
+            let _ = self.0.db.save_geometry(id, g);
+        }
+        if let Err(e) = self.open_row(&NoteRow { id, content: String::new(), geometry }) {
+            self.0.env.dialogs.error(&e.to_string());
+        }
+    }
+
+    /// Reopen a closed note where it was.
+    pub fn reopen_note(&self, id: NoteId) {
+        if self.with_note(id, |_| ()).is_some() {
+            return;
+        }
+        let Ok(Some(row)) = self.0.db.note(id) else { return };
+        if self.0.db.set_open(id, true).is_ok() {
+            if let Err(e) = self.open_row(&row) {
+                self.0.env.dialogs.error(&e.to_string());
+            }
+        }
+    }
+
+    fn show_menu(&self, id: NoteId, at: (i32, i32)) {
+        let closed = self.0.db.closed_notes().unwrap_or_default();
+        let item = |id, label: &str, enabled, children| MenuItem {
+            id,
+            label: label.into(),
+            checked: false,
+            enabled,
+            children,
+        };
+        let open_children: Vec<MenuItem> = closed
+            .iter()
+            .enumerate()
+            .map(|(i, c)| item(MENU_OPEN_BASE + i as u32, &title_of(&c.preview), true, vec![]))
+            .collect();
+        let items = [
+            item(MENU_NEW, "New note", true, vec![]),
+            item(MENU_OPEN, "Open note", !open_children.is_empty(), open_children),
+            item(MENU_CLOSE, "Close", true, vec![]),
+            item(MENU_DELETE, "Delete", true, vec![]),
+        ];
+        match self.0.env.menu.show(&items, at) {
+            Some(MENU_NEW) => self.new_note_from(id),
+            Some(MENU_CLOSE) => self.close_note(id),
+            Some(MENU_DELETE) => self.delete_note(id),
+            Some(c) if c >= MENU_OPEN_BASE => {
+                if let Some(note) = closed.get((c - MENU_OPEN_BASE) as usize) {
+                    self.reopen_note(note.id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Take a note out of the app. Its window is released on the next turn of the event loop,
+    /// because this may run inside one of that window's own callbacks.
+    fn remove_note(&self, id: NoteId) {
+        let (note, now_empty) = {
+            let mut notes = self.0.notes.borrow_mut();
+            let at = notes.iter().position(|n| n.id() == id);
+            (at.map(|i| notes.remove(i)), notes.is_empty())
+        };
+        if let Some(note) = note {
+            slint::Timer::single_shot(Duration::ZERO, move || drop(note));
+            if now_empty {
+                self.0.quit.set(true);
+                let _ = slint::quit_event_loop();
+            }
         }
     }
 
@@ -150,7 +253,24 @@ impl App {
     pub fn quit(&self) {
         for n in self.0.notes.borrow().iter() {
             n.flush();
+            let _ = self.0.db.save_geometry(n.id(), n.geometry());
         }
         self.0.quit.set(true);
     }
+}
+
+/// Menu title of a note: its first line, cut to about 40 characters.
+fn title_of(content: &str) -> String {
+    const MAX: usize = 40;
+    let line = content
+        .split(['\n', '\r', '\u{2028}', '\u{2029}'])
+        .map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    if line.is_empty() {
+        return "(empty note)".into();
+    }
+    if line.chars().count() <= MAX {
+        return line.into();
+    }
+    let cut: String = line.chars().take(MAX).collect();
+    format!("{}…", cut.trim_end())
 }
