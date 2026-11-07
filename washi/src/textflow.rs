@@ -115,6 +115,13 @@ struct Word {
     off: usize,
 }
 
+/// Add a word to the last line (`wrap` always starts with one line, and only ever adds more).
+fn push_word(lines: &mut [Vec<Word>], word: Word) {
+    if let Some(line) = lines.last_mut() {
+        line.push(word);
+    }
+}
+
 /// Break one block's text into lines of words.
 fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
     let space = m.advance(' ');
@@ -148,7 +155,7 @@ fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
             for (ci, c) in word.char_indices() {
                 let a = m.advance(c);
                 if cw + a > avail && !chunk.is_empty() {
-                    lines.last_mut().unwrap().push(Word { text: std::mem::take(&mut chunk), at: 0.0, off: chunk_off });
+                    push_word(&mut lines, Word { text: std::mem::take(&mut chunk), at: 0.0, off: chunk_off });
                     lines.push(vec![]);
                     chunk_off = word_pos + ci;
                     cw = 0.0;
@@ -156,14 +163,14 @@ fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
                 chunk.push(c);
                 cw += a;
             }
-            lines.last_mut().unwrap().push(Word { text: chunk, at: 0.0, off: chunk_off });
+            push_word(&mut lines, Word { text: chunk, at: 0.0, off: chunk_off });
             x = cw;
             pending = 0.0;
             at_line_start = false;
             continue;
         }
         let at = x + pending;
-        lines.last_mut().unwrap().push(Word { text: word.to_string(), at, off: word_pos });
+        push_word(&mut lines, Word { text: word.to_string(), at, off: word_pos });
         x = at + w;
         pending = 0.0;
         at_line_start = false;

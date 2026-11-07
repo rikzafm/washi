@@ -11,13 +11,23 @@ use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, GW_HWNDPREV,
-    WM_ACTIVATE, WM_ACTIVATEAPP, WM_MOVE, WM_NCDESTROY, WM_PAINT, WM_SIZE,
+    WM_ACTIVATE, WM_ACTIVATEAPP, WM_ENDSESSION, WM_MOVE, WM_NCDESTROY, WM_PAINT, WM_QUERYENDSESSION, WM_SIZE,
 };
 
 const SUBCLASS_ID: usize = 0x5741_5348; // "WASH"
 
 thread_local! {
     static NOTIFIER: RefCell<Option<Rc<dyn Fn(SignalEvent)>>> = const { RefCell::new(None) };
+    static SESSION_END: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+/// Windows is ending the session: run the app's save routine now, inside the message. (The
+/// process can be killed as soon as the message returns, so nothing may be deferred.)
+fn save_for_session_end() {
+    let handler = SESSION_END.with(|h| h.borrow().clone());
+    if let Some(handler) = handler {
+        handler();
+    }
 }
 
 static STATE_QUEUED: AtomicBool = AtomicBool::new(false);
@@ -51,12 +61,23 @@ impl Win32Signals {
     }
 }
 
-/// Runs inside the window procedure, so it must not touch the app: it only queues a call
-/// for the event loop (coalesced) and lets Windows carry on.
+/// Runs inside the window procedure. Apart from the session-end messages it must not touch the
+/// app: it only queues a call for the event loop (coalesced) and lets Windows carry on.
 unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, note: usize) -> LRESULT {
     match msg {
+        // Shutdown, restart or sign-out: save every note before agreeing (and again on the
+        // confirmed end, in case a note was edited between the two messages).
+        WM_QUERYENDSESSION => {
+            save_for_session_end();
+            return 1;
+        }
+        WM_ENDSESSION => {
+            if wparam != 0 {
+                save_for_session_end();
+            }
+        }
         WM_SIZE | WM_MOVE | WM_ACTIVATE | WM_ACTIVATEAPP => {
-            if msg == WM_SIZE || msg == WM_ACTIVATE || msg == WM_ACTIVATEAPP {
+            if msg != WM_MOVE {
                 post(SignalEvent::StateChanged);
             }
             // a minimized window "moves" to (-32000, -32000): not a place worth saving
@@ -182,6 +203,10 @@ impl WindowSignals for Win32Signals {
 
     fn set_notifier(&self, notify: Rc<dyn Fn(SignalEvent)>) {
         NOTIFIER.with(|n| *n.borrow_mut() = Some(notify));
+    }
+
+    fn set_session_end_handler(&self, handler: Rc<dyn Fn()>) {
+        SESSION_END.with(|h| *h.borrow_mut() = Some(handler));
     }
 
     fn app_in_background(&self) -> bool {

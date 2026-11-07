@@ -37,6 +37,11 @@ impl Harness {
 
     /// `seed` picks the (deterministic) test key.
     pub fn with_key_seed(seed: u8) -> Harness {
+        Self::with_protector(Rc::new(FakeProtector::new(seed)))
+    }
+
+    /// A harness whose key protector is `protector` (for example one with a broken random generator).
+    pub fn with_protector(protector: Rc<dyn KeyProtector>) -> Harness {
         platform::install();
         let dir = tempfile::tempdir().expect("temp data folder");
         let signals = Rc::new(FakeSignals::default());
@@ -50,7 +55,7 @@ impl Harness {
         let env = Env {
             window_control: control.clone(),
             data_dir: dir.path().to_path_buf(),
-            protector: Rc::new(FakeProtector::new(seed)),
+            protector,
             clock: Rc::new(FakeClock::new(platform::time_handle())),
             signals: signals.clone(),
             power: power.clone(),
@@ -102,6 +107,16 @@ impl Harness {
             self.last_ids = app.note_ids();
             app.quit();
         }
+    }
+
+    /// Windows is ending the session: everything must be saved before this returns.
+    pub fn end_session(&mut self) {
+        self.signals.end_session();
+    }
+
+    /// The notes' windows, bottom to top, as the desktop will report them from now on.
+    pub fn set_stacking(&mut self, order: Vec<NoteId>) {
+        *self.control.stacking.borrow_mut() = order;
     }
 
     pub fn has_quit(&self) -> bool {
@@ -217,6 +232,22 @@ impl Harness {
             w.dispatch_event(WindowEvent::KeyPressed { text: ctrl.clone() });
             w.dispatch_event(WindowEvent::KeyPressed { text: letter.to_string().into() });
             w.dispatch_event(WindowEvent::KeyReleased { text: letter.to_string().into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: ctrl });
+        });
+        self.settle();
+    }
+
+    /// Press Ctrl plus a key that reports the control code Windows sends for Ctrl+letter (U+0001
+    /// for A, U+0002 for B ...) instead of the letter, as keyboard layouts without Latin letters do.
+    pub fn press_ctrl_code(&mut self, note: usize, letter: char) {
+        let code = ((letter.to_ascii_lowercase() as u8) - b'a' + 1) as char;
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let ctrl: slint::SharedString = Key::Control.into();
+            w.dispatch_event(WindowEvent::KeyPressed { text: ctrl.clone() });
+            w.dispatch_event(WindowEvent::KeyPressed { text: code.to_string().into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: code.to_string().into() });
             w.dispatch_event(WindowEvent::KeyReleased { text: ctrl });
         });
         self.settle();
@@ -633,7 +664,7 @@ impl Harness {
 
     pub fn replace_key_with_another_valid_key(&self) {
         let other = FakeProtector::new(99);
-        let wrapped = other.protect(&other.generate_key()).unwrap();
+        let wrapped = other.protect(&*other.generate_key().unwrap()).unwrap();
         std::fs::write(self.path("key.bin"), wrapped).unwrap();
     }
 

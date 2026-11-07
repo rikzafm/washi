@@ -13,6 +13,23 @@ const MAX_DIB_BYTES: usize = 160 * 1024 * 1024;
 
 pub struct Win32Clipboard;
 
+/// Holds the open clipboard; closes it on every way out.
+struct OpenClipboardGuard;
+
+impl OpenClipboardGuard {
+    fn open() -> Option<Self> {
+        // SAFETY: a null owner window opens the clipboard for the current task.
+        (unsafe { OpenClipboard(std::ptr::null_mut()) } != 0).then_some(OpenClipboardGuard)
+    }
+}
+
+impl Drop for OpenClipboardGuard {
+    fn drop(&mut self) {
+        // SAFETY: this guard opened the clipboard.
+        unsafe { CloseClipboard() };
+    }
+}
+
 impl ImageClipboard for Win32Clipboard {
     fn image(&self) -> Option<Rgba> {
         // SAFETY: the clipboard is opened and closed around the reads; the global memory block is
@@ -21,9 +38,7 @@ impl ImageClipboard for Win32Clipboard {
             if IsClipboardFormatAvailable(CF_UNICODETEXT) != 0 || IsClipboardFormatAvailable(CF_DIB) == 0 {
                 return None;
             }
-            if OpenClipboard(std::ptr::null_mut()) == 0 {
-                return None;
-            }
+            let _open = OpenClipboardGuard::open()?;
             let mut bytes = None;
             let handle = GetClipboardData(CF_DIB);
             if !handle.is_null() {
@@ -36,7 +51,6 @@ impl ImageClipboard for Win32Clipboard {
                     GlobalUnlock(handle);
                 }
             }
-            CloseClipboard();
             dib_to_rgba(&bytes?)
         }
     }

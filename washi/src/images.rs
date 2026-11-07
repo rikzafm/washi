@@ -208,16 +208,16 @@ pub fn prepare(source: Source) -> Result<Stored, ImageError> {
 }
 
 /// Run [`prepare`] on its own thread; the result arrives on the returned channel. The thread
-/// ends when it is done.
-pub fn spawn_prepare(source: Source) -> mpsc::Receiver<Result<Stored, ImageError>> {
+/// ends when it is done. Fails if the system will not start a thread.
+pub fn spawn_prepare(source: Source) -> Result<mpsc::Receiver<Result<Stored, ImageError>>, ImageError> {
     let (tx, rx) = mpsc::channel();
     std::thread::Builder::new()
         .name("washi-image".into())
         .spawn(move || {
             let _ = tx.send(prepare(source));
         })
-        .expect("spawn image thread");
-    rx
+        .map_err(|e| ImageError(format!("The picture could not be prepared: {e}")))?;
+    Ok(rx)
 }
 
 #[cfg(test)]
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn the_worker_thread_delivers_the_result() {
-        let rx = spawn_prepare(Source::Pixels(photo(64, 48)));
+        let rx = spawn_prepare(Source::Pixels(photo(64, 48))).unwrap();
         let stored = rx.recv().unwrap().unwrap();
         assert_eq!((stored.width, stored.height), (64, 48));
     }

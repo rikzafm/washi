@@ -334,6 +334,14 @@ impl Doc {
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
     }
 
+    /// Ask the block at `c` to take the keyboard focus with the caret there, and scroll it into view.
+    fn focus_at(&self, ui: &NoteWindow, c: Caret) {
+        ui.set_focus_block(c.block as i32);
+        ui.set_focus_offset(c.offset as i32);
+        ui.set_focus_serial(ui.get_focus_serial() + 1);
+        self.reveal(ui, c.block, c.offset);
+    }
+
     /// Scroll the least that brings the caret's line into the text area (the top of the note when
     /// the caret is on its first line).
     fn reveal(&self, ui: &NoteWindow, block: usize, offset: usize) {
@@ -522,10 +530,7 @@ impl Note {
                     }
                     doc.show_formats(&ui);
                     if let Some(c) = focus {
-                        ui.set_focus_block(c.block as i32);
-                        ui.set_focus_offset(c.offset as i32);
-                        ui.set_focus_serial(ui.get_focus_serial() + 1);
-                        doc.reveal(&ui, c.block, c.offset);
+                        doc.focus_at(&ui, c);
                     }
                 }
                 autosave.dirty.set(true);
@@ -578,10 +583,7 @@ impl Note {
                     changed(Some(caret));
                 } else {
                     // only the caret moves, to another block
-                    ui.set_focus_block(caret.block as i32);
-                    ui.set_focus_offset(caret.offset as i32);
-                    ui.set_focus_serial(ui.get_focus_serial() + 1);
-                    doc.reveal(&ui, caret.block, caret.offset);
+                    doc.focus_at(&ui, caret);
                 }
                 true
             });
@@ -621,14 +623,13 @@ impl Note {
                 on_event(id, NoteEvent::ContextMenu { at });
             });
         }
-        {
+        // callbacks that only pass one event on to the app
+        let forward = |ev: NoteEvent| {
             let on_event = on_event.clone();
-            ui.on_pointer_moved(move || on_event(id, NoteEvent::PointerMoved));
-        }
-        {
-            let on_event = on_event.clone();
-            ui.on_start_move(move || on_event(id, NoteEvent::StartMove));
-        }
+            move || on_event(id, ev)
+        };
+        ui.on_pointer_moved(forward(NoteEvent::PointerMoved));
+        ui.on_start_move(forward(NoteEvent::StartMove));
         {
             let on_event = on_event.clone();
             ui.on_start_resize(move |code| {
@@ -637,20 +638,11 @@ impl Note {
                 }
             });
         }
-        {
-            let on_event = on_event.clone();
-            ui.on_new_note(move || on_event(id, NoteEvent::New));
-        }
-        {
-            let on_event = on_event.clone();
-            ui.on_close_note(move || on_event(id, NoteEvent::Close));
-        }
-        {
-            let on_event = on_event.clone();
-            ui.on_insert_image(move || on_event(id, NoteEvent::InsertImage));
-        }
+        ui.on_new_note(forward(NoteEvent::New));
+        ui.on_close_note(forward(NoteEvent::Close));
+        ui.on_insert_image(forward(NoteEvent::InsertImage));
+        ui.on_delete_note(forward(NoteEvent::Delete));
         ui.on_paste_image(move || paste_image(id));
-        ui.on_delete_note(move || on_event(id, NoteEvent::Delete));
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
@@ -798,10 +790,15 @@ impl Note {
         self.ui.window().request_redraw();
     }
 
-    /// Save now if there are unsaved edits (used on close and quit).
-    pub fn flush(&self) {
+    /// Save the text now if there are unsaved edits (focus lost); the position keeps its own debounce.
+    pub fn flush_text(&self) {
         self.timer.stop();
         self.autosave.flush();
+    }
+
+    /// Save now if there are unsaved edits (used on close and quit).
+    pub fn flush(&self) {
+        self.flush_text();
         self.geometry_timer.stop();
         self.geometry.flush();
     }

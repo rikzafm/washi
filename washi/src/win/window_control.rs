@@ -3,7 +3,7 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, PostMessageW, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
+    GetCursorPos, GetTopWindow, GetWindow, PostMessageW, GW_HWNDNEXT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
     HTTOPRIGHT, WM_NCLBUTTONDOWN,
 };
 
@@ -60,6 +60,24 @@ impl WindowControl for Win32WindowControl {
 
     fn begin_resize(&self, _note: NoteId, hwnd: Option<isize>, edge: ResizeEdge) {
         start_native_drag(hwnd, hit_test_code(edge));
+    }
+
+    fn stacking_order(&self, notes: &[(NoteId, Option<isize>)]) -> Vec<NoteId> {
+        // Walk the desktop's top-level windows front to back, noting where each note's window is.
+        let mut front_to_back: Vec<NoteId> = Vec::new();
+        // SAFETY: plain window queries; a stale handle just ends the walk.
+        unsafe {
+            let mut w = GetTopWindow(std::ptr::null_mut());
+            while !w.is_null() {
+                if let Some((id, _)) = notes.iter().find(|(_, h)| *h == Some(w as isize)) {
+                    front_to_back.push(*id);
+                }
+                w = GetWindow(w, GW_HWNDNEXT);
+            }
+        }
+        let mut out: Vec<NoteId> = notes.iter().map(|(id, _)| *id).filter(|id| !front_to_back.contains(id)).collect();
+        out.extend(front_to_back.into_iter().rev());
+        out
     }
 
     fn work_areas(&self) -> Vec<ScreenRect> {

@@ -140,6 +140,13 @@ impl App {
         let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, imports: RefCell::new(Vec::new()), import_timer: slint::Timer::default(), attach_timer: slint::Timer::default(), trim_timer: slint::Timer::default(), trim_enabled: Cell::new(false) });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
+        // Windows ending the session (shutdown, restart, sign-out): save everything before returning
+        let weak = Rc::downgrade(&inner);
+        inner.env.signals.set_session_end_handler(Rc::new(move || {
+            if let Some(inner) = weak.upgrade() {
+                inner.save_all();
+            }
+        }));
         let app = App(inner);
         for row in &rows {
             app.open_row(row)?;
@@ -233,6 +240,13 @@ impl App {
 
     /// The platform saw a note minimize, restore, gain focus or get covered or uncovered.
     pub fn window_state_changed(&self) {
+        // a note that lost the focus must not hold unsaved text: it saves now, not after the debounce
+        let notes: Vec<_> = self.0.notes.borrow().clone();
+        for n in notes {
+            if !self.0.env.signals.window_state(n.id()).focused {
+                n.flush_text();
+            }
+        }
         self.0.suspend.evaluate();
     }
 
@@ -326,6 +340,7 @@ impl App {
                 eprintln!("washi: could not save the position of note {id}: {e}");
             }
         });
+        self.0.save_stacking();
         if let Err(e) = self.0.db.set_open(id, false) {
             eprintln!("washi: could not mark note {id} closed: {e}");
         }
@@ -403,7 +418,11 @@ impl App {
     /// after the paragraph that has the caret now, when it is ready.
     fn start_import(&self, note: NoteId, source: Source) {
         let Some(after) = self.with_note(note, |n| n.insert_position()) else { return };
-        self.0.imports.borrow_mut().push(Import { note, after, result: images::spawn_prepare(source) });
+        let result = match images::spawn_prepare(source) {
+            Ok(rx) => rx,
+            Err(e) => return self.0.env.dialogs.error(&e.to_string()),
+        };
+        self.0.imports.borrow_mut().push(Import { note, after, result });
         if !self.0.import_timer.running() {
             let weak = Rc::downgrade(&self.0);
             self.0.import_timer.start(slint::TimerMode::Repeated, IMPORT_POLL, move || {
@@ -544,11 +563,21 @@ impl App {
 
     /// Save everything immediately. Notes stay open, so the next start reopens them.
     pub fn quit(&self) {
-        for n in self.0.notes.borrow().iter() {
-            n.flush();
-            let _ = self.0.db.save_geometry(n.id(), n.geometry());
-        }
+        self.0.save_all();
         self.0.quit.set(true);
+    }
+}
+
+impl Inner {
+    /// Remember which note window is above which, for the next start.
+    fn save_stacking(&self) {
+        let Ok(notes) = self.notes.try_borrow() else { return };
+        let windows: Vec<(NoteId, Option<isize>)> = notes.iter().map(|n| (n.id(), n.hwnd())).collect();
+        drop(notes);
+        let order = self.env.window_control.stacking_order(&windows);
+        if let Err(e) = self.db.save_stacking(&order) {
+            eprintln!("washi: could not save the stacking order of the notes: {e}");
+        }
     }
 }
 
@@ -558,13 +587,15 @@ impl SuspendHost for Inner {
     }
 
     fn save_all(&self) {
-        let notes: Vec<_> = self.notes.borrow().clone();
+        // `try_borrow`: this may run inside a window message while the list is being changed
+        let Ok(notes) = self.notes.try_borrow().map(|n| n.clone()) else { return };
         for n in notes {
             n.flush();
             if let Err(e) = self.db.save_geometry(n.id(), n.geometry()) {
                 eprintln!("washi: could not save the position of note {}: {e}", n.id());
             }
         }
+        self.save_stacking();
     }
 
     fn stop_timers(&self) {
