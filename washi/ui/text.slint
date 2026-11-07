@@ -1,0 +1,22 @@
+import { Theme } from "theme.slint";
+import { BlockData, BlockView } from "block.slint";
+
+// The note's text: blocks stacked in the paper's frame, tilted with the paper.
+// `width`/`height` are the paper's size; the layer rotates about the paper's center.
+export component TextLayer inherits Rectangle {
+    in property <[BlockData]> blocks;
+    callback block-edited(int, string);
+
+    VerticalLayout {
+        x: Theme.text-inset-left;
+        y: Theme.text-inset-top;
+        width: root.width - Theme.text-inset-left - Theme.text-inset-right;
+        alignment: start;
+        for b[i] in root.blocks: BlockView {
+            kind: b.kind;
+            text: b.text;
+            autofocus: i == 0;
+            edited(t) => { root.block-edited(i, t); }
+        }
+    }
+}

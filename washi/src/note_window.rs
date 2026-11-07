@@ -3,7 +3,9 @@
 use crate::platform::{Clock, NoteId};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use std::cell::Cell;
+use crate::blocks::{self, Block, Kind};
+use slint::{Model, VecModel};
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -75,9 +77,47 @@ pub enum NoteEvent {
     Delete,
 }
 
+/// The note text as styled blocks, shared between the window's model and the stored text.
+struct Doc {
+    blocks: RefCell<Vec<Block>>,
+    model: Rc<VecModel<BlockData>>,
+}
+
+impl Doc {
+    fn new() -> Rc<Doc> {
+        Rc::new(Doc { blocks: RefCell::new(Vec::new()), model: Rc::new(VecModel::default()) })
+    }
+
+    /// Replace everything (opening a note, or text set from outside).
+    fn load(&self, content: &str) {
+        let parsed = blocks::parse(content);
+        self.model.set_vec(parsed.iter().map(block_data).collect::<Vec<_>>());
+        *self.blocks.borrow_mut() = parsed;
+    }
+
+    /// Block `i` was edited; returns the whole stored text.
+    fn edit(&self, i: usize, text: &str) -> String {
+        let mut blocks = self.blocks.borrow_mut();
+        if let Some(b) = blocks.get_mut(i) {
+            b.set_text(text);
+        }
+        blocks::serialize(&blocks)
+    }
+}
+
+fn block_data(b: &Block) -> BlockData {
+    let kind = match b.kind {
+        Kind::Title => BlockKind::Title,
+        Kind::Heading => BlockKind::Heading,
+        Kind::Body => BlockKind::Body,
+    };
+    BlockData { kind, text: b.text.as_str().into() }
+}
+
 pub struct Note {
     id: NoteId,
     ui: NoteWindow,
+    doc: Rc<Doc>,
     autosave: Rc<Autosave>,
     timer: Rc<Timer>,
 }
@@ -94,6 +134,9 @@ impl Note {
         on_event: Rc<dyn Fn(NoteId, NoteEvent)>,
     ) -> Result<Note, slint::PlatformError> {
         let ui = NoteWindow::new()?;
+        let doc = Doc::new();
+        doc.load(content);
+        ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
         ui.set_text(content.into());
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
@@ -105,9 +148,11 @@ impl Note {
         let autosave = Rc::new(Autosave { id, db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
         {
-            let (autosave, timer, weak) = (autosave.clone(), timer.clone(), ui.as_weak());
-            ui.on_edited(move |text| {
+            let (autosave, timer, weak, doc) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone());
+            ui.on_block_edited(move |i, block_text| {
+                let text = doc.edit(i.max(0) as usize, block_text.as_str());
                 if let Some(ui) = weak.upgrade() {
+                    ui.set_text(text.as_str().into());
                     ui.set_window_title(window_title(&text).into());
                 }
                 autosave.dirty.set(true);
@@ -147,7 +192,7 @@ impl Note {
         }
         ui.on_delete_note(move || on_event(id, NoteEvent::Delete));
         ui.show()?;
-        Ok(Note { id, ui, autosave, timer })
+        Ok(Note { id, ui, doc, autosave, timer })
     }
 
     pub fn id(&self) -> NoteId {
@@ -193,6 +238,12 @@ impl Note {
     /// The title the window (and its taskbar button) currently shows.
     pub fn title(&self) -> String {
         self.ui.get_window_title().to_string()
+    }
+
+    /// Replace the note's text without typing it.
+    pub fn set_text(&self, text: &str) {
+        self.doc.load(text);
+        self.ui.set_text(text.into());
     }
 
     pub fn text(&self) -> String {

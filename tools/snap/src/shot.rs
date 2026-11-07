@@ -70,7 +70,12 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
     let (pw, ph) = ((lw * o.scale).round() as u32, (lh * o.scale).round() as u32);
     win.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: o.scale as f32 });
     win.set_size(PhysicalSize::new(pw, ph));
-    // The note is shown unfocused: no caret, like the mockups.
+    // Lay the note out first (rows of the text blocks appear on the first draw and focus their
+    // field), then show it unfocused: no caret, like the mockups.
+    win.request_redraw();
+    win.draw_if_needed(|r| {
+        r.render(&mut vec![PremultipliedRgbaColor::default(); (pw * ph) as usize], pw as usize);
+    });
     win.dispatch_event(WindowEvent::WindowActiveChanged(false));
     if o.hover {
         win.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new((lw / 2.0) as f32, (lh / 2.0) as f32) });

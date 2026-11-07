@@ -1,3 +1,9 @@
+import { Theme } from "theme.slint";
+import { BlockData } from "block.slint";
+import { TextLayer } from "text.slint";
+
+export { BlockData, BlockKind } from "block.slint";
+
 // Walking-skeleton note: unstyled paper. Real styling arrives with the paper/theme tickets.
 export component NoteWindow inherits Window {
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
@@ -11,10 +17,13 @@ export component NoteWindow inherits Window {
     preferred-height: 451px;
     min-width: 200px;
     min-height: 200px;
-    background: #fdfaf0;
+    background: #FFFFFD;
 
-    in-out property <string> text;
-    callback edited(string);
+    /// The note's stored text, kept by the app; `blocks` is the same text split into styled blocks.
+    in property <string> text;
+    in property <[BlockData]> blocks;
+    /// Block `i` was edited to this text.
+    callback block-edited(int, string);
     /// Right click on the paper, in window coordinates.
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
@@ -44,19 +53,14 @@ export component NoteWindow inherits Window {
             reject
         }
 
-        input := TextInput {
-            x: 30px;
-            y: 30px;
-            width: root.width - 60px;
-            height: root.height - 60px;
-            wrap: word-wrap;
-            single-line: false;
-            font-size: 14px;
-            color: #222222;
-            text <=> root.text;
-            edited => { root.edited(self.text); }
+        // The text sits on the paper: the window minus the fixed margin on every side.
+        TextLayer {
+            x: Theme.window-margin;
+            y: Theme.window-margin;
+            width: root.width - 2 * Theme.window-margin;
+            height: root.height - 2 * Theme.window-margin;
+            blocks: root.blocks;
+            block-edited(i, t) => { root.block-edited(i, t); }
         }
     }
-
-    init => { input.focus(); }
 }

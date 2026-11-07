@@ -1,0 +1,46 @@
+import "../../fonts/ShadowsIntoLight.ttf";
+import "../../fonts/ShadowsIntoLight-Bold.ttf";
+import "../../fonts/ShadowsIntoLight-Italic.ttf";
+import "../../fonts/ShadowsIntoLight-BoldItalic.ttf";
+import { Theme } from "theme.slint";
+
+export enum BlockKind { title, heading, body }
+
+export struct BlockData {
+    kind: BlockKind,
+    text: string,
+}
+
+// One paragraph: an editable text field styled by its kind.
+export component BlockView inherits Rectangle {
+    in property <BlockKind> kind: body;
+    in property <string> text;
+    in property <bool> autofocus: false;
+    callback edited(string);
+
+    property <length> size: kind == BlockKind.title ? Theme.title-size
+        : kind == BlockKind.heading ? Theme.heading-size : Theme.body-size;
+    property <length> pitch: kind == BlockKind.title ? Theme.title-pitch
+        : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch;
+
+    preferred-height: input.preferred-height;
+
+    input := TextInput {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        wrap: word-wrap;
+        single-line: false;
+        text: root.text;
+        font-family: Theme.handwriting;
+        font-size: root.size;
+        font-weight: root.kind == BlockKind.heading ? 700 : 400;
+        line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
+        color: Theme.ink;
+        edited => { root.edited(self.text); }
+    }
+
+    init => {
+        if (root.autofocus) { input.focus(); }
+    }
+}

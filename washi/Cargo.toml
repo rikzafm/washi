@@ -21,9 +21,9 @@ accessibility = ["slint/accessibility"]
 
 [dependencies]
 # Software renderer on winit (ADR 0001). No GPU renderer features, ever (CI-checked).
-# `software-renderer-systemfonts` is a placeholder until ticket 03 embeds fonts.
+# Fonts are embedded (ui/block.slint imports fonts/*.ttf); no system font is needed for Latin text.
 slint = { version = "1.18", default-features = false, features = [
-    "std", "compat-1-2", "backend-winit", "renderer-software", "software-renderer-systemfonts",
+    "std", "compat-1-2", "backend-winit", "renderer-software",
     "raw-window-handle-06",
 ] }
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
