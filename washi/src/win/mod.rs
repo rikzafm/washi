@@ -1,5 +1,6 @@
 //! Windows implementations of the `crate::platform` interfaces.
 
+mod clipboard;
 mod dialogs;
 mod dpapi;
 mod instance;
@@ -9,6 +10,7 @@ mod signals;
 mod startup;
 mod window_control;
 
+pub use clipboard::Win32Clipboard;
 pub use dialogs::Win32Dialogs;
 pub use dpapi::DpapiProtector;
 pub use instance::Win32Instance;

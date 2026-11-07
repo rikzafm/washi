@@ -153,6 +153,8 @@ export component Toolbar inherits Rectangle {
     in property <length> paper-w;
     in property <length> paper-h;
     in property <angle> tilt;
+    /// The image button was clicked.
+    callback image-clicked();
     /// True while the pointer holds one of the buttons down.
     out property <bool> any-pressed: h0.pressed || h1.pressed || h2.pressed || h3.pressed || h4.pressed || h5.pressed;
 
@@ -221,5 +223,5 @@ export component Toolbar inherits Rectangle {
     h2 := Hit { f: root.f; du: root.c2; dv: root.cv; }
     h3 := Hit { f: root.f; du: root.c3; dv: root.cv; }
     h4 := Hit { f: root.f; du: root.c4; dv: root.cv; }
-    h5 := Hit { f: root.f; du: root.c5; dv: root.cv; }
+    h5 := Hit { f: root.f; du: root.c5; dv: root.cv; clicked => { root.image-clicked(); } }
 }

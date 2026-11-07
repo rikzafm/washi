@@ -1,10 +1,12 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
+use crate::images::{self, ImageError, Source, Stored};
 use crate::note_window::{note_title, Note, NoteEvent};
 use crate::platform::*;
 use crate::suspend::{SuspendController, SuspendHost};
 use crate::storage::{keystore, Db, DbError, Geometry, KeyStoreError, NoteRow};
 use std::cell::{Cell, RefCell};
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
@@ -23,6 +25,7 @@ pub struct Env {
     pub startup: Rc<dyn StartupRegistration>,
     pub instance: Rc<dyn SingleInstance>,
     pub dialogs: Rc<dyn Dialogs>,
+    pub clipboard: Rc<dyn ImageClipboard>,
     pub window_control: Rc<dyn WindowControl>,
 }
 
@@ -52,7 +55,22 @@ struct Inner {
     notes: RefCell<Vec<Rc<Note>>>,
     quit: Cell<bool>,
     suspend: Rc<SuspendController>,
+    /// Pictures being prepared on their worker threads, and the timer that collects them (it runs
+    /// only while there are any).
+    imports: RefCell<Vec<Import>>,
+    import_timer: slint::Timer,
 }
+
+/// A picture on its way into a note.
+struct Import {
+    note: NoteId,
+    /// The block it goes after.
+    after: usize,
+    result: Receiver<Result<Stored, ImageError>>,
+}
+
+/// How often the worker threads' results are looked for while a picture is being prepared.
+const IMPORT_POLL: Duration = Duration::from_millis(20);
 
 #[derive(Clone)]
 pub struct App(Rc<Inner>);
@@ -63,6 +81,7 @@ const MENU_CLOSE: u32 = 3;
 const MENU_DELETE: u32 = 4;
 const MENU_TOP: u32 = 5;
 const MENU_STARTUP: u32 = 6;
+const MENU_EXPORT: u32 = 7;
 /// Closed notes in the "Open note" submenu get `MENU_OPEN_BASE + position`.
 const MENU_OPEN_BASE: u32 = 1000;
 
@@ -110,7 +129,7 @@ impl App {
             rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
-        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend });
+        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, imports: RefCell::new(Vec::new()), import_timer: slint::Timer::default() });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
         let app = App(inner);
@@ -129,7 +148,9 @@ impl App {
                 App(inner).handle(id, ev);
             }
         });
-        let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, row.always_on_top, on_event)
+        let weak = Rc::downgrade(&self.0);
+        let paste_image: Rc<dyn Fn(NoteId) -> bool> = Rc::new(move |id| weak.upgrade().is_some_and(|inner| App(inner).paste_image(id)));
+        let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, row.always_on_top, on_event, paste_image)
             .map_err(StartError::Ui)?;
         if row.geometry.is_some() {
             // a note saved on a monitor that is gone comes back on the main screen
@@ -148,6 +169,7 @@ impl App {
             NoteEvent::WindowClosed | NoteEvent::Close => self.close_note(id),
             NoteEvent::New => self.new_note_from(id),
             NoteEvent::Delete => self.delete_note(id),
+            NoteEvent::InsertImage => self.insert_image_from_file(id),
             NoteEvent::ContextMenu { at } => self.show_menu(id, at),
             NoteEvent::PointerMoved => self.0.suspend.poke(),
             NoteEvent::StartMove => {
@@ -236,6 +258,7 @@ impl App {
     pub fn close_note(&self, id: NoteId) {
         self.with_note(id, |n| {
             n.flush();
+            n.prune_images();
             if let Err(e) = self.0.db.save_geometry(id, n.geometry()) {
                 eprintln!("washi: could not save the position of note {id}: {e}");
             }
@@ -296,6 +319,103 @@ impl App {
         }
     }
 
+    /// The toolbar's image button: ask for a PNG or JPEG and add it after the current paragraph.
+    fn insert_image_from_file(&self, id: NoteId) {
+        let Some(path) = self.0.env.dialogs.pick_open_file("Pictures|*.png;*.jpg;*.jpeg|All files|*.*") else { return };
+        self.start_import(id, Source::File(path));
+    }
+
+    /// Ctrl+V in a note: true (and the picture is on its way) when the clipboard holds a picture.
+    fn paste_image(&self, id: NoteId) -> bool {
+        match self.0.env.clipboard.image() {
+            Some(pixels) => {
+                self.start_import(id, Source::Pixels(pixels));
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Prepare a picture on a short-lived thread (typing never stalls) and add it to the note,
+    /// after the paragraph that has the caret now, when it is ready.
+    fn start_import(&self, note: NoteId, source: Source) {
+        let Some(after) = self.with_note(note, |n| n.insert_position()) else { return };
+        self.0.imports.borrow_mut().push(Import { note, after, result: images::spawn_prepare(source) });
+        if !self.0.import_timer.running() {
+            let weak = Rc::downgrade(&self.0);
+            self.0.import_timer.start(slint::TimerMode::Repeated, IMPORT_POLL, move || {
+                if let Some(inner) = weak.upgrade() {
+                    App(inner).collect_imports();
+                }
+            });
+        }
+    }
+
+    /// Add the pictures whose threads are done; stop polling when none are left.
+    fn collect_imports(&self) {
+        let mut done = Vec::new();
+        self.0.imports.borrow_mut().retain(|i| match i.result.try_recv() {
+            Ok(r) => {
+                done.push((i.note, i.after, r));
+                false
+            }
+            Err(TryRecvError::Empty) => true,
+            Err(TryRecvError::Disconnected) => {
+                done.push((i.note, i.after, Err(ImageError("The picture could not be prepared.".into()))));
+                false
+            }
+        });
+        if self.0.imports.borrow().is_empty() {
+            self.0.import_timer.stop();
+        }
+        for (note, after, result) in done {
+            match result {
+                Ok(stored) => {
+                    // the note may have been closed meanwhile: then the picture is dropped
+                    if let Some(Err(e)) = self.with_note(note, |n| n.add_image(&stored, after)) {
+                        self.0.env.dialogs.error(&format!("Washi could not save the picture: {e}"));
+                    }
+                }
+                Err(e) => self.0.env.dialogs.error(&e.to_string()),
+            }
+        }
+    }
+
+    /// A stored picture: mime type, size and encoded bytes (what is in the database).
+    pub fn stored_image(&self, id: i64) -> Option<(String, u32, u32, Vec<u8>)> {
+        self.0.db.image(id).ok().flatten().map(|i| (i.mime, i.width, i.height, i.data))
+    }
+
+    /// How many pictures the database holds, for all notes.
+    pub fn stored_image_count(&self) -> usize {
+        self.0.db.image_count().unwrap_or(0)
+    }
+
+    /// Pictures still being prepared.
+    pub fn pending_images(&self) -> usize {
+        self.0.imports.borrow().len()
+    }
+
+    /// Bytes of decoded pictures all open notes hold right now.
+    pub fn decoded_image_bytes(&self) -> usize {
+        self.0.notes.borrow().iter().map(|n| n.decoded_image_bytes()).sum()
+    }
+
+    /// "Export as Markdown...": a save dialog, then the note as a plain .md file with its pictures
+    /// as PNG files beside it.
+    pub fn export_note(&self, id: NoteId) {
+        let Some((text, title)) = self.with_note(id, |n| {
+            n.flush();
+            (n.text(), n.title())
+        }) else {
+            return;
+        };
+        let Some(path) = self.0.env.dialogs.pick_save_file(&crate::export::suggested_name(&title), "Markdown|*.md") else { return };
+        if let Err(e) = crate::export::write(&self.0.db, &text, &path) {
+            self.0.env.dialogs.error(&format!("Washi could not export the note: {e}"));
+        }
+    }
+
     fn show_menu(&self, id: NoteId, at: (i32, i32)) {
         let closed = self.0.db.closed_notes().unwrap_or_default();
         let item = |id, label: &str, enabled, children| MenuItem {
@@ -319,12 +439,14 @@ impl App {
             item(MENU_DELETE, "Delete", true, vec![]),
             toggle(MENU_TOP, "Always on top", pinned),
             toggle(MENU_STARTUP, "Start with Windows", self.0.env.startup.is_enabled()),
+            item(MENU_EXPORT, "Export as Markdown\u{2026}", true, vec![]),
         ];
         match self.0.env.menu.show(&items, at) {
             Some(MENU_NEW) => self.new_note_from(id),
             Some(MENU_CLOSE) => self.close_note(id),
             Some(MENU_DELETE) => self.delete_note(id),
             Some(MENU_TOP) => self.set_always_on_top(id, !pinned),
+            Some(MENU_EXPORT) => self.export_note(id),
             Some(MENU_STARTUP) => {
                 let startup = &self.0.env.startup;
                 startup.set_enabled(!startup.is_enabled());
@@ -390,7 +512,11 @@ impl SuspendHost for Inner {
     }
 
     fn release_caches(&self) {
-        // No decoded images or app-level caches exist yet; SQLite's are the big one.
+        // decoded pictures first (the big allocations), then SQLite's caches
+        let notes: Vec<_> = self.notes.borrow().clone();
+        for n in notes {
+            n.free_images();
+        }
         self.db.shrink_memory();
     }
 

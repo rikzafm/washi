@@ -4,6 +4,8 @@ use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 use crate::document::{Block, Caret, Document, Kind};
+use crate::images::Stored;
+use crate::note_images::NoteImages;
 use crate::textflow::{self, Style, Tokens};
 use slint::{Model, VecModel};
 use std::cell::{Cell, RefCell};
@@ -128,6 +130,8 @@ pub enum NoteEvent {
     New,
     Close,
     Delete,
+    /// The toolbar's image button: the app asks for a picture to add.
+    InsertImage,
 }
 
 /// The note's document, shared between the window's model and the stored text.
@@ -137,20 +141,29 @@ struct Doc {
     runs: Rc<VecModel<RunData>>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
+    /// Sizes and decoded pixels of the note's pictures.
+    images: NoteImages,
 }
 
 /// The shown text of an empty note.
 pub const HINT: &str = "Note Something....";
 
 impl Doc {
-    fn new() -> Rc<Doc> {
-        Rc::new(Doc { doc: RefCell::new(Document::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)) })
+    fn new(images: NoteImages) -> Rc<Doc> {
+        Rc::new(Doc { doc: RefCell::new(Document::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)), images })
+    }
+
+    /// A block as the window shows it.
+    fn block_data(&self, b: &Block) -> BlockData {
+        let (img_w, img_h) = self.images.size(b).unwrap_or((0, 0));
+        BlockData { img: self.images.pixels(b), img_w: img_w as i32, img_h: img_h as i32, ..block_data(b) }
     }
 
     /// Replace everything (opening a note, or text set from outside).
     fn load(&self, content: &str) {
         let parsed = Document::parse(content);
-        self.model.set_vec(parsed.blocks().iter().map(block_data).collect::<Vec<_>>());
+        self.images.load(&parsed);
+        self.model.set_vec(parsed.blocks().iter().map(|b| self.block_data(b)).collect::<Vec<_>>());
         *self.doc.borrow_mut() = parsed;
     }
 
@@ -174,10 +187,11 @@ impl Doc {
     /// Make the window's blocks match the document, touching only the rows that differ so the
     /// fields that stay keep their focus.
     fn sync_model(&self) {
-        let new: Vec<BlockData> = self.doc.borrow().blocks().iter().map(block_data).collect();
+        self.images.load(&self.doc.borrow());
+        let new: Vec<BlockData> = self.doc.borrow().blocks().iter().map(|b| self.block_data(b)).collect();
         let old: Vec<BlockData> = self.model.iter().collect();
-        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
-        let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
+        let prefix = old.iter().zip(&new).take_while(|(a, b)| same_row(a, b)).count();
+        let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| same_row(a, b)).count();
         let (old_mid, new_mid) = (old.len() - prefix - suffix, new.len() - prefix - suffix);
         for k in 0..old_mid.min(new_mid) {
             self.model.set_row_data(prefix + k, new[prefix + k].clone());
@@ -194,7 +208,7 @@ impl Doc {
     fn relayout(&self, ui: &NoteWindow) {
         let tokens = Self::tokens(ui);
         let doc = self.doc.borrow();
-        let mut runs = textflow::layout(doc.blocks(), self.paper.get(), &tokens);
+        let mut runs = textflow::layout_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
         let hint = doc.is_empty();
         if hint {
             runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
@@ -289,6 +303,17 @@ impl Doc {
     }
 }
 
+/// Whether two rows of the block model are the same. (`BlockData`'s own equality is no use: Slint
+/// never calls two empty images equal, so no row with one would ever match.)
+fn same_row(a: &BlockData, b: &BlockData) -> bool {
+    a.kind == b.kind
+        && a.text == b.text
+        && a.bold == b.bold
+        && (a.img_w, a.img_h) == (b.img_w, b.img_h)
+        && a.img.size() == b.img.size()
+        && (a.img.size().width == 0 || a.img == b.img)
+}
+
 fn block_data(b: &Block) -> BlockData {
     let kind = match b.kind {
         Kind::Title => BlockKind::Title,
@@ -297,7 +322,7 @@ fn block_data(b: &Block) -> BlockData {
         Kind::ListItem => BlockKind::ListItem,
         Kind::Image => BlockKind::Image,
     };
-    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold() }
+    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold(), img: Default::default(), img_w: 0, img_h: 0 }
 }
 
 pub struct Note {
@@ -308,6 +333,8 @@ pub struct Note {
     timer: Rc<Timer>,
     geometry: Rc<GeometrySave>,
     geometry_timer: Rc<Timer>,
+    /// Everything that changes the text ends here (see `open`).
+    changed: Rc<dyn Fn(Option<Caret>)>,
 }
 
 impl Note {
@@ -320,9 +347,10 @@ impl Note {
         geometry: Option<Geometry>,
         always_on_top: bool,
         on_event: Rc<dyn Fn(NoteId, NoteEvent)>,
+        paste_image: Rc<dyn Fn(NoteId) -> bool>,
     ) -> Result<Note, slint::PlatformError> {
         let ui = NoteWindow::new()?;
-        let doc = Doc::new();
+        let doc = Doc::new(NoteImages::new(id, db.clone()));
         doc.load(content);
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
@@ -432,11 +460,55 @@ impl Note {
             let on_event = on_event.clone();
             ui.on_close_note(move || on_event(id, NoteEvent::Close));
         }
+        {
+            let on_event = on_event.clone();
+            ui.on_insert_image(move || on_event(id, NoteEvent::InsertImage));
+        }
+        ui.on_paste_image(move || paste_image(id));
         ui.on_delete_note(move || on_event(id, NoteEvent::Delete));
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, geometry, geometry_timer: Rc::new(Timer::default()) })
+        Ok(Note { id, ui, doc, autosave, timer, geometry, geometry_timer: Rc::new(Timer::default()), changed })
+    }
+
+    /// Where an image added now goes: after the block that has the caret (or last had it).
+    pub fn insert_position(&self) -> usize {
+        let last = self.doc.doc.borrow().len() - 1;
+        let focused = self.ui.get_text_focused_block();
+        let at = if focused >= 0 { focused } else { self.ui.get_last_focused_block() };
+        if at < 0 { last } else { (at as usize).min(last) }
+    }
+
+    /// Put a stored picture into the note as a new block after block `after`, and move the caret to
+    /// the paragraph below it. The picture is saved in the database now; the text that refers to
+    /// it follows with the usual autosave.
+    pub fn add_image(&self, stored: &Stored, after: usize) -> Result<(), crate::storage::DbError> {
+        let image_id = self.autosave.db.add_image(self.id, stored.mime, stored.width, stored.height, &stored.data)?;
+        let pixels = crate::images::decode(&stored.data).ok().map(|p| crate::note_images::to_slint(&p));
+        self.doc.images.add(image_id, (stored.width, stored.height), pixels);
+        let at = self.doc.doc.borrow_mut().insert_image(after, image_id);
+        (self.changed)(Some(Caret { block: at + 1, offset: 0 }));
+        Ok(())
+    }
+
+    /// Bytes of decoded pictures this note holds right now.
+    pub fn decoded_image_bytes(&self) -> usize {
+        self.doc.images.decoded_bytes()
+    }
+
+    /// Drop the decoded pictures (suspension); they are decoded again by [`Note::resume`].
+    pub fn free_images(&self) {
+        self.doc.images.free();
+        self.doc.sync_model();
+    }
+
+    /// Delete stored pictures the text no longer shows (called when the note closes).
+    pub fn prune_images(&self) {
+        let keep: Vec<i64> = self.doc.doc.borrow().blocks().iter().filter_map(|b| b.image_id).collect();
+        if let Err(e) = self.autosave.db.prune_images(self.id, &keep) {
+            eprintln!("washi: could not remove unused pictures of note {}: {e}", self.id);
+        }
     }
 
     /// The user (or the platform) moved or resized the window: save the new geometry after the
@@ -527,6 +599,8 @@ impl Note {
 
     /// Waking: draw the whole note again; `focused` notes get their caret blink back.
     pub fn resume(&self, focused: bool) {
+        self.doc.images.thaw(&self.doc.doc.borrow());
+        self.doc.sync_model();
         self.ui.set_suspended(false);
         // fields that lost the focus while suspended say so now
         self.ui.set_text_resync(self.ui.get_text_resync() + 1);

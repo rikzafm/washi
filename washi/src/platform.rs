@@ -191,6 +191,13 @@ pub trait WindowControl {
     fn work_areas(&self) -> Vec<ScreenRect>;
 }
 
+/// The picture on the clipboard, if any (Ctrl+V pastes it into a note).
+pub trait ImageClipboard {
+    /// A bitmap on the clipboard, only when no text is there too (copying text from a page or
+    /// spreadsheet often puts a bitmap beside it; that paste is text).
+    fn image(&self) -> Option<crate::images::Rgba>;
+}
+
 /// Message boxes and file pickers.
 pub trait Dialogs {
     fn confirm(&self, message: &str) -> bool;

@@ -240,6 +240,21 @@ pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> us
 
 /// Lay the blocks out in a paper of size `paper` (logical px).
 pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
+    layout_with_images(blocks, paper, t, &|_| None)
+}
+
+/// The height of an image at the width it is shown: the text-area width times its aspect ratio.
+pub fn image_height(width: f64, pixels: (u32, u32)) -> f64 {
+    if pixels.0 == 0 {
+        0.0
+    } else {
+        width * pixels.1 as f64 / pixels.0 as f64
+    }
+}
+
+/// Like [`layout`], where `image_size` gives an image block's size in pixels. An image block is as
+/// wide as the text area and as tall as its aspect ratio makes it (a missing size: one body line).
+pub fn layout_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Vec<Run> {
     let avail = paper.0 - t.inset_left - t.inset_right;
     let mut runs = vec![];
     let mut top = t.inset_top;
@@ -247,6 +262,10 @@ pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
         let st = t.style(b.kind);
         if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
             top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
+        }
+        if b.kind == Kind::Image {
+            top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
+            continue;
         }
         let m = Measure::new(b.is_bold(), st.size);
         for (li, line) in wrap(&b.text, avail, &m).into_iter().enumerate() {

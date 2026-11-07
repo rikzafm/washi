@@ -5,6 +5,7 @@
 
 pub mod fakes;
 mod harness;
+mod images;
 pub mod platform;
 pub mod shot;
 
