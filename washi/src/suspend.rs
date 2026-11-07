@@ -3,9 +3,10 @@
 //! The controller is a small state machine on the UI thread. It owns no windows: the app
 //! implements [`SuspendHost`] and the controller tells it what to save, stop and release.
 //!
-//! Ticket 18 (suspend when covered) plugs in at [`should_suspend`], the one place that decides
-//! whether the notes are hidden: add the "background and fully covered" clause there, and have
-//! the platform signals call `App::window_state_changed` when they change.
+//! [`should_suspend`] is the one place that decides whether the notes are hidden. The platform
+//! signals call `App::window_state_changed` when something changes. Windows never announces
+//! coverage, so while Washi is in the background the controller re-checks every
+//! [`COVER_CHECK_INTERVAL`]; that timer does not exist in the foreground or while suspended.
 
 use crate::platform::{NoteId, ProcessPower, WindowSignals, WindowState};
 use slint::{Timer, TimerMode};
@@ -15,6 +16,9 @@ use std::time::Duration;
 
 /// How long the notes must stay hidden before Washi suspends.
 pub const GRACE_PERIOD: Duration = Duration::from_secs(10);
+
+/// How often coverage is re-checked while Washi is in the background and not suspended.
+pub const COVER_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// What the controller needs from the app.
 pub trait SuspendHost {
@@ -37,9 +41,10 @@ struct Picture {
     background: bool,
 }
 
-/// True when none of Washi can be seen. Ticket 17: every open note is minimized.
-pub fn should_suspend(notes: &[(NoteId, WindowState)], _app_in_background: bool) -> bool {
-    !notes.is_empty() && notes.iter().all(|(_, s)| s.minimized)
+/// True when none of Washi can be seen: every open note is minimized, or Washi is in the
+/// background and every note is minimized or fully covered.
+pub fn should_suspend(notes: &[(NoteId, WindowState)], app_in_background: bool) -> bool {
+    !notes.is_empty() && notes.iter().all(|(_, s)| s.minimized || (app_in_background && s.covered))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -57,6 +62,8 @@ pub struct SuspendController {
     phase: Cell<Phase>,
     picture: RefCell<Option<Picture>>,
     timer: Timer,
+    /// The periodic coverage check; runs only in the background and not suspended.
+    cover_check: Timer,
 }
 
 impl SuspendController {
@@ -68,6 +75,7 @@ impl SuspendController {
             phase: Cell::new(Phase::Active),
             picture: RefCell::new(None),
             timer: Timer::default(),
+            cover_check: Timer::default(),
         })
     }
 
@@ -94,6 +102,7 @@ impl SuspendController {
         let Some(host) = self.host() else { return };
         let picture = self.look(&*host);
         let hidden = should_suspend(&picture.notes, picture.background);
+        self.manage_cover_check(picture.background);
         match self.phase.get() {
             Phase::Suspended => {
                 let focused = picture.notes.iter().any(|(_, s)| s.focused);
@@ -116,6 +125,22 @@ impl SuspendController {
                     self.start_grace(picture);
                 }
             }
+        }
+    }
+
+    /// The coverage check runs while Washi is in the background and not suspended, and never
+    /// otherwise.
+    fn manage_cover_check(self: &Rc<Self>, background: bool) {
+        let wanted = background && self.phase.get() != Phase::Suspended;
+        if !wanted {
+            self.cover_check.stop();
+        } else if !self.cover_check.running() {
+            let weak = Rc::downgrade(self);
+            self.cover_check.start(TimerMode::Repeated, COVER_CHECK_INTERVAL, move || {
+                if let Some(c) = weak.upgrade() {
+                    c.evaluate();
+                }
+            });
         }
     }
 
@@ -145,6 +170,7 @@ impl SuspendController {
     fn suspend(&self, host: &dyn SuspendHost) {
         host.save_all();
         self.timer.stop();
+        self.cover_check.stop();
         host.stop_timers();
         host.release_caches();
         self.power.release_memory();

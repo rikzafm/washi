@@ -245,6 +245,33 @@ impl Harness {
         self.set_state(note, |s| s.minimized = false);
     }
 
+    /// Other windows now hide the whole note (only counts while Washi is in the background).
+    pub fn cover(&mut self, note: usize) {
+        self.set_state(note, |s| s.covered = true);
+    }
+
+    pub fn uncover(&mut self, note: usize) {
+        self.set_state(note, |s| s.covered = false);
+    }
+
+    /// Another app takes focus (Alt-Tab away): no note is focused any more.
+    pub fn switch_away(&mut self) {
+        self.signals.background.set(true);
+        for n in 0..self.open_note_count() {
+            let id = self.id(n);
+            self.signals.states.borrow_mut().entry(id).or_default().focused = false;
+            // What Windows does: every window goes inactive, so no caret blinks.
+            self.app().with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(false)));
+        }
+        self.app().window_state_changed();
+    }
+
+    /// Back to Washi (Alt-Tab back): the first note takes focus.
+    pub fn switch_back(&mut self) {
+        self.signals.background.set(false);
+        self.focus(0);
+    }
+
     pub fn focus(&mut self, note: usize) {
         self.set_state(note, |s| s.focused = true);
     }

@@ -51,9 +51,6 @@ struct Inner {
     notes: RefCell<Vec<Rc<Note>>>,
     quit: Cell<bool>,
     suspend: Rc<SuspendController>,
-    /// Real app only: polls the window state (see `watch_window_state`).
-    watch: slint::Timer,
-    watching: Cell<bool>,
 }
 
 #[derive(Clone)]
@@ -112,7 +109,7 @@ impl App {
             rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
-        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, watch: slint::Timer::default(), watching: Cell::new(false) });
+        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
         let app = App(inner);
@@ -193,11 +190,18 @@ impl App {
         self.0.suspend.poke();
     }
 
-    /// Real app: Slint reports no minimize/restore events, so look at the windows every
-    /// `WATCH_INTERVAL`. The poll stops while suspended (zero CPU) and restarts on wake.
+    /// Real app: have the platform tell us about minimize, restore, focus, activation and
+    /// paint requests as they happen (no polling, so a suspended app sleeps until a message).
     pub fn watch_window_state(&self) {
-        self.0.watching.set(true);
-        self.0.start_watch();
+        let weak = Rc::downgrade(&self.0);
+        self.0.env.signals.set_notifier(Rc::new(move |ev| {
+            if let Some(inner) = weak.upgrade() {
+                match ev {
+                    SignalEvent::StateChanged => App(inner).window_state_changed(),
+                    SignalEvent::Paint(id) => App(inner).paint_requested(id),
+                }
+            }
+        }));
     }
 
     pub fn is_suspended(&self) -> bool {
@@ -344,19 +348,6 @@ impl App {
     }
 }
 
-/// How often the real app looks for minimize/restore.
-const WATCH_INTERVAL: Duration = Duration::from_millis(500);
-
-impl Inner {
-    fn start_watch(&self) {
-        if !self.watching.get() {
-            return;
-        }
-        let suspend = self.suspend.clone();
-        self.watch.start(slint::TimerMode::Repeated, WATCH_INTERVAL, move || suspend.evaluate());
-    }
-}
-
 impl SuspendHost for Inner {
     fn open_notes(&self) -> Vec<NoteId> {
         self.notes.borrow().iter().map(|n| n.id()).collect()
@@ -377,7 +368,6 @@ impl SuspendHost for Inner {
         for n in notes {
             n.pause();
         }
-        self.watch.stop();
     }
 
     fn release_caches(&self) {
@@ -386,7 +376,6 @@ impl SuspendHost for Inner {
     }
 
     fn resume(&self) {
-        self.start_watch();
         let notes: Vec<_> = self.notes.borrow().clone();
         for n in notes {
             n.resume(self.env.signals.window_state(n.id()).focused);
