@@ -120,14 +120,14 @@ fn closed_notes_are_listed_by_title_newest_first() {
 fn choosing_a_closed_note_reopens_it_at_its_saved_size() {
     let mut h = two_notes();
     h.type_text(1, "come back to me");
-    h.resize_note(1, 300, 260);
+    h.resize_note(1, 500, 470);
     h.right_click(1, Some(&["Close"]));
     assert_eq!(h.open_note_count(), 1);
 
     h.right_click(0, Some(&["Open note", "come back to me"]));
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.note_text(1), "# come back to me");
-    assert_eq!(h.note_size(1), (300, 260));
+    assert_eq!(h.note_size(1), (500, 470));
 
     // It is open again, so it is no longer listed.
     h.right_click(0, None);

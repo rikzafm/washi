@@ -7,6 +7,7 @@ mod menu;
 mod process;
 mod signals;
 mod startup;
+mod window_control;
 
 pub use dialogs::Win32Dialogs;
 pub use dpapi::DpapiProtector;
@@ -15,6 +16,7 @@ pub use menu::Win32ContextMenu;
 pub use process::Win32Power;
 pub use signals::Win32Signals;
 pub use startup::Win32Startup;
+pub use window_control::Win32WindowControl;
 
 use crate::platform::Clock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

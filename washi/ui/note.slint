@@ -7,6 +7,7 @@ import { TextLayer } from "text.slint";
 export { BlockData, BlockKind, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
+import { WindowHandles } from "resize-zones.slint";
 
 export component NoteWindow inherits Window {
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
@@ -52,6 +53,10 @@ export component NoteWindow inherits Window {
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
     callback pointer-moved();
+    /// The user pressed the pink tape or the top margin: the platform drags the window.
+    callback start-move();
+    /// The user pressed a resize zone (0 north, then clockwise: see resize-zones.slint).
+    callback start-resize(int);
     callback new-note();
     callback close-note();
     callback delete-note();
@@ -61,6 +66,8 @@ export component NoteWindow inherits Window {
     out property <float> toolbar-opacity: toolbar.opacity;
     out property <bool> toolbar-visible: toolbar.visible;
     property <length> margin: PaperTheme.margin;
+    /// The transparent margin around the paper (Rust keeps the paper on screen, not the margin).
+    out property <length> window-margin: PaperTheme.margin;
     property <angle> tilt: PaperTheme.paper-tilt;
     // The paper's untilted box in the window (the margin on every side).
     property <length> paper-top: PaperTheme.margin;
@@ -118,6 +125,20 @@ export component NoteWindow inherits Window {
                 }
             }
         }
+
+        // Invisible grips for moving and resizing (inside paper-touch, so hovering them keeps the
+        // toolbar up). Above the editor; none of them reaches into the text area.
+        WindowHandles {
+            x: 0px;
+            y: 0px;
+            width: root.width;
+            height: root.height;
+            start-move => { root.start-move(); }
+            start-resize(d) => { root.start-resize(d); }
+            right-click(x, y) => { root.context-menu(x, y); }
+            pointer-over => { root.pointer-moved(); }
+        }
+
         // Drawn in the paper's frame, which tilts with the paper. Above the editor, so its buttons
         // get the clicks while shown; while hidden it takes no part in hit testing at all.
         toolbar := Toolbar {
