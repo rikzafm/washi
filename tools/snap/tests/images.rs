@@ -314,3 +314,16 @@ fn the_menu_offers_export_last() {
     let labels: Vec<String> = h.last_menu().into_iter().map(|i| i.label).collect();
     assert_eq!(labels.last().map(String::as_str), Some("Export as Markdown\u{2026}"));
 }
+
+#[test]
+fn typing_below_a_tall_picture_works_and_the_note_scrolls_to_it() {
+    let mut h = note_with_title();
+    h.copy_picture(flat(200, 200, RED));
+    h.press_ctrl(0, 'v');
+    h.wait_for_images();
+    // the 291 px square pushes the paragraph below it past the bottom of the text area
+    h.type_text(0, "below");
+    assert_eq!(h.note_text(0), "# Trip
+![](img:1)
+below");
+}

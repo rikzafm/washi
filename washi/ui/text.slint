@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { BlockData, BlockKind, BlockView, RunData } from "block.slint";
+import { BlockData, BlockKind, BlockView, RuleData, RunData } from "block.slint";
 
 // The note's text, in the paper's frame (fixed insets, not proportions of the size). `width` and
 // `height` are the paper's.
@@ -11,11 +11,16 @@ import { BlockData, BlockKind, BlockView, RunData } from "block.slint";
 export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
     in property <[RunData]> runs;
+    in property <[RuleData]> rules;
+    /// A field took the focus: the caret is in this block now.
+    callback focus-entered(int);
     /// While the note is suspended (covered, minimized) losing the focus does not change its look.
     in property <bool> suspended: false;
     in property <int> resync: 0;
     callback block-edited(int, string, int);
     callback block-key(int, string, int) -> bool;
+    /// The caret moved: block, byte offset.
+    callback caret-moved(int, int);
     /// Rust asks for the focus: block, caret offset, and a counter that changes with each request.
     in property <int> focus-block: -1;
     in property <int> focus-offset: 0;
@@ -43,8 +48,19 @@ export component TextLayer inherits Rectangle {
         font-family: Theme.handwriting;
         font-size: r.size;
         font-weight: r.bold ? 700 : 400;
+        font-italic: r.italic;
         line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
         color: r.hint ? Theme.ink-hint : Theme.ink;
+    }
+
+    // underlines, strike-throughs and list bullets: drawn by the app, level while editing
+    for r in root.rules: Rectangle {
+        x: r.x + r.dx * root.tilt-scale;
+        y: r.y + r.dy * root.tilt-scale;
+        width: r.width;
+        height: r.height;
+        border-radius: min(r.width, r.height) / 2;
+        background: Theme.ink;
     }
 
     VerticalLayout {
@@ -60,6 +76,7 @@ export component TextLayer inherits Rectangle {
             img-w: b.img-w;
             img-h: b.img-h;
             paste-image => { return root.paste-image(); }
+            italic: b.italic;
             autofocus: i == 0;
             show-input: root.flat >= 1;
             resync: root.resync;
@@ -71,8 +88,9 @@ export component TextLayer inherits Rectangle {
             focus-offset: root.focus-offset;
             edited(t, c) => { root.block-edited(i, t, c); }
             key(k, o) => { return root.block-key(i, k, o); }
+            caret-moved(o) => { root.caret-moved(i, o); }
             focus-changed(f) => {
-                if (f) { root.focused-block = i; root.last-focused = i; } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
+                if (f) { root.focused-block = i; root.last-focused = i; root.focus-entered(i); } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
             }
         }
     }

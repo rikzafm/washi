@@ -312,6 +312,27 @@ impl Document {
         Some(Caret { block, offset })
     }
 
+    /// Typing a space after `#` or `-` at the start of a body block (`old` was the block's text
+    /// before the edit, the caret is now at `cursor`) turns it into a heading or list item and
+    /// drops the marker. Returns the caret (the start of the block) when it did.
+    pub fn auto_format(&mut self, block: usize, old: &str, cursor: usize) -> Option<Caret> {
+        let b = self.blocks.get_mut(block)?;
+        if b.kind != Kind::Body || cursor != 2 {
+            return None;
+        }
+        let kind = match b.text.get(..2)? {
+            "# " => Kind::Heading,
+            "- " => Kind::ListItem,
+            _ => return None,
+        };
+        if old.starts_with(&b.text[..2]) {
+            return None;
+        }
+        b.kind = kind;
+        b.text.drain(..2);
+        Some(Caret { block, offset: 0 })
+    }
+
     /// Toggle one style flag of a block. False when the block has no text (an image).
     pub fn toggle_style(&mut self, block: usize, flag: Style) -> bool {
         match self.blocks.get_mut(block) {
@@ -438,6 +459,25 @@ mod tests {
     }
     fn doc(blocks: &[(Kind, &str)]) -> Document {
         Document::from_blocks(blocks.iter().map(|&(k, t)| Block::new(k, t)).collect())
+    }
+
+    #[test]
+    fn hash_or_dash_then_space_at_the_start_of_a_body_makes_a_heading_or_list_item() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "# ")]);
+        assert_eq!(d.auto_format(1, "#", 2), Some(Caret { block: 1, offset: 0 }));
+        assert_eq!((d.blocks()[1].kind, d.blocks()[1].text.as_str()), (Kind::Heading, ""));
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "- milk")]);
+        assert_eq!(d.auto_format(1, "-milk", 2), Some(Caret { block: 1, offset: 0 }));
+        assert_eq!((d.blocks()[1].kind, d.blocks()[1].text.as_str()), (Kind::ListItem, "milk"));
+    }
+
+    #[test]
+    fn the_markers_do_nothing_elsewhere() {
+        let mut d = doc(&[(Kind::Title, "# "), (Kind::Body, "a # "), (Kind::Body, "- x")]);
+        assert_eq!(d.auto_format(0, "#", 2), None, "the title stays the title");
+        assert_eq!(d.auto_format(1, "a #", 4), None);
+        assert_eq!(d.auto_format(2, "- x", 2), None, "already there before the edit");
+        assert_eq!(d.auto_format(9, "", 2), None);
     }
 
     // ---- the format ----

@@ -6,11 +6,13 @@
 //! shows instead. Both must break lines in the same places, so this module wraps with the advances
 //! of the same embedded fonts (they have no kerning table, so the advances are exact).
 
-use crate::document::{Block, Kind};
+use crate::document::{Block, Kind, Style as Flags};
 use ttf_parser::Face;
 
 const REGULAR: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight.ttf");
 const BOLD: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Bold.ttf");
+const ITALIC: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Italic.ttf");
+const BOLD_ITALIC: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-BoldItalic.ttf");
 
 /// The look of one kind of block: font size and line pitch, in logical px.
 #[derive(Debug, Clone, Copy)]
@@ -53,6 +55,7 @@ pub struct Run {
     pub block: usize,
     pub kind: Kind,
     pub bold: bool,
+    pub italic: bool,
     /// Line within the block (0 first).
     pub line: usize,
     pub text: String,
@@ -73,8 +76,13 @@ struct Measure<'a> {
 }
 
 impl<'a> Measure<'a> {
-    fn new(bold: bool, size: f64) -> Measure<'a> {
-        let data = if bold { BOLD } else { REGULAR };
+    fn new(bold: bool, italic: bool, size: f64) -> Measure<'a> {
+        let data = match (bold, italic) {
+            (false, false) => REGULAR,
+            (true, false) => BOLD,
+            (false, true) => ITALIC,
+            (true, true) => BOLD_ITALIC,
+        };
         let face = Face::parse(data, 0).expect("embedded font parses");
         let scale = size / face.units_per_em() as f64;
         Measure { face, scale }
@@ -204,7 +212,7 @@ fn line_starts(lines: &[Vec<Word>]) -> Vec<usize> {
 /// The visual line and x of the caret at byte `offset` of block `b`, in a paper `paper_w` wide.
 pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLine {
     let avail = paper_w - t.inset_left - t.inset_right;
-    let m = Measure::new(b.is_bold(), t.style(b.kind).size);
+    let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
     let mut offset = offset.min(b.text.len());
@@ -218,7 +226,7 @@ pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLi
 /// The byte offset on visual `line` (clamped to the block's last) of block `b` nearest to `x`.
 pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> usize {
     let avail = paper_w - t.inset_left - t.inset_right;
-    let m = Measure::new(b.is_bold(), t.style(b.kind).size);
+    let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
     let line = line.min(lines.len() - 1);
@@ -238,9 +246,35 @@ pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> us
     best.0
 }
 
+/// A thin filled bar in the paper's frame: an underline, a strike-through or a list bullet.
+/// Level box (`x`, `y`, `width`, `height`) plus the offset (`dx`, `dy`) onto the tilted baseline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rule {
+    pub block: usize,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub dx: f64,
+    pub dy: f64,
+}
+
+/// Where the baseline of a line is below the top of its line box: the font's ascent plus half of
+/// the leading the line pitch adds to the font's natural line height.
+fn baseline(m: &Measure, pitch: f64) -> f64 {
+    let (asc, desc) = (m.face.ascender() as f64 * m.scale, m.face.descender() as f64 * m.scale);
+    asc + (pitch - (asc - desc)) / 2.0
+}
+
 /// Lay the blocks out in a paper of size `paper` (logical px).
 pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
-    layout_with_images(blocks, paper, t, &|_| None)
+    layout_all(blocks, paper, t).0
+}
+
+/// [`layout`], and the bars that go with it: underlines and strike-throughs (a bar per line, in
+/// pieces like the words) and a bullet for each list item.
+pub fn layout_all(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> (Vec<Run>, Vec<Rule>) {
+    layout_all_with_images(blocks, paper, t, &|_| None)
 }
 
 /// The height of an image at the width it is shown: the text-area width times its aspect ratio.
@@ -252,11 +286,12 @@ pub fn image_height(width: f64, pixels: (u32, u32)) -> f64 {
     }
 }
 
-/// Like [`layout`], where `image_size` gives an image block's size in pixels. An image block is as
+/// Like [`layout_all`], where `image_size` gives an image block's size in pixels. An image block is as
 /// wide as the text area and as tall as its aspect ratio makes it (a missing size: one body line).
-pub fn layout_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Vec<Run> {
+pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<Run>, Vec<Rule>) {
     let avail = paper.0 - t.inset_left - t.inset_right;
     let mut runs = vec![];
+    let mut rules = vec![];
     let mut top = t.inset_top;
     for (bi, b) in blocks.iter().enumerate() {
         let st = t.style(b.kind);
@@ -267,24 +302,90 @@ pub fn layout_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image
             top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
             continue;
         }
-        let m = Measure::new(b.is_bold(), st.size);
-        for (li, line) in wrap(&b.text, avail, &m).into_iter().enumerate() {
+        let italic = b.style.contains(Flags::ITALIC);
+        let m = Measure::new(b.is_bold(), italic, st.size);
+        let lines = wrap(&b.text, avail, &m);
+        let base = baseline(&m, st.pitch);
+        let thick = (st.size / 20.0).max(1.0);
+        let bar = |rules: &mut Vec<Rule>, x: f64, y: f64, width: f64, height: f64| {
+            let mut at = 0.0;
+            while at < width - 1e-9 {
+                let w = (width - at).min(t.max_run);
+                let (dx, dy) = tilt_offset(x + at + w / 2.0, y + height / 2.0, paper, t.tilt_deg);
+                rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy });
+                at += w;
+            }
+        };
+        if b.kind == Kind::ListItem {
+            let d = (st.size / 4.0).max(3.0);
+            bar(&mut rules, t.inset_left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
+        }
+        for (li, line) in lines.iter().enumerate() {
             let y = top + li as f64 * st.pitch;
             for Word { text: word, at, .. } in line {
                 let mut x = t.inset_left + at;
-                for piece in pieces(&word, t.max_run, &m) {
+                for piece in pieces(word, t.max_run, &m) {
                     let width = m.width(&piece);
                     let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
-                    runs.push(Run { block: bi, kind: b.kind, bold: b.is_bold(), line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                    runs.push(Run { block: bi, kind: b.kind, bold: b.is_bold(), italic, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
                     x += width;
+                }
+            }
+            if let (Some(first), Some(last)) = (line.first(), line.last()) {
+                let (x0, x1) = (t.inset_left + first.at, t.inset_left + last.at + m.width(&last.text));
+                if b.style.contains(Flags::UNDERLINE) {
+                    bar(&mut rules, x0, y + base + 0.1 * st.size, x1 - x0, thick);
+                }
+                if b.style.contains(Flags::STRIKE) {
+                    bar(&mut rules, x0, y + base - 0.3 * st.size, x1 - x0, thick);
                 }
             }
         }
         // every block takes at least one line, even when empty
-        let n = wrap(&b.text, avail, &m).len();
-        top += n as f64 * st.pitch;
+        top += lines.len() as f64 * st.pitch;
     }
-    runs
+    (runs, rules)
+}
+
+/// Vertical extent of the text in the paper's frame: the top of every block, and the bottom of the
+/// last line (what the note scrolls through).
+pub fn extent(blocks: &[Block], paper_w: f64, t: &Tokens) -> (Vec<f64>, f64) {
+    extent_with_images(blocks, paper_w, t, &|_| None)
+}
+
+/// [`extent`] with the sizes of the images (see [`layout_all_with_images`]).
+pub fn extent_with_images(blocks: &[Block], paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<f64>, f64) {
+    let avail = paper_w - t.inset_left - t.inset_right;
+    let mut tops = vec![];
+    let mut top = t.inset_top;
+    for (bi, b) in blocks.iter().enumerate() {
+        let st = t.style(b.kind);
+        if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
+            top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
+        }
+        tops.push(top);
+        if b.kind == Kind::Image {
+            top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
+            continue;
+        }
+        let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), st.size);
+        top += wrap(&b.text, avail, &m).len() as f64 * st.pitch;
+    }
+    (tops, top)
+}
+
+/// The top and bottom of the line holding the caret (byte `offset` of block `block`), in the paper's frame.
+pub fn caret_span(blocks: &[Block], block: usize, offset: usize, paper_w: f64, t: &Tokens) -> Option<(f64, f64)> {
+    caret_span_with_images(blocks, block, offset, paper_w, t, &|_| None)
+}
+
+/// [`caret_span`] with the sizes of the images.
+pub fn caret_span_with_images(blocks: &[Block], block: usize, offset: usize, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Option<(f64, f64)> {
+    let b = blocks.get(block)?;
+    let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+    let pitch = t.style(b.kind).pitch;
+    let y = tops[block] + caret_line(b, offset, paper_w, t).line as f64 * pitch;
+    Some((y, y + pitch))
 }
 
 #[cfg(test)]
@@ -306,6 +407,30 @@ mod tests {
     };
 
     const MOCKUP: &str = "# Endfield Note\n## **Thermite Cutter : POG & Akekuri**\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";
+
+    #[test]
+    fn extent_gives_block_tops_and_the_bottom_of_the_last_line() {
+        let doc = Document::parse(MOCKUP);
+        let (tops, bottom) = extent(doc.blocks(), 363.0, &TOKENS);
+        let runs = layout(doc.blocks(), (363.0, 433.0), &TOKENS);
+        for (bi, top) in tops.iter().enumerate() {
+            let first = runs.iter().find(|r| r.block == bi).unwrap();
+            assert!((first.y - top).abs() < 1e-9);
+        }
+        let last = runs.last().unwrap();
+        assert!((bottom - (last.y + last.pitch)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn caret_span_is_the_line_box_of_the_caret() {
+        let doc = Document::parse(MOCKUP);
+        let runs = layout(doc.blocks(), (363.0, 433.0), &TOKENS);
+        let last_len = doc.blocks()[2].text.len();
+        let (top, bottom) = caret_span(doc.blocks(), 2, last_len, 363.0, &TOKENS).unwrap();
+        let last = runs.last().unwrap();
+        assert_eq!((top, bottom), (last.y, last.y + last.pitch));
+        assert_eq!(caret_span(doc.blocks(), 9, 0, 363.0, &TOKENS), None);
+    }
 
     fn line_texts(runs: &[Run], block: usize) -> Vec<String> {
         let n = runs.iter().filter(|r| r.block == block).map(|r| r.line).max().map_or(0, |l| l + 1);

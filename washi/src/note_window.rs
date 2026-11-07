@@ -3,7 +3,8 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{Block, Caret, Document, Kind};
+use crate::document::{Block, Caret, Document, Kind, Style as Flags};
+use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
 use crate::textflow::{self, Style, Tokens};
@@ -139,18 +140,39 @@ struct Doc {
     doc: RefCell<Document>,
     model: Rc<VecModel<BlockData>>,
     runs: Rc<VecModel<RunData>>,
+    rules: Rc<VecModel<RuleData>>,
+    /// The block that last held the caret: what the toolbar and the format shortcuts act on.
+    caret: Cell<usize>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
     /// Sizes and decoded pixels of the note's pictures.
     images: NoteImages,
+    /// Undo and redo (ticket 12): the snapshots of this note's document.
+    history: RefCell<History<Document>>,
 }
+
+/// Typing is snapshotted once it pauses this long; structural changes are snapshotted at once.
+pub const HISTORY_PAUSE: Duration = Duration::from_millis(500);
+
+/// The keys the block field sends for Ctrl+Z and Ctrl+Y (see ui/block.slint).
+const UNDO_KEY: &str = "\u{1a}";
+const REDO_KEY: &str = "\u{19}";
 
 /// The shown text of an empty note.
 pub const HINT: &str = "Note Something....";
 
 impl Doc {
     fn new(images: NoteImages) -> Rc<Doc> {
-        Rc::new(Doc { doc: RefCell::new(Document::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)), images })
+        Rc::new(Doc {
+            doc: RefCell::new(Document::new()),
+            model: Rc::new(VecModel::default()),
+            runs: Rc::new(VecModel::default()),
+            rules: Rc::new(VecModel::default()),
+            caret: Cell::new(0),
+            paper: Cell::new((363.0, 433.0)),
+            history: RefCell::new(History::new(Document::new())),
+            images,
+        })
     }
 
     /// A block as the window shows it.
@@ -164,7 +186,37 @@ impl Doc {
         let parsed = Document::parse(content);
         self.images.load(&parsed);
         self.model.set_vec(parsed.blocks().iter().map(|b| self.block_data(b)).collect::<Vec<_>>());
+        *self.history.borrow_mut() = History::new(parsed.clone());
         *self.doc.borrow_mut() = parsed;
+    }
+
+    /// Snapshot the document as it is now (typing paused, or an undo is about to step back).
+    fn checkpoint(&self) {
+        self.history.borrow_mut().record(self.doc.borrow().clone());
+    }
+
+    /// A structural change just happened to the document that was `before`: snapshot the typing
+    /// before it, then the change.
+    fn structural(&self, before: Document) {
+        let mut h = self.history.borrow_mut();
+        h.record(before);
+        h.record(self.doc.borrow().clone());
+    }
+
+    /// Ctrl+Z (`redo` false) or Ctrl+Y: show the previous or next snapshot. The caret to place,
+    /// or `None` when there is no such snapshot.
+    fn step(&self, redo: bool) -> Option<Caret> {
+        self.checkpoint();
+        let target = {
+            let mut h = self.history.borrow_mut();
+            if redo { h.redo() } else { h.undo() }?.clone()
+        };
+        let mut doc = self.doc.borrow_mut();
+        let at = doc.blocks().iter().zip(target.blocks()).take_while(|(a, b)| a == b).count();
+        let block = at.min(target.len() - 1);
+        let offset = target.blocks()[block].text.len();
+        *doc = target;
+        Some(Caret { block, offset })
     }
 
     fn tokens(ui: &NoteWindow) -> Tokens {
@@ -208,7 +260,14 @@ impl Doc {
     fn relayout(&self, ui: &NoteWindow) {
         let tokens = Self::tokens(ui);
         let doc = self.doc.borrow();
-        let mut runs = textflow::layout_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
+        let (mut runs, rules) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
+        ui.set_content_height(textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b)).1 as f32);
+        self.rules.set_vec(
+            rules
+                .iter()
+                .map(|r| RuleData { x: r.x as f32, y: r.y as f32, dx: r.dx as f32, dy: r.dy as f32, width: r.width as f32, height: r.height as f32 })
+                .collect::<Vec<_>>(),
+        );
         let hint = doc.is_empty();
         if hint {
             runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
@@ -225,6 +284,7 @@ impl Doc {
                     size: r.size as f32,
                     pitch: r.pitch as f32,
                     bold: r.bold,
+                    italic: r.italic,
                     hint,
                 })
                 .collect::<Vec<_>>(),
@@ -235,14 +295,79 @@ impl Doc {
         self.doc.borrow().to_text()
     }
 
+    /// The caret's block, kept within the document.
+    fn caret_block(&self) -> usize {
+        self.caret.get().min(self.doc.borrow().len().saturating_sub(1))
+    }
+
+    /// Toolbar button or shortcut `what` (0 bold, 1 italic, 2 underline, 3 strike, 4 list) on the
+    /// paragraph holding the caret. True when the document changed.
+    fn format(&self, what: i32) -> bool {
+        let i = self.caret_block();
+        let before = self.doc.borrow().clone();
+        let done = {
+            let mut doc = self.doc.borrow_mut();
+            match what {
+                0 => doc.toggle_style(i, Flags::BOLD),
+                1 => doc.toggle_style(i, Flags::ITALIC),
+                2 => doc.toggle_style(i, Flags::UNDERLINE),
+                3 => doc.toggle_style(i, Flags::STRIKE),
+                4 => doc.toggle_list(i),
+                _ => false,
+            }
+        };
+        if done {
+            self.structural(before);
+        }
+        done
+    }
+
+    /// Show the formats of the caret's paragraph on the toolbar buttons.
+    fn show_formats(&self, ui: &NoteWindow) {
+        let doc = self.doc.borrow();
+        let b = doc.blocks().get(self.caret_block());
+        let has = |f: Flags| b.is_some_and(|b| b.style.contains(f));
+        ui.set_fmt_bold(b.is_some_and(|b| b.is_bold()));
+        ui.set_fmt_italic(has(Flags::ITALIC));
+        ui.set_fmt_underline(has(Flags::UNDERLINE));
+        ui.set_fmt_strike(has(Flags::STRIKE));
+        ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
+    }
+
+    /// Scroll the least that brings the caret's line into the text area (the top of the note when
+    /// the caret is on its first line).
+    fn reveal(&self, ui: &NoteWindow, block: usize, offset: usize) {
+        let tokens = Self::tokens(ui);
+        let doc = self.doc.borrow();
+        let Some((top, bottom)) = textflow::caret_span_with_images(doc.blocks(), block, offset, self.paper.get().0, &tokens, &|b| self.images.size(b)) else { return };
+        let (_, content) = textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b));
+        let view = ui.get_text_view_height() as f64;
+        let cur = ui.get_scroll_y() as f64;
+        let mut to = if top <= tokens.inset_top + 0.5 { 0.0 } else if top < cur { top } else if bottom > cur + view { bottom - view } else { cur };
+        to = to.min((content - view).max(0.0)).max(0.0);
+        if (to - cur).abs() > 0.01 {
+            ui.set_scroll_y(to as f32);
+        }
+    }
+
     /// Block `i` was edited to `text`, the caret now at `cursor`. Line breaks in it (a paste) make
     /// new blocks; then the caret to move to is returned.
     fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
-        let mut doc = self.doc.borrow_mut();
         if !text.contains(['\n', '\r']) {
+            let before = self.doc.borrow().clone();
+            let mut doc = self.doc.borrow_mut();
+            let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
             doc.set_text(i, text);
-            return None;
+            // `# ` or `- ` typed at the start of a paragraph
+            let caret = doc.auto_format(i, &old, cursor);
+            drop(doc);
+            if caret.is_some() {
+                self.structural(before);
+            }
+            return caret;
         }
+        let before = self.doc.borrow().clone();
+        let mut doc = self.doc.borrow_mut();
         let old = match doc.blocks().get(i) {
             Some(b) if b.is_text() => b.text.clone(),
             _ => return None,
@@ -260,7 +385,10 @@ impl Doc {
         while !old.is_char_boundary(start) || !text.is_char_boundary(start) {
             start -= 1;
         }
-        Some(doc.insert_text(i, start, end, &text[start..cursor]))
+        let caret = doc.insert_text(i, start, end, &text[start..cursor]);
+        drop(doc);
+        self.structural(before);
+        Some(caret)
     }
 
     /// Enter, Backspace, Delete, Up or Down in block `i` at `offset`. `Some((caret, changed))` when
@@ -268,16 +396,25 @@ impl Doc {
     /// `None` when the field keeps it.
     fn key(&self, i: usize, key: &str, offset: usize, ui: &NoteWindow) -> Option<(Caret, bool)> {
         use slint::platform::Key;
+        let before = self.doc.borrow().clone();
         let mut doc = self.doc.borrow_mut();
         let is = |k: Key| key == char::from(k).to_string();
-        if is(Key::Return) {
-            return Some((doc.split(i, offset), true));
+        let edit = if is(Key::Return) {
+            Some(doc.split(i, offset))
+        } else if is(Key::Backspace) {
+            doc.backspace(i, offset)
+        } else if is(Key::Delete) {
+            doc.delete(i, offset)
+        } else {
+            None
+        };
+        if let Some(c) = edit {
+            drop(doc);
+            self.structural(before);
+            return Some((c, true));
         }
-        if is(Key::Backspace) {
-            return doc.backspace(i, offset).map(|c| (c, true));
-        }
-        if is(Key::Delete) {
-            return doc.delete(i, offset).map(|c| (c, true));
+        if is(Key::Return) || is(Key::Backspace) || is(Key::Delete) {
+            return None;
         }
         let up = is(Key::UpArrow);
         if !up && !is(Key::DownArrow) {
@@ -322,7 +459,7 @@ fn block_data(b: &Block) -> BlockData {
         Kind::ListItem => BlockKind::ListItem,
         Kind::Image => BlockKind::Image,
     };
-    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold(), img: Default::default(), img_w: 0, img_h: 0 }
+    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold(), italic: b.style.contains(Flags::ITALIC), img: Default::default(), img_w: 0, img_h: 0 }
 }
 
 pub struct Note {
@@ -331,6 +468,8 @@ pub struct Note {
     doc: Rc<Doc>,
     autosave: Rc<Autosave>,
     timer: Rc<Timer>,
+    /// Snapshots typing once it pauses (stopped while suspended; the next undo snapshots anyway).
+    history_timer: Rc<Timer>,
     geometry: Rc<GeometrySave>,
     geometry_timer: Rc<Timer>,
     /// Everything that changes the text ends here (see `open`).
@@ -354,7 +493,9 @@ impl Note {
         doc.load(content);
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
+        ui.set_rules(slint::ModelRc::from(doc.rules.clone()));
         doc.relayout(&ui);
+        doc.show_formats(&ui);
         ui.set_text(doc.text().as_str().into());
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
@@ -365,6 +506,7 @@ impl Note {
         }
         let autosave = Rc::new(Autosave { id, db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
+        let history_timer = Rc::new(Timer::default());
         // everything that changes the text ends here: relayout, stored text, title, autosave
         let changed: Rc<dyn Fn(Option<Caret>)> = {
             let (autosave, timer, weak, doc) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone());
@@ -376,9 +518,14 @@ impl Note {
                     ui.set_text(text.as_str().into());
                     ui.set_window_title(window_title(&text).into());
                     if let Some(c) = focus {
+                        doc.caret.set(c.block);
+                    }
+                    doc.show_formats(&ui);
+                    if let Some(c) = focus {
                         ui.set_focus_block(c.block as i32);
                         ui.set_focus_offset(c.offset as i32);
                         ui.set_focus_serial(ui.get_focus_serial() + 1);
+                        doc.reveal(&ui, c.block, c.offset);
                     }
                 }
                 autosave.dirty.set(true);
@@ -387,16 +534,45 @@ impl Note {
             })
         };
         {
-            let (changed, doc) = (changed.clone(), doc.clone());
+            let (changed, doc, history_timer) = (changed.clone(), doc.clone(), history_timer.clone());
             ui.on_block_edited(move |i, block_text, cursor| {
                 let caret = doc.edit(i.max(0) as usize, block_text.as_str(), cursor.max(0) as usize);
+                if caret.is_none() {
+                    // typing: snapshot when it pauses
+                    let doc = doc.clone();
+                    history_timer.start(TimerMode::SingleShot, HISTORY_PAUSE, move || doc.checkpoint());
+                }
                 changed(caret);
+            });
+        }
+        {
+            let (changed, doc) = (changed.clone(), doc.clone());
+            ui.on_format(move |what| {
+                if doc.format(what) {
+                    changed(None);
+                }
+            });
+        }
+        {
+            let (doc, weak) = (doc.clone(), ui.as_weak());
+            ui.on_focus_entered(move |i| {
+                doc.caret.set(i.max(0) as usize);
+                if let Some(ui) = weak.upgrade() {
+                    doc.show_formats(&ui);
+                }
             });
         }
         {
             let (changed, doc, weak) = (changed.clone(), doc.clone(), ui.as_weak());
             ui.on_block_key(move |i, key, offset| {
                 let Some(ui) = weak.upgrade() else { return false };
+                if key == UNDO_KEY || key == REDO_KEY {
+                    // taken even with nothing to step to: the field has no history of its own
+                    if let Some(caret) = doc.step(key == REDO_KEY) {
+                        changed(Some(caret));
+                    }
+                    return true;
+                }
                 let Some((caret, edited)) = doc.key(i.max(0) as usize, key.as_str(), offset.max(0) as usize, &ui) else { return false };
                 if edited {
                     changed(Some(caret));
@@ -405,8 +581,17 @@ impl Note {
                     ui.set_focus_block(caret.block as i32);
                     ui.set_focus_offset(caret.offset as i32);
                     ui.set_focus_serial(ui.get_focus_serial() + 1);
+                    doc.reveal(&ui, caret.block, caret.offset);
                 }
                 true
+            });
+        }
+        {
+            let (doc, weak) = (doc.clone(), ui.as_weak());
+            ui.on_caret_moved(move |block, offset| {
+                if let Some(ui) = weak.upgrade() {
+                    doc.reveal(&ui, block.max(0) as usize, offset.max(0) as usize);
+                }
             });
         }
         {
@@ -469,7 +654,7 @@ impl Note {
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, geometry, geometry_timer: Rc::new(Timer::default()), changed })
+        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), changed })
     }
 
     /// Where an image added now goes: after the block that has the caret (or last had it).
@@ -578,6 +763,8 @@ impl Note {
         self.ui.set_text_focused_block(-1);
         self.ui.set_focus_block(-1);
         self.doc.load(text);
+        self.doc.caret.set(0);
+        self.doc.show_formats(&self.ui);
         self.doc.relayout(&self.ui);
         self.ui.set_text(self.doc.text().as_str().into());
         self.ui.set_window_title(window_title(text).into());
@@ -591,6 +778,7 @@ impl Note {
     /// does not blink). Unsaved edits must have been flushed first.
     pub fn pause(&self) {
         self.timer.stop();
+        self.history_timer.stop();
         self.geometry_timer.stop();
         // the text keeps its look (editing or resting) while nobody can see it: no redraw
         self.ui.set_suspended(true);

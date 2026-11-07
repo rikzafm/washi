@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod document;
+pub mod history;
 pub mod icon;
 pub mod images;
 pub mod export;

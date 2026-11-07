@@ -8,6 +8,7 @@
 //! --scale <n>            physical px per logical px (default 1.5)
 //! --paper <WxH>          paper size in logical px (default 363x384)
 //! --hover                move a real pointer over the note first
+//! --caret <n>            the paragraph holding the caret (sets the toolbar's active buttons; default the title)
 //! --canvas <WxH>         output size in px (default 720x840)
 //! --desk <RRGGBB>        desk color (default D9DDE1)
 //! --out <png>            output file (default snap.png)
@@ -16,7 +17,7 @@ use snap::shot::{snapshot, Options};
 use std::path::PathBuf;
 
 fn usage() -> ! {
-    eprintln!("usage: snap [--fixture <name|path>] [--fixtures-dir <dir>] [--scale <n>] [--paper <WxH>] [--hover] [--canvas <WxH>] [--desk <RRGGBB>] [--out <png>]");
+    eprintln!("usage: snap [--fixture <name|path>] [--fixtures-dir <dir>] [--scale <n>] [--paper <WxH>] [--hover] [--caret <n>] [--canvas <WxH>] [--desk <RRGGBB>] [--out <png>]");
     std::process::exit(2)
 }
 
@@ -50,6 +51,7 @@ fn run() -> Result<(), String> {
                 o.desk = [(n >> 16) as u8, (n >> 8) as u8, n as u8];
             }
             "--hover" => o.hover = true,
+            "--caret" => o.caret_block = Some(value(&mut i)?.parse().map_err(|_| "--caret needs a block number")?),
             "--out" => out = PathBuf::from(value(&mut i)?),
             _ => usage(),
         }

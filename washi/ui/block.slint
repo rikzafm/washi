@@ -16,6 +16,7 @@ export struct BlockData {
     img: image,
     img-w: int,
     img-h: int,
+    italic: bool,
 }
 
 /// One word at rest: upright, at its level place (x, y) plus the offset (dx, dy) that puts it on the tilted baseline.
@@ -29,8 +30,19 @@ export struct RunData {
     size: length,
     pitch: length,
     bold: bool,
+    italic: bool,
     /// The empty-note hint rather than note text.
     hint: bool,
+}
+
+/// An underline, a strike-through or a list bullet: a level box plus the offset onto the tilted baseline.
+export struct RuleData {
+    x: length,
+    y: length,
+    dx: length,
+    dy: length,
+    width: length,
+    height: length,
 }
 
 // One paragraph: an editable text field styled by its kind.
@@ -44,6 +56,7 @@ export component BlockView inherits Rectangle {
     in property <int> img-h: 0;
     /// Ctrl+V: true when the note took it (the clipboard held a picture).
     callback paste-image() -> bool;
+    in property <bool> italic: false;
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
     in property <length> gap-before: 0px;
@@ -59,6 +72,8 @@ export component BlockView inherits Rectangle {
     in property <int> focus-serial: 0;
     in property <int> focus-offset: 0;
     callback focus-changed(bool);
+    /// The caret of this block's field moved to this byte offset (the note keeps it in view).
+    callback caret-moved(int);
     /// Bumped to make the field state its focus again (after a suspension).
     in property <int> resync: 0;
     changed resync => { root.focus-changed(input.has-focus); }
@@ -105,6 +120,7 @@ export component BlockView inherits Rectangle {
         font-family: Theme.handwriting;
         font-size: root.size;
         font-weight: root.bold ? 700 : 400;
+        font-italic: root.italic;
         line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
         color: Theme.ink;
         // hidden, not removed: a click still lands in the field and starts editing
@@ -112,9 +128,22 @@ export component BlockView inherits Rectangle {
         // an image has no text field
         visible: root.kind != BlockKind.image;
         edited => { root.edited(self.text, self.cursor-position-byte-offset); }
+        changed cursor-position-byte-offset => {
+            if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset); }
+        }
         key-pressed(e) => {
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift && (e.text == "v" || e.text == "\u{16}") && root.paste-image()) {
                 return accept;
+            }
+            // Ctrl+Z undoes, Ctrl+Y (or Ctrl+Shift+Z) redoes: the note keeps the history, not the field
+            if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta) {
+                if (!e.modifiers.shift && (e.text == "z" || e.text == "\u{1a}")) {
+                    return root.key("\u{1a}", self.cursor-position-byte-offset) ? accept : reject;
+                }
+                if ((!e.modifiers.shift && (e.text == "y" || e.text == "\u{19}"))
+                    || (e.modifiers.shift && (e.text == "z" || e.text == "Z" || e.text == "\u{1a}"))) {
+                    return root.key("\u{19}", self.cursor-position-byte-offset) ? accept : reject;
+                }
             }
             if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta
                 || self.cursor-position-byte-offset != self.anchor-position-byte-offset) {
