@@ -41,13 +41,26 @@ pub struct WindowState {
     pub focused: bool,
 }
 
-/// Window-state signals used by the suspend controller (a later ticket).
+/// Something the platform noticed about Washi's windows, delivered on the UI thread.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SignalEvent {
+    /// A note minimized, restored, gained or lost focus, or Washi moved to or from the background.
+    StateChanged,
+    /// Windows asked a note to paint (for example because it was uncovered).
+    Paint(NoteId),
+}
+
+/// Window-state signals used by the suspend controller.
 pub trait WindowSignals {
     fn window_state(&self, note: NoteId) -> WindowState;
     fn app_in_background(&self) -> bool;
     /// A note's native window now exists / is gone. Fakes ignore this.
     fn attach(&self, _note: NoteId, _hwnd: isize) {}
     fn detach(&self, _note: NoteId) {}
+    /// Deliver [`SignalEvent`]s to `notify` (on the UI thread, never from inside a window
+    /// procedure) so a suspended app wakes without polling. Fakes ignore this: tests call the
+    /// app directly.
+    fn set_notifier(&self, _notify: std::rc::Rc<dyn Fn(SignalEvent)>) {}
 }
 
 /// Efficiency mode and memory release (suspension, a later ticket).

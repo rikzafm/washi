@@ -251,3 +251,176 @@ fn a_woken_app_can_suspend_again_after_minimizing_again() {
     assert!(h.is_suspended());
     assert_eq!(h.power.log.borrow().iter().filter(|e| *e == "efficiency_on").count(), 2);
 }
+
+// ---- suspending when covered (ticket 18) ----
+
+fn cover_all(h: &mut Harness) {
+    for n in 0..h.open_note_count() {
+        h.cover(n);
+    }
+}
+
+#[test]
+fn background_and_all_covered_suspends_at_10_seconds() {
+    let mut h = three_notes();
+    h.switch_away();
+    cover_all(&mut h);
+    h.advance(secs(9));
+    assert!(!h.is_suspended());
+    h.advance(secs(1));
+    assert!(h.is_suspended());
+    assert_eq!(*h.power.log.borrow(), ["release_memory", "efficiency_on"], "the same sequence as minimized");
+}
+
+#[test]
+fn switching_back_at_3_seconds_never_suspends() {
+    let mut h = three_notes();
+    h.switch_away();
+    cover_all(&mut h);
+    h.advance(secs(3));
+    h.switch_back();
+    h.advance(secs(60));
+    assert!(!h.is_suspended());
+}
+
+#[test]
+fn covered_notes_in_the_foreground_do_not_suspend() {
+    let mut h = three_notes();
+    cover_all(&mut h);
+    h.advance(secs(60));
+    assert!(!h.is_suspended());
+}
+
+#[test]
+fn one_uncovered_note_prevents_suspending() {
+    let mut h = three_notes();
+    h.switch_away();
+    h.cover(0);
+    h.cover(1);
+    h.advance(secs(60));
+    assert!(!h.is_suspended());
+}
+
+#[test]
+fn uncovering_a_note_during_the_grace_period_cancels_it() {
+    let mut h = three_notes();
+    h.switch_away();
+    cover_all(&mut h);
+    h.advance(secs(5));
+    h.uncover(2);
+    h.advance(secs(60));
+    assert!(!h.is_suspended());
+}
+
+#[test]
+fn some_minimized_and_the_rest_covered_suspends() {
+    let mut h = three_notes();
+    h.switch_away();
+    h.minimize(0);
+    h.cover(1);
+    h.cover(2);
+    h.advance(secs(10));
+    assert!(h.is_suspended());
+}
+
+#[test]
+fn minimized_notes_suspend_in_the_foreground_but_covered_ones_do_not() {
+    let mut h = three_notes();
+    h.minimize(0);
+    h.minimize(1);
+    h.cover(2);
+    h.advance(secs(60));
+    assert!(!h.is_suspended());
+}
+
+#[test]
+fn an_alt_tab_flicker_restarts_the_10_seconds() {
+    let mut h = three_notes();
+    cover_all(&mut h);
+    h.switch_away();
+    h.advance(secs(6));
+    h.switch_back();
+    h.advance(secs(1));
+    h.switch_away();
+    h.advance(secs(9));
+    assert!(!h.is_suspended());
+    h.advance(secs(1));
+    assert!(h.is_suspended());
+}
+
+// The occlusion check runs on a 5 s timer only while in the background and not suspended.
+
+#[test]
+fn no_timer_runs_while_in_the_foreground() {
+    let mut h = three_notes();
+    h.switch_away(); // windows go inactive, so no caret blink either
+    assert_eq!(h.next_timer_due(), Some(secs(5)), "the periodic check starts when Washi goes to the background");
+    h.advance(secs(2));
+    assert_eq!(h.next_timer_due(), Some(secs(3)));
+    h.switch_back();
+    assert_eq!(h.next_timer_due(), None);
+}
+
+#[test]
+fn the_check_repeats_every_5_seconds_and_stops_when_suspended() {
+    let mut h = three_notes();
+    h.switch_away();
+    h.advance(secs(5));
+    assert_eq!(h.next_timer_due(), Some(secs(5)));
+    cover_all(&mut h);
+    h.advance(secs(10));
+    assert!(h.is_suspended());
+    assert_eq!(h.next_timer_due(), None);
+}
+
+// ---- waking from covered ----
+
+fn suspended_covered() -> Harness {
+    let mut h = three_notes();
+    for n in 0..3 {
+        h.render(n);
+    }
+    h.switch_away();
+    cover_all(&mut h);
+    h.advance(secs(10));
+    assert!(h.is_suspended());
+    h
+}
+
+#[test]
+fn a_repaint_request_wakes_a_covered_suspended_app() {
+    let mut h = suspended_covered();
+    h.uncover(1);
+    assert_awake_with_full_repaint(&mut h);
+}
+
+#[test]
+fn hovering_wakes_a_covered_suspended_app() {
+    let mut h = suspended_covered();
+    h.hover(0);
+    assert_awake_with_full_repaint(&mut h);
+}
+
+#[test]
+fn focusing_wakes_a_covered_suspended_app() {
+    let mut h = suspended_covered();
+    h.switch_back();
+    assert_awake_with_full_repaint(&mut h);
+}
+
+#[test]
+fn a_woken_app_still_covered_in_the_background_suspends_again() {
+    let mut h = suspended_covered();
+    h.hover(0);
+    assert!(!h.is_suspended());
+    h.advance(secs(10));
+    assert!(h.is_suspended());
+}
+
+#[test]
+fn waking_in_the_background_restarts_the_5_second_check() {
+    let mut h = suspended_covered();
+    h.uncover(0);
+    h.paint_request(0);
+    assert_eq!(h.next_timer_due().map(|d| d <= secs(5)), Some(true));
+}
