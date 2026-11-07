@@ -8,7 +8,7 @@ use slint::{LogicalPosition, PhysicalSize};
 use std::time::Duration;
 
 /// Transparent margin around the paper inside the window, in logical px (spec: layout.window_margin).
-pub const WINDOW_MARGIN: f64 = 40.0;
+pub const WINDOW_MARGIN: f64 = 42.0;
 
 pub struct Options {
     /// Content of the note.
@@ -19,6 +19,9 @@ pub struct Options {
     pub paper: (f64, f64),
     /// Move a real pointer over the note before drawing.
     pub hover: bool,
+    /// The note has the keyboard focus (level text fields, caret shown) instead of resting
+    /// (words on the tilted baseline).
+    pub editing: bool,
     /// Output size in physical px (the mockup canvas).
     pub canvas: (u32, u32),
     pub desk: [u8; 3],
@@ -26,7 +29,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { text: String::new(), scale: 1.5, paper: (363.0, 384.0), hover: false, canvas: (720, 840), desk: [0xD9, 0xDD, 0xE1] }
+        Options { text: String::new(), scale: 1.5, paper: (363.0, 384.0), hover: false, editing: false, canvas: (720, 840), desk: [0xD9, 0xDD, 0xE1] }
     }
 }
 
@@ -76,7 +79,14 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
     win.draw_if_needed(|r| {
         r.render(&mut vec![PremultipliedRgbaColor::default(); (pw * ph) as usize], pw as usize);
     });
-    win.dispatch_event(WindowEvent::WindowActiveChanged(false));
+    win.dispatch_event(WindowEvent::WindowActiveChanged(o.editing));
+    // Slint animations start when first drawn: let the focus change through, draw once, then wait
+    // for the text to finish settling (flat when editing, tilted at rest).
+    h.advance(Duration::from_millis(2));
+    win.request_redraw();
+    win.draw_if_needed(|r| {
+        r.render(&mut vec![PremultipliedRgbaColor::default(); (pw * ph) as usize], pw as usize);
+    });
     if o.hover {
         win.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new((lw / 2.0) as f32, (lh / 2.0) as f32) });
     }

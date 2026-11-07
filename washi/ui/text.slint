@@ -11,6 +11,9 @@ import { BlockData, BlockKind, BlockView, RunData } from "block.slint";
 export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
     in property <[RunData]> runs;
+    /// While the note is suspended (covered, minimized) losing the focus does not change its look.
+    in property <bool> suspended: false;
+    in property <int> resync: 0;
     callback block-edited(int, string);
 
     // The block whose field has the focus, -1 for none. (Not a count: blocks that vanish with the
@@ -45,12 +48,13 @@ export component TextLayer inherits Rectangle {
             text: b.text;
             autofocus: i == 0;
             show-input: root.flat >= 1;
+            resync: root.resync;
             // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
             gap-before: i == 0 || root.blocks[i - 1].kind == b.kind ? 0px
                 : b.kind == BlockKind.heading ? Theme.heading-gap : Theme.body-gap;
             edited(t) => { root.block-edited(i, t); }
             focus-changed(f) => {
-                if (f) { root.focused-block = i; } else if (root.focused-block == i) { root.focused-block = -1; }
+                if (f) { root.focused-block = i; } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
             }
         }
     }

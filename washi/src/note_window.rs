@@ -306,11 +306,16 @@ impl Note {
     /// does not blink). Unsaved edits must have been flushed first.
     pub fn pause(&self) {
         self.timer.stop();
+        // the text keeps its look (editing or resting) while nobody can see it: no redraw
+        self.ui.set_suspended(true);
         self.ui.window().dispatch_event(slint::platform::WindowEvent::WindowActiveChanged(false));
     }
 
     /// Waking: draw the whole note again; `focused` notes get their caret blink back.
     pub fn resume(&self, focused: bool) {
+        self.ui.set_suspended(false);
+        // fields that lost the focus while suspended say so now
+        self.ui.set_text_resync(self.ui.get_text_resync() + 1);
         if focused {
             self.ui.window().dispatch_event(slint::platform::WindowEvent::WindowActiveChanged(true));
         }

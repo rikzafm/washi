@@ -2,7 +2,7 @@
 resolver = "2"
 members = ["washi", "tools/snap"]
 # Not part of the product build: uidiff keeps its own lockfile; spikes are throwaway.
-exclude = ["tools/uidiff", "spikes/slint", "spikes/sqlcipher"]
+exclude = ["tools/uidiff", "tools/tapegen", "spikes/slint", "spikes/sqlcipher"]
 default-members = ["washi"]
 
 [profile.release]

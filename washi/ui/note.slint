@@ -1,11 +1,10 @@
-import { Theme } from "theme.slint";
 import { BlockData, RunData } from "block.slint";
+import { PaperTheme } from "paper-theme.slint";
+import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
 
 export { BlockData, BlockKind, RunData } from "block.slint";
 export { Theme } from "theme.slint";
-
-// Walking-skeleton note: unstyled paper. Real styling arrives with the paper/theme tickets.
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
 
 export component NoteWindow inherits Window {
@@ -16,11 +15,13 @@ export component NoteWindow inherits Window {
     title: window-title;
     always-on-top: pinned;
     icon: app-icon;
-    preferred-width: 431px;
-    preferred-height: 451px;
-    min-width: 200px;
-    min-height: 200px;
-    background: #FFFFFD;
+    // The window is the paper plus a fixed transparent margin on every side.
+    no-frame: true;
+    background: transparent;
+    preferred-width: PaperTheme.paper-default-width + 2 * PaperTheme.margin;
+    preferred-height: PaperTheme.paper-default-height + 2 * PaperTheme.margin;
+    min-width: PaperTheme.paper-min-width + 2 * PaperTheme.margin;
+    min-height: PaperTheme.paper-min-height + 2 * PaperTheme.margin;
 
     /// The note's stored text, kept by the app; `blocks` is the same text split into styled blocks.
     in property <string> text;
@@ -35,6 +36,9 @@ export component NoteWindow inherits Window {
     out property <float> text-tilt-scale: text-layer.tilt-scale;
     /// The block whose field has the focus (-1 none). Rust clears it when it replaces the blocks.
     in-out property <int> text-focused-block <=> text-layer.focused-block;
+    /// Suspended (covered, minimized): the look must not change, so no redraw is asked for.
+    in property <bool> suspended: false;
+    in-out property <int> text-resync: 0;
     /// Block `i` was edited to this text.
     callback block-edited(int, string);
     /// Right click on the paper, in window coordinates.
@@ -49,8 +53,14 @@ export component NoteWindow inherits Window {
     // of its buttons. Keyboard focus never shows it. The band is reserved either way.
     out property <float> toolbar-opacity: toolbar.opacity;
     out property <bool> toolbar-visible: toolbar.visible;
-    property <length> margin: 40px;
-    property <angle> tilt: 1.5deg;
+    property <length> margin: PaperTheme.margin;
+    property <angle> tilt: PaperTheme.paper-tilt;
+    // The paper's untilted box in the window (the margin on every side).
+    property <length> paper-top: PaperTheme.margin;
+    property <length> paper-bottom: root.height - PaperTheme.margin;
+
+    // Shadow and paper (the look: see paper.slint). Behind everything.
+    Paper { width: root.width; height: root.height; }
 
     // The whole note: it holds everything, so `has-hover` stays true over the editor and the
     // toolbar too (ADR 0001). The editor ignores the right button, so a right click anywhere
@@ -77,18 +87,20 @@ export component NoteWindow inherits Window {
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             Rectangle {
                 x: root.margin;
-                y: root.margin;
+                y: root.paper-top;
                 width: root.width - 2 * root.margin;
-                height: root.height - 2 * root.margin - ToolbarMetrics.band-height;
+                height: root.paper-bottom - ToolbarMetrics.band-height - root.paper-top;
                 clip: true;
 
                 text-layer := TextLayer {
                     x: 0px;
                     y: 0px;
                     width: root.width - 2 * root.margin;
-                    height: root.height - 2 * root.margin;
+                    height: root.paper-bottom - root.paper-top;
                     blocks: root.blocks;
                     runs: root.runs;
+                    suspended: root.suspended;
+                    resync: root.text-resync;
                     block-edited(i, t) => { root.block-edited(i, t); }
                 }
             }
@@ -101,7 +113,7 @@ export component NoteWindow inherits Window {
             width: root.width;
             height: root.height;
             paper-x: root.margin;
-            paper-y: root.margin;
+            paper-y: root.paper-top;
             paper-w: root.width - 2 * root.margin;
             paper-h: root.height - 2 * root.margin;
             tilt: root.tilt;
@@ -110,4 +122,7 @@ export component NoteWindow inherits Window {
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }
     }
+
+    // The tapes lie over the paper.
+    Tapes { width: root.width; height: root.height; }
 }

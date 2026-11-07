@@ -2,10 +2,7 @@
 // never proportions of the note size.
 
 export global Theme {
-    // Transparent margin between the window edge and the paper, on every side.
-    out property <length> window-margin: 40px;
-    // The paper and its text tilt together (clockwise).
-    out property <angle> paper-tilt: 1.5deg;
+    // The text lies tilted with the paper (PaperTheme.paper-tilt) at rest, clockwise.
     out property <angle> text-tilt: 1.45deg;
     // The text settles flat over this long when editing starts, and back when it ends.
     out property <duration> settle: 120ms;
