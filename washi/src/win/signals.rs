@@ -123,23 +123,27 @@ fn post(ev: SignalEvent) {
     });
 }
 
-/// Every top-level window above `hwnd` in z-order, nearest first.
-fn windows_above(hwnd: HWND) -> Vec<Above> {
+/// The top-level windows above `hwnd` in z-order that could cover part of `note`, nearest first.
+/// Cheap rejections come first (hidden, minimized, not overlapping the note): the DWM cloak query
+/// is the slow call and a desktop easily has hundreds of windows.
+fn windows_above(hwnd: HWND, note: Rect) -> Vec<Above> {
     let mut out = Vec::new();
     // SAFETY: plain window queries; stale handles just report failure.
     unsafe {
         let mut w = GetWindow(hwnd, GW_HWNDPREV);
         while !w.is_null() {
             let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-            if GetWindowRect(w, &mut r) != 0 {
+            let overlaps = IsWindowVisible(w) != 0
+                && IsIconic(w) == 0
+                && GetWindowRect(w, &mut r) != 0
+                && r.left < note.right
+                && r.right > note.left
+                && r.top < note.bottom
+                && r.bottom > note.top;
+            if overlaps {
                 let mut cloaked = 0u32;
                 let hr = DwmGetWindowAttribute(w, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut _, 4);
-                out.push(Above {
-                    rect: Rect::new(r.left, r.top, r.right, r.bottom),
-                    visible: IsWindowVisible(w) != 0,
-                    cloaked: hr == 0 && cloaked != 0,
-                    minimized: IsIconic(w) != 0,
-                });
+                out.push(Above { rect: Rect::new(r.left, r.top, r.right, r.bottom), visible: true, cloaked: hr == 0 && cloaked != 0, minimized: false });
             }
             w = GetWindow(w, GW_HWNDPREV);
         }
@@ -153,7 +157,8 @@ fn is_covered(hwnd: HWND) -> bool {
     if unsafe { GetWindowRect(hwnd, &mut r) } == 0 {
         return false;
     }
-    fully_covered(Rect::new(r.left, r.top, r.right, r.bottom), &windows_above(hwnd))
+    let note = Rect::new(r.left, r.top, r.right, r.bottom);
+    fully_covered(note, &windows_above(hwnd, note))
 }
 
 impl WindowSignals for Win32Signals {

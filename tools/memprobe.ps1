@@ -11,7 +11,8 @@
 #   pwsh tools/memprobe.ps1 -Suspended                   # also suspended memory, wake time
 #   pwsh tools/memprobe.ps1 -Notes 1,3 -Suspended -Enforce -NoLog   # CI
 #   pwsh tools/memprobe.ps1 -Startup -CpuSec 60          # startup time (5 launches) and 60 s idle CPU
-#   pwsh tools/memprobe.ps1 -StickyNotes                 # also measure Microsoft Sticky Notes as the baseline
+#   pwsh tools/memprobe.ps1 -NoTrim                      # without the post-start-up working-set trim (what the heap really holds)
+#   pwsh tools/memprobe.ps1 -StickyNotes                # also measure Microsoft Sticky Notes as the baseline
 #   pwsh tools/memprobe.ps1 -NoLog                       # do not touch docs/PERF.md
 #
 # Budgets (-Enforce fails when one is broken):
@@ -20,7 +21,8 @@
 #   each extra note (least-squares slope)  <= 2 MB    (-PerNoteBudgetMb), needs two or more -Notes values
 #   startup (-Startup), median             <= 150 ms; wake (-Suspended), median <= 50 ms
 param(
-    [int[]]$Notes = @(1, 3, 10),
+    # strings: `pwsh tools/memprobe.ps1 -Notes 1,3,10` from another shell arrives as the one string "1,3,10"
+    [string[]]$Notes = @("1", "3", "10"),
     [string]$Exe = 'target/release/washi.exe',
     [string]$Seed = 'target/release/seed.exe',
     [int]$IdleSec = 10,
@@ -36,11 +38,13 @@ param(
     [switch]$StickyNotes,
     [switch]$Suspended,
     [switch]$Startup,
+    [switch]$NoTrim,
     [switch]$NoLog,
     [string]$Log = 'docs/PERF.md'
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
+[int[]]$Notes = @(($Notes -join ',') -split '[,\s]+' | Where-Object { $_ } | ForEach-Object { [int]$_ })
 # `-Exe`/`-Seed` default to ./target; honour CARGO_TARGET_DIR when the defaults are untouched.
 if ($env:CARGO_TARGET_DIR) {
     if (-not $PSBoundParameters.ContainsKey('Exe')) { $Exe = Join-Path $env:CARGO_TARGET_DIR 'release/washi.exe' }
@@ -54,6 +58,9 @@ Add-Type -Namespace Probe -Name Win -MemberDefinition @'
 [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
 [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 public delegate bool EnumProc(IntPtr h, IntPtr l);
 '@ -ErrorAction SilentlyContinue
 
@@ -119,6 +126,7 @@ function New-Profile([int]$n) {
     $dir
 }
 
+if ($NoTrim) { $env:WASHI_NO_TRIM = '1' }   # measure without the one-shot working-set trim after start-up
 function Stop-Probe($p, $dir) {
     if ($p -and -not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
     Remove-Item Env:WASHI_DATA_DIR, Env:WASHI_TRACE -ErrorAction SilentlyContinue
@@ -149,8 +157,19 @@ foreach ($n in $Notes) {
         if ($CpuSec -gt 0 -and $n -eq 3) {
             $c0 = $p.TotalProcessorTime; Start-Sleep -Seconds $CpuSec; $c1 = $p.TotalProcessorTime
             $ms = ($c1 - $c0).TotalMilliseconds
-            $extra += "| idle CPU, $n notes, active (not foreground) | $([math]::Round($ms, 1)) ms of CPU in $CpuSec s ($([math]::Round($ms / ($CpuSec * 10), 3)) % of one core) |"
-            Write-Host ("idle CPU, {0} notes, active: {1:N1} ms in {2} s" -f $n, $ms, $CpuSec)
+            $extra += "| idle CPU, $n notes, active, Washi in the background (notes not covered) | $([math]::Round($ms, 1)) ms of CPU in $CpuSec s ($([math]::Round($ms / ($CpuSec * 10), 3)) % of one core) |"
+            Write-Host ("idle CPU, {0} notes, active, in the background: {1:N1} ms in {2} s" -f $n, $ms, $CpuSec)
+            # now in the foreground: the plan's "0% idle CPU" case (no timer of any kind should be running)
+            [Probe.Win]::keybd_event(0xA4, 0, 0, [UIntPtr]::Zero); [Probe.Win]::keybd_event(0xA4, 0, 2, [UIntPtr]::Zero)
+            [void][Probe.Win]::SetForegroundWindow($windows[0])
+            Start-Sleep -Milliseconds 700
+            $fgPid = 0; [void][Probe.Win]::GetWindowThreadProcessId([Probe.Win]::GetForegroundWindow(), [ref]$fgPid)
+            if ($fgPid -eq $p.Id) {
+                $c0 = $p.TotalProcessorTime; Start-Sleep -Seconds $CpuSec; $c1 = $p.TotalProcessorTime
+                $ms = ($c1 - $c0).TotalMilliseconds
+                $extra += "| idle CPU, $n notes, active, Washi in the foreground | $([math]::Round($ms, 1)) ms of CPU in $CpuSec s |"
+                Write-Host ("idle CPU, {0} notes, active, in the foreground: {1:N1} ms in {2} s" -f $n, $ms, $CpuSec)
+            } else { Write-Host 'memprobe: could not bring a note to the foreground; foreground idle CPU not measured' }
         }
         if ($Suspended) {
             foreach ($h in $windows) { [void][Probe.Win]::ShowWindow($h, 7) }   # SW_SHOWMINNOACTIVE
@@ -194,11 +213,11 @@ if ($Startup) {
         try {
             $deadline = (Get-Date).AddSeconds(20)
             $t1 = $null
-            while (-not $t1 -and (Get-Date) -lt $deadline) { $t1 = Read-Trace $trace 'first-turn'; if (-not $t1) { Start-Sleep -Milliseconds 2 } }
-            if (-not $t1) { throw 'no first-turn mark in the trace' }
+            while (-not $t1 -and (Get-Date) -lt $deadline) { $t1 = Read-Trace $trace 'windows-attached'; if (-not $t1) { Start-Sleep -Milliseconds 2 } }
+            if (-not $t1) { throw 'no windows-attached mark in the trace' }
             $ps = Read-Trace $trace 'process-start'; $shown = Read-Trace $trace 'notes-shown'
             $startups += ($t1 - $t0)
-            Write-Host ("startup run {0}: {1} ms to first turn (process start +{2} ms, notes shown +{3} ms, 3 notes)" -f ($i + 1), ($t1 - $t0), ($ps - $t0), ($shown - $t0))
+            Write-Host ("startup run {0}: {1} ms to windows shown (process start +{2} ms, Slint run loop entered +{3} ms, 3 notes)" -f ($i + 1), ($t1 - $t0), ($ps - $t0), ($shown - $t0))
         } finally { Stop-Probe $p $dir }
         Start-Sleep -Milliseconds 500
     }
@@ -249,7 +268,7 @@ if ($active.Count -ge 2) {
 }
 if ($Startup -and $startups.Count -gt 0) {
     $med = Median $startups
-    $extra += "| startup to first event-loop turn, 3 notes (median of $($startups.Count): $($startups -join ', ') ms) | $med ms (budget $StartupBudgetMs ms) |"
+    $extra += "| startup: process start to all 3 note windows created and shown (the first frame is drawn on the next event-loop turn) (median of $($startups.Count): $($startups -join ', ') ms) | $med ms (budget $StartupBudgetMs ms) |"
     if ($med -gt $StartupBudgetMs) { $fail += "startup: median $med ms is above $StartupBudgetMs ms" }
 }
 if ($wakes.Count -gt 0) { $extra += "| wake, restore to next event-loop turn (runs: $($wakes -join ', ') ms) | median $(Median $wakes) ms (budget $WakeBudgetMs ms) |" }

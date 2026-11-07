@@ -294,7 +294,8 @@ impl App {
     /// the app needs while idle is faulted back in (a soft fault), the rest stays out. One-shot:
     /// no timer is left running.
     fn schedule_trim(&self) {
-        if !self.0.trim_enabled.get() {
+        // WASHI_NO_TRIM: lets tools/memprobe.ps1 -NoTrim measure the untrimmed working set
+        if !self.0.trim_enabled.get() || std::env::var_os("WASHI_NO_TRIM").is_some() {
             return;
         }
         let weak = Rc::downgrade(&self.0);

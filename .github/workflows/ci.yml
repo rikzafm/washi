@@ -27,4 +27,4 @@ jobs:
       # wake <= 50 ms. Startup (150 ms) is measured by tools/memprobe.ps1 -Startup on a
       # developer machine: shared runners are too noisy for a 150 ms gate.
       - run: cargo build --release -p snap --bin seed
-      - run: pwsh tools/memprobe.ps1 -Notes 1,3 -IdleSec 5 -Suspended -Enforce -NoLog
+      - run: pwsh tools/memprobe.ps1 -Notes '1,3' -IdleSec 5 -Suspended -Enforce -NoLog
