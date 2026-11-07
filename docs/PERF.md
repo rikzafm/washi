@@ -40,3 +40,31 @@ Not done: live capture at other display scales (display here is 100%), 150% sign
 Washi is single-instance per user: memprobe waits while another washi.exe runs, otherwise launches hand off.
 
 Known measurement caveat: `-StickyNotes` was not run (not installed or not driven here).
+
+## Ticket 20 pass (commit after 216f76b, release build, this machine: 100% display scale, 4 monitors)
+
+Measured with `tools/memprobe.ps1 -Suspended -Startup -CpuSec 60`. Private WS = Task Manager "active private working set".
+
+| measurement | result | target |
+|---|---|---|
+| active, 1 / 3 / 10 notes (after the one-shot trim) | 2.7 / 2.9 / 3.0 MB private WS (commit 7.8 / 13.2 / 30.7 MB) | 3 notes <= 15 MB |
+| active, untrimmed (`-NoTrim`, heap as allocated) | 6.7 / 12.1 / 28.0 MB | 3 notes <= 15 MB, stretch 12 |
+| per extra note, untrimmed / trimmed | about 2.3 MB / about 0.03 MB (commit grows about 2.5 MB per note) | <= 2 MB |
+| suspended, 1 / 3 / 10 notes | 0.64 / 0.29 / 2.1 MB | 3 notes <= 5 MB |
+| startup: process start to all 3 windows shown | 136-184 ms, median about 142 ms (first frame is drawn on the next loop turn, not measured) | < 150 ms (marginal) |
+| wake: restore to the next event-loop turn after waking | 7-15 ms (does not include the DWM present) | <= 50 ms |
+| idle CPU 60 s, 3 notes, suspended | 0 ms | 0 |
+| idle CPU 60 s, 3 notes, active | 0.5-1.3 % of a core, background or foreground (focused note's caret blink, cover check). Not 0 | 0 |
+| release exe | 13.59 MB, no DLLs | <= 8 MB: NOT MET |
+
+Cuts and findings, in order:
+
+1. The real app never suspended: note HWNDs did not exist when the notes were opened, so no minimize was ever seen. Fixed (attach after the event loop creates the windows; windows appear about 110 ms after the run loop starts).
+2. Focus or foreground changes during the grace period restarted the 10 s. Now only changes in minimized/covered state do (test added).
+3. One-shot compact + working-set trim 1.5 s after the last note opens (not in the planned cut order; it is what takes active memory from 12.1 to 2.9 MB private WS). Pages needed while idle fault back in on use, so a note being used will read higher; commit is unchanged. `WASHI_NO_TRIM` / `-NoTrim` measures without it. The product owner should decide whether this counts for G1.
+4. Cover check no longer queries DWM for windows that do not overlap the note.
+5. Planned order (font scan, buffer type, layered platform, accessibility, SQLite cache): not needed for G1/G1s. The buffer type is chosen inside Slint's winit backend and cannot be changed without forking it.
+
+Binary size (G5, not met, product decision: measured only): `.text` 7.3 MB and `.rdata` 5.3 MB. About 3 MB of `.rdata` is ICU data pulled by Slint's `std` feature (parley/icu_segmenter), about 1 MB is OpenSSL for SQLCipher. Experiments: `opt-level = "z"` 13.07 MB; plus no `accessibility` 12.88 MB. Reaching 8 MB needs a fork or patch of Slint/parley.
+
+Not done: Sticky Notes side-by-side (`-StickyNotes`), live capture at 150% (this machine is 100% and display scale was not changed).
