@@ -328,6 +328,33 @@ pub fn layout_all(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> (Vec<Run>,
     (runs, rules)
 }
 
+/// Vertical extent of the text in the paper's frame: the top of every block, and the bottom of the
+/// last line (what the note scrolls through).
+pub fn extent(blocks: &[Block], paper_w: f64, t: &Tokens) -> (Vec<f64>, f64) {
+    let avail = paper_w - t.inset_left - t.inset_right;
+    let mut tops = vec![];
+    let mut top = t.inset_top;
+    for (bi, b) in blocks.iter().enumerate() {
+        let st = t.style(b.kind);
+        if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
+            top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
+        }
+        tops.push(top);
+        let m = Measure::new(b.is_bold(), st.size);
+        top += wrap(&b.text, avail, &m).len() as f64 * st.pitch;
+    }
+    (tops, top)
+}
+
+/// The top and bottom of the line holding the caret (byte `offset` of block `block`), in the paper's frame.
+pub fn caret_span(blocks: &[Block], block: usize, offset: usize, paper_w: f64, t: &Tokens) -> Option<(f64, f64)> {
+    let b = blocks.get(block)?;
+    let (tops, _) = extent(blocks, paper_w, t);
+    let pitch = t.style(b.kind).pitch;
+    let y = tops[block] + caret_line(b, offset, paper_w, t).line as f64 * pitch;
+    Some((y, y + pitch))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,6 +374,30 @@ mod tests {
     };
 
     const MOCKUP: &str = "# Endfield Note\n## **Thermite Cutter : POG & Akekuri**\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";
+
+    #[test]
+    fn extent_gives_block_tops_and_the_bottom_of_the_last_line() {
+        let doc = Document::parse(MOCKUP);
+        let (tops, bottom) = extent(doc.blocks(), 363.0, &TOKENS);
+        let runs = layout(doc.blocks(), (363.0, 433.0), &TOKENS);
+        for (bi, top) in tops.iter().enumerate() {
+            let first = runs.iter().find(|r| r.block == bi).unwrap();
+            assert!((first.y - top).abs() < 1e-9);
+        }
+        let last = runs.last().unwrap();
+        assert!((bottom - (last.y + last.pitch)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn caret_span_is_the_line_box_of_the_caret() {
+        let doc = Document::parse(MOCKUP);
+        let runs = layout(doc.blocks(), (363.0, 433.0), &TOKENS);
+        let last_len = doc.blocks()[2].text.len();
+        let (top, bottom) = caret_span(doc.blocks(), 2, last_len, 363.0, &TOKENS).unwrap();
+        let last = runs.last().unwrap();
+        assert_eq!((top, bottom), (last.y, last.y + last.pitch));
+        assert_eq!(caret_span(doc.blocks(), 9, 0, 363.0, &TOKENS), None);
+    }
 
     fn line_texts(runs: &[Run], block: usize) -> Vec<String> {
         let n = runs.iter().filter(|r| r.block == block).map(|r| r.line).max().map_or(0, |l| l + 1);

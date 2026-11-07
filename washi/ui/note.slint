@@ -8,6 +8,7 @@ export { BlockData, BlockKind, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
 import { WindowHandles } from "resize-zones.slint";
+import { ScrollBar, ScrollMetrics } from "scroll.slint";
 
 export component NoteWindow inherits Window {
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
@@ -42,7 +43,7 @@ export component NoteWindow inherits Window {
     /// (a toolbar button or its shortcut).
     callback format(int);
     /// A text field took the focus: the caret is in this block.
-    callback caret-moved(int);
+    callback focus-entered(int);
     /// The paper (window minus margins) changed size: Rust lays the words out again.
     callback paper-resized(length, length);
     changed width => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
@@ -62,6 +63,17 @@ export component NoteWindow inherits Window {
     in-out property <int> focus-block: -1;
     in-out property <int> focus-offset: 0;
     in-out property <int> focus-serial: 0;
+    /// The text's height (Rust lays it out) and how far it is scrolled up; the wheel changes it.
+    in property <length> content-height;
+    in-out property <length> scroll-y: 0px;
+    /// The height of the text area (it ends above the toolbar band).
+    out property <length> text-view-height: text-view.height;
+    /// The caret moved to this byte offset of this block (Rust keeps it in view).
+    callback caret-moved(int, int);
+    property <length> max-scroll: max(0px, root.content-height - text-view.height);
+    changed max-scroll => { if (root.scroll-y > root.max-scroll) { root.scroll-y = root.max-scroll; } }
+    /// Opacity of the scrollbar (0 unless hovered and the text overflows).
+    out property <float> scrollbar-opacity: scrollbar.bar-opacity;
     /// Right click on the paper, in window coordinates.
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
@@ -93,6 +105,11 @@ export component NoteWindow inherits Window {
     // toolbar too (ADR 0001). The editor ignores the right button, so a right click anywhere
     // reaches this.
     paper-touch := TouchArea {
+        scroll-event(e) => {
+            if (root.max-scroll <= 0px) { return reject; }
+            root.scroll-y = max(0px, min(root.max-scroll, root.scroll-y - e.delta-y));
+            accept
+        }
         pointer-event(e) => {
             if (e.kind == PointerEventKind.move) { root.pointer-moved(); }
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
@@ -119,7 +136,7 @@ export component NoteWindow inherits Window {
 
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
-            Rectangle {
+            text-view := Rectangle {
                 x: root.margin;
                 y: root.paper-top;
                 width: root.width - 2 * root.margin;
@@ -130,13 +147,14 @@ export component NoteWindow inherits Window {
 
                 text-layer := TextLayer {
                     x: 0px;
-                    y: 0px;
+                    y: -root.scroll-y;
                     width: root.width - 2 * root.margin;
-                    height: root.paper-bottom - root.paper-top;
+                    // at least the text's height, or the blocks' layout would squeeze them together
+                    height: max(root.paper-bottom - root.paper-top, root.content-height);
                     blocks: root.blocks;
                     runs: root.runs;
                     rules: root.rules;
-                    caret-moved(i) => { root.caret-moved(i); }
+                    focus-entered(i) => { root.focus-entered(i); }
                     suspended: root.suspended;
                     resync: root.text-resync;
                     focus-block: root.focus-block;
@@ -144,8 +162,21 @@ export component NoteWindow inherits Window {
                     focus-serial: root.focus-serial;
                     block-edited(i, t, c) => { root.block-edited(i, t, c); }
                     block-key(i, k, o) => { return root.block-key(i, k, o); }
+                    caret-moved(i, o) => { root.caret-moved(i, o); }
                 }
             }
+        }
+
+        // The scrollbar: level, in the right inset of the text area, over the text.
+        scrollbar := ScrollBar {
+            x: root.margin + root.width - 2 * root.margin - ScrollMetrics.bar-right;
+            y: root.paper-top;
+            width: ScrollMetrics.bar-width;
+            height: text-view.height;
+            view: text-view.height;
+            content: root.content-height;
+            offset: root.scroll-y;
+            shown: paper-touch.has-hover;
         }
 
         // Invisible grips for moving and resizing (inside paper-touch, so hovering them keeps the

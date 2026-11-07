@@ -78,6 +78,28 @@ fn the_fixture_text_is_what_gets_drawn() {
     assert!(dark_pixels(&text) > 100);
 }
 
+/// Pixels of the scrollbar's muted ink in the strip where the bar lies (right inset of the text area).
+fn scrollbar_pixels(s: &snap::shot::Snapshot, paper: (f64, f64)) -> usize {
+    let scale = 1.5;
+    let (pw, ph) = (((paper.0 + 84.0) * scale).round() as i64, ((paper.1 + 84.0) * scale).round() as i64);
+    let (ox, oy) = ((s.width as i64 - pw) / 2, (s.height as i64 - ph) / 2);
+    let x0 = ox + ((42.0 + paper.0 - 24.0 - 2.0) * scale) as i64;
+    let (y0, y1) = (oy + (46.0 * scale) as i64, oy + ((42.0 + paper.1 - 56.0 - 40.0) * scale) as i64);
+    let near = |p: [u8; 3]| p.iter().zip([0x8B, 0x91, 0x9A]).all(|(&a, b): (&u8, i32)| (a as i32 - b).abs() <= 4);
+    (y0..y1).flat_map(|y| (x0..x0 + (8.0 * scale) as i64).map(move |x| (x, y))).filter(|&(x, y)| near(s.pixel(x as u32, y as u32))).count()
+}
+
+#[test]
+fn the_scrollbar_is_drawn_only_when_hovered_and_the_text_overflows() {
+    let long = std::fs::read_to_string("../../docs/design/fixtures/long.md").unwrap().replace("\r\n", "\n");
+    let mockup = std::fs::read_to_string("../../docs/design/fixtures/mockup.md").unwrap().replace("\r\n", "\n");
+    let paper = (545.0, 576.0);
+    let big = |text: &str, hover| Options { paper, canvas: (1000, 1040), hover, ..opts(text.trim_end()) };
+    assert!(scrollbar_pixels(&snapshot(&big(&long, true)).unwrap(), paper) > 20, "overflowing and hovered: shown");
+    assert_eq!(scrollbar_pixels(&snapshot(&big(&long, false)).unwrap(), paper), 0, "not hovered: hidden");
+    assert_eq!(scrollbar_pixels(&snapshot(&big(&mockup, true)).unwrap(), paper), 0, "hovered but fits: hidden");
+}
+
 #[test]
 fn a_hovered_snapshot_is_produced_through_a_real_pointer_event() {
     let o = Options { hover: true, ..opts("hi") };
