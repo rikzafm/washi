@@ -1,0 +1,41 @@
+// Design tokens of the note's physical look: paper, shadow and tapes.
+// Every number here comes from docs/design/spec.json (the measured mockups); a test in
+// washi/tests/paper_theme.rs fails when this file and the spec disagree. Never write these
+// values inline in a component.
+export global PaperTheme {
+    // layout.window_margin: fixed transparent margin around the paper, all four sides
+    out property <length> margin: 42px;
+    // layout.paper: minimum paper size (the window is the paper plus the margin)
+    out property <length> paper-min-width: 360px;
+    out property <length> paper-min-height: 360px;
+    // layout.paper.default
+    out property <length> paper-default-width: 363px;
+    out property <length> paper-default-height: 384px;
+    // paper_tilt_deg: constant at every size, clockwise
+    out property <angle> paper-tilt: 1.5deg;
+    // paper_color. layout.paper.corner_radius is 1 px: the corners are square.
+    out property <color> paper-color: #FFFFFD;
+
+    // layout.text.left_inset_u and layout.toolbar.band_height. (text-top-inset is a placeholder
+    // until the text styles are tuned.)
+    out property <length> text-left-inset: 33px;
+    out property <length> text-top-inset: 24px;
+    out property <length> toolbar-band: 56px;
+
+    // Shadow: stacked copies of the paper shape, shifted down by shadow-offset-y. Copy i is grown
+    // by shadow-growths[i] on every side and filled with shadow-colors[i]; widest copy first.
+    // Least-squares fit to the shadow profile of both mockups (docs/design/fidelity-log.md).
+    out property <length> shadow-offset-y: 10.8px;
+    out property <[length]> shadow-growths: [12.3px, 6.9px, 3.1px, -3.2px];
+    out property <[color]> shadow-colors: [#00000005, #00000005, #00000008, #00000019];
+
+    // layout.tapes: the images are drawn by tools/tapegen at this many pixels per logical px
+    // (tapegen::IMAGE_SCALE) and are already rotated; they have a fixed size.
+    out property <float> tape-image-scale: 3;
+    // layout.tapes.pink / blue center_offset_from_corner_uv: from the paper's top-left and
+    // bottom-right corners, along the paper's own axes
+    out property <length> tape-pink-offset-u: 37.1px;
+    out property <length> tape-pink-offset-v: 5.7px;
+    out property <length> tape-blue-offset-u: -37.0px;
+    out property <length> tape-blue-offset-v: -9.0px;
+}

@@ -1,4 +1,5 @@
-// Walking-skeleton note: unstyled paper. Real styling arrives with the paper/theme tickets.
+import { PaperTheme } from "paper-theme.slint";
+import { Paper, Tapes } from "paper.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
 
 export component NoteWindow inherits Window {
@@ -9,11 +10,13 @@ export component NoteWindow inherits Window {
     title: window-title;
     always-on-top: pinned;
     icon: app-icon;
-    preferred-width: 431px;
-    preferred-height: 451px;
-    min-width: 200px;
-    min-height: 200px;
-    background: #FFFFFD;
+    // The window is the paper plus a fixed transparent margin on every side.
+    no-frame: true;
+    background: transparent;
+    preferred-width: PaperTheme.paper-default-width + 2 * PaperTheme.margin;
+    preferred-height: PaperTheme.paper-default-height + 2 * PaperTheme.margin;
+    min-width: PaperTheme.paper-min-width + 2 * PaperTheme.margin;
+    min-height: PaperTheme.paper-min-height + 2 * PaperTheme.margin;
 
     in-out property <string> text;
     callback edited(string);
@@ -29,8 +32,14 @@ export component NoteWindow inherits Window {
     // of its buttons. Keyboard focus never shows it. The band is reserved either way.
     out property <float> toolbar-opacity: toolbar.opacity;
     out property <bool> toolbar-visible: toolbar.visible;
-    property <length> margin: 40px;
-    property <angle> tilt: 1.5deg;
+    property <length> margin: PaperTheme.margin;
+    property <angle> tilt: PaperTheme.paper-tilt;
+    // The paper's untilted box in the window (the margin on every side).
+    property <length> paper-top: PaperTheme.margin;
+    property <length> paper-bottom: root.height - PaperTheme.margin;
+
+    // Shadow and paper (the look: see paper.slint). Behind everything.
+    Paper { width: root.width; height: root.height; }
 
     // The whole note: it holds everything, so `has-hover` stays true over the editor and the
     // toolbar too (ADR 0001). The editor ignores the right button, so a right click anywhere
@@ -55,10 +64,10 @@ export component NoteWindow inherits Window {
 
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
             Rectangle {
-                x: 30px;
-                y: 30px;
-                width: root.width - 60px;
-                height: root.height - root.margin - ToolbarMetrics.band-height - 30px;
+                x: PaperTheme.margin + PaperTheme.text-left-inset;
+                y: root.paper-top + PaperTheme.text-top-inset;
+                width: root.width - 2 * (PaperTheme.margin + PaperTheme.text-left-inset);
+                height: root.paper-bottom - ToolbarMetrics.band-height - self.y;
                 clip: true;
 
                 input := TextInput {
@@ -84,7 +93,7 @@ export component NoteWindow inherits Window {
             width: root.width;
             height: root.height;
             paper-x: root.margin;
-            paper-y: root.margin;
+            paper-y: root.paper-top;
             paper-w: root.width - 2 * root.margin;
             paper-h: root.height - 2 * root.margin;
             tilt: root.tilt;
@@ -93,6 +102,9 @@ export component NoteWindow inherits Window {
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }
     }
+
+    // The tapes lie over the paper.
+    Tapes { width: root.width; height: root.height; }
 
     init => { input.focus(); }
 }

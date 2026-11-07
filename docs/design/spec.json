@@ -99,9 +99,9 @@
       "tilt_deg": 1.5
     },
     "window_margin": {
-      "value": 40,
+      "value": 42,
       "rule": "fixed transparent margin around the paper (all four sides), the same at every note size",
-      "derived_from": "tape overhang above the paper's tilted bbox is 38.7 (hover pink tape: 58 mockup px), below 34.7, left and right 8.7; shadow reaches about 30 below, 15 right, 13 left, 8 above. 40 covers all of them."
+      "derived_from": "tape overhang above the paper's tilted bbox is 38.7 (hover pink tape: 58 mockup px), below 34.7, left and right 8.7; shadow reaches about 30 below, 15 right, 13 left, 8 above. 40 covers all of them; 42 is needed once the tape images are drawn in full: the tilt lifts the pink tape about 3 px (logical) above the unrotated paper box and the idle mockup's blue tape ends about 3 px below it."
     },
     "toolbar": {
       "band_height": 56,
@@ -156,6 +156,12 @@
         "base": "#B1D9E5",
         "stripe": "#D7EDF3"
       },
+      "alpha": 0.88,
+      "alpha_note": "Tape pixels over the desk and over the paper differ by about 12% of the paper/desk gap, so the tape is 88% opaque. base and stripe above are the colors seen over the white paper.",
+      "stripe_duty": 0.5,
+      "stripe_phase": 0.295,
+      "stripe_phase_note": "Where the base-color band starts along the stripe normal, as a fraction of the pitch, counted from the tape center (the stripes are not centered on the tape). Fitted to both mockups and both tapes: 0.29 to 0.30, 99.7% of tape pixels classified the same.",
+      "edge": "square",
       "rule": "fixed size, pinned to the paper corners; they do not scale with the note"
     },
     "rules": ["default and minimum paper size: 363 x 384 default, 360 x 360 minimum, applied to the paper (not the window)", "window = paper + a fixed 40 px transparent margin on every side", "toolbar band is 56 px tall at the bottom of the paper, always reserved; text area ends above it", "tapes have a fixed size and are pinned to their paper corners", "insets, font sizes, toolbar geometry and tape size are fixed logical values, not proportions of the note size", "tilt is a constant 1.5 deg at every note size; the text block tilts with the paper", "idle mockup: its leftover caption line is masked out and its text regions are skipped (text positions come from the hover mockup only)"]

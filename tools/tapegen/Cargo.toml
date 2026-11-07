@@ -1,0 +1,13 @@
+[package]
+name = "tapegen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Dev-only: generates the washi tape images (washi/ui/assets/tape-*.png) from docs/design/spec.json"
+
+[dependencies]
+png = "0.17"
+serde_json = "1"
+
+# standalone: keeps its own lockfile and target dir (like tools/uidiff)
+[workspace]
