@@ -340,7 +340,7 @@ pub fn extent(blocks: &[Block], paper_w: f64, t: &Tokens) -> (Vec<f64>, f64) {
             top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
         }
         tops.push(top);
-        let m = Measure::new(b.is_bold(), st.size);
+        let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), st.size);
         top += wrap(&b.text, avail, &m).len() as f64 * st.pitch;
     }
     (tops, top)
