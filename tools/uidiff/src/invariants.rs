@@ -84,7 +84,13 @@ pub fn check(spec: &Spec, mock: &Image, default: &Image, large: &Image, opts: &O
             None => r.flag("tilt", &format!("{label} paper found"), false, "paper", "none", Some(format!("{label} snap: no paper found (paper color #{}?)", "FFFFFD"))),
         }
     }
-    let (Some(pd), Some(pl)) = (pd, pl) else { return Ok(r.rows) };
+    let (Some(pd), Some(pl)) = (pd, pl) else {
+        // every group stays in the report, failing, so the baseline can name it
+        for g in ["tapes", "insets", "fonts", "toolbar", "text area"] {
+            r.flag(g, "measured", false, "measured", "not measured", Some(format!("{g}: cannot be checked without a paper in both snaps")));
+        }
+        return Ok(r.rows);
+    };
 
     // tapes: same size, same offset from their corner
     for (name, corner) in [("tape_pink", (|p: &Paper| p.tl) as fn(&Paper) -> (f64, f64)), ("tape_blue", (|p: &Paper| p.br) as fn(&Paper) -> (f64, f64))] {

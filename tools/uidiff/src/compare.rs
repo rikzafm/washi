@@ -443,6 +443,8 @@ pub fn compare(spec: &Spec, name: &str, mock: &Image, snap: &Image, opts: &Optio
         if let (Some(c), true) = (corners(&exp["paper"]), act["paper"]["found"] == true) {
             let mae = shadow_mae(&mock, &snap, c);
             r.num("shadow", "ring MAE (levels)", 0.0, mae, TOL_SHADOW_MAE, Some(format!("shadow: mean error {} levels in the {} px ring around the paper → adjust shadow blur/offset/opacity", fmt(mae), SHADOW_RING)));
+        } else {
+            r.flag("shadow", "measured", false, "measured", "not measured", Some("shadow: cannot be measured without the paper".into()));
         }
     }
 

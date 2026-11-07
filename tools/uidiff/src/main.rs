@@ -81,6 +81,7 @@ fn run() -> Result<(), String> {
     let (mut measure, mut mockup, mut update) = (None, None, false);
     let (mut font_match, mut fonts_dir) = (false, PathBuf::from("fonts"));
     let (mut compare_args, mut invariant_args, mut index_dir): (Option<(PathBuf, PathBuf)>, Option<(PathBuf, PathBuf)>, Option<PathBuf>) = (None, None, None);
+    let mut only: Vec<String> = vec![];
     let (mut out_dir, mut register, mut scale, mut baseline) = (None::<PathBuf>, true, 1.5f64, None::<PathBuf>);
     let mut i = 0;
     while i < args.len() {
@@ -115,6 +116,10 @@ fn run() -> Result<(), String> {
                 out_dir = Some(PathBuf::from(args.get(i).ok_or("--out needs a directory")?));
             }
             "--no-register" => register = false,
+            "--only" => {
+                i += 1;
+                only = args.get(i).ok_or("--only needs a comma-separated list of groups")?.split(',').map(|s| s.trim().to_string()).collect();
+            }
             "--scale" => {
                 i += 1;
                 scale = args.get(i).ok_or("--scale needs a number")?.parse().map_err(|_| "--scale needs a number")?;
@@ -151,7 +156,10 @@ fn run() -> Result<(), String> {
         let name = mockup.clone().or_else(|| spec.mockups.iter().find(|(_, m)| m.file.ends_with(&stem)).map(|(n, _)| n.clone())).ok_or("--compare needs --mockup <name>")?;
         let (mock, snap) = (Image::load_png(&mock_png)?, Image::load_png(&snap_png)?);
         let opts = uidiff::compare::Options { register, scale };
-        let c = uidiff::compare::compare(&spec, &name, &mock, &snap, &opts)?;
+        let mut c = uidiff::compare::compare(&spec, &name, &mock, &snap, &opts)?;
+        if !only.is_empty() {
+            c.rows.retain(|r| only.contains(&r.group));
+        }
         let verdict = uidiff::report::judge(&name, &c.rows, &known);
         println!("{}", uidiff::report::table_text(&c.rows, &verdict));
         let hints = uidiff::report::hints_text(&c.rows);
@@ -174,7 +182,10 @@ fn run() -> Result<(), String> {
         let hover = spec.mockups.get("hover").ok_or("spec has no hover mockup")?;
         let mock = Image::load_png(&dir.join(&hover.file))?;
         let (default, large) = (Image::load_png(&default_png)?, Image::load_png(&large_png)?);
-        let rows = uidiff::invariants::check(&spec, &mock, &default, &large, &uidiff::invariants::Options { scale })?;
+        let mut rows = uidiff::invariants::check(&spec, &mock, &default, &large, &uidiff::invariants::Options { scale })?;
+        if !only.is_empty() {
+            rows.retain(|r| only.contains(&r.group));
+        }
         let verdict = uidiff::report::judge("invariants", &rows, &known);
         println!("{}", uidiff::report::table_text(&rows, &verdict));
         let hints = uidiff::report::hints_text(&rows);

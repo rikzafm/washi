@@ -9,3 +9,4 @@ description = "Dev-only app harness: runs the whole Washi app on a stand-in plat
 washi = { path = "../../washi" }
 slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "renderer-software"] }
 tempfile = "3"
+png = "0.17"
