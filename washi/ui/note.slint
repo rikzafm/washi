@@ -1,8 +1,9 @@
 import { Theme } from "theme.slint";
-import { BlockData } from "block.slint";
+import { BlockData, RunData } from "block.slint";
 import { TextLayer } from "text.slint";
 
-export { BlockData, BlockKind } from "block.slint";
+export { BlockData, BlockKind, RunData } from "block.slint";
+export { Theme } from "theme.slint";
 
 // Walking-skeleton note: unstyled paper. Real styling arrives with the paper/theme tickets.
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
@@ -24,6 +25,16 @@ export component NoteWindow inherits Window {
     /// The note's stored text, kept by the app; `blocks` is the same text split into styled blocks.
     in property <string> text;
     in property <[BlockData]> blocks;
+    /// The same text as upright words on the tilted baseline (shown at rest), laid out by Rust.
+    in property <[RunData]> runs;
+    /// The paper (window minus margins) changed size: Rust lays the words out again.
+    callback paper-resized(length, length);
+    changed width => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
+    changed height => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
+    /// 1 at rest (words on the tilted baseline), 0 while editing (level).
+    out property <float> text-tilt-scale: text-layer.tilt-scale;
+    /// The block whose field has the focus (-1 none). Rust clears it when it replaces the blocks.
+    in-out property <int> text-focused-block <=> text-layer.focused-block;
     /// Block `i` was edited to this text.
     callback block-edited(int, string);
     /// Right click on the paper, in window coordinates.
@@ -71,12 +82,13 @@ export component NoteWindow inherits Window {
                 height: root.height - 2 * root.margin - ToolbarMetrics.band-height;
                 clip: true;
 
-                TextLayer {
+                text-layer := TextLayer {
                     x: 0px;
                     y: 0px;
                     width: root.width - 2 * root.margin;
                     height: root.height - 2 * root.margin;
                     blocks: root.blocks;
+                    runs: root.runs;
                     block-edited(i, t) => { root.block-edited(i, t); }
                 }
             }

@@ -1,13 +1,39 @@
 import { Theme } from "theme.slint";
-import { BlockData, BlockKind, BlockView } from "block.slint";
+import { BlockData, BlockKind, BlockView, RunData } from "block.slint";
 
-// The note's text: blocks stacked in the paper's frame (fixed insets, not proportions of the size).
-// `width`/`height` are the paper's size.
-// The mockups' text is tilted 1.5 deg with the paper, but Slint's software renderer cannot rotate
-// text (transform-rotation is a no-op there, slint#6068), so the text stays level for now.
+// The note's text, in the paper's frame (fixed insets, not proportions of the size). `width` and
+// `height` are the paper's.
+//
+// The mockup text is tilted with the paper but the software renderer cannot rotate text
+// (slint#6068). At rest every word is therefore its own upright Text on the tilted baseline
+// (`runs`, laid out by src/textflow.rs). While a field has the focus the stock level TextInputs
+// show instead (caret, selection and IME stay Slint's) and the words' offsets settle to 0.
 export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
+    in property <[RunData]> runs;
     callback block-edited(int, string);
+
+    // The block whose field has the focus, -1 for none. (Not a count: blocks that vanish with the
+    // model never report losing the focus.)
+    in-out property <int> focused-block: -1;
+    // 0 at rest, 1 while editing
+    property <float> flat: focused-block >= 0 ? 1 : 0;
+    animate flat { duration: Theme.settle; easing: ease-in-out; }
+    /// How much of the resting tilt the words still carry: 1 at rest, 0 while editing.
+    out property <float> tilt-scale: 1 - flat;
+
+    for r in root.runs: Text {
+        visible: root.flat < 1;
+        x: r.x + r.dx * root.tilt-scale;
+        y: r.y + r.dy * root.tilt-scale;
+        text: r.text;
+        wrap: no-wrap;
+        font-family: Theme.handwriting;
+        font-size: r.size;
+        font-weight: r.bold ? 700 : 400;
+        line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
+        color: Theme.ink;
+    }
 
     VerticalLayout {
         x: Theme.text-inset-left;
@@ -18,10 +44,14 @@ export component TextLayer inherits Rectangle {
             kind: b.kind;
             text: b.text;
             autofocus: i == 0;
+            show-input: root.flat >= 1;
             // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
             gap-before: i == 0 || root.blocks[i - 1].kind == b.kind ? 0px
                 : b.kind == BlockKind.heading ? Theme.heading-gap : Theme.body-gap;
             edited(t) => { root.block-edited(i, t); }
+            focus-changed(f) => {
+                if (f) { root.focused-block = i; } else if (root.focused-block == i) { root.focused-block = -1; }
+            }
         }
     }
 }

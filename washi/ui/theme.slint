@@ -6,7 +6,9 @@ export global Theme {
     out property <length> window-margin: 40px;
     // The paper and its text tilt together (clockwise).
     out property <angle> paper-tilt: 1.5deg;
-    out property <angle> text-tilt: 1.5deg;
+    out property <angle> text-tilt: 1.45deg;
+    // The text settles flat over this long when editing starts, and back when it ends.
+    out property <duration> settle: 120ms;
 
     out property <color> ink: #2B2F36;
     out property <string> handwriting: "Shadows Into Light";

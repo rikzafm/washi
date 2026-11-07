@@ -4,6 +4,7 @@ use crate::platform::{Clock, NoteId};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
 use crate::blocks::{self, Block, Kind};
+use crate::textflow::{self, Style, Tokens};
 use slint::VecModel;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -81,11 +82,14 @@ pub enum NoteEvent {
 struct Doc {
     blocks: RefCell<Vec<Block>>,
     model: Rc<VecModel<BlockData>>,
+    runs: Rc<VecModel<RunData>>,
+    /// The paper's size in logical px (window minus margins), for the stepped layout.
+    paper: Cell<(f64, f64)>,
 }
 
 impl Doc {
     fn new() -> Rc<Doc> {
-        Rc::new(Doc { blocks: RefCell::new(Vec::new()), model: Rc::new(VecModel::default()) })
+        Rc::new(Doc { blocks: RefCell::new(Vec::new()), model: Rc::new(VecModel::default()), runs: Rc::new(VecModel::default()), paper: Cell::new((363.0, 433.0)) })
     }
 
     /// Replace everything (opening a note, or text set from outside).
@@ -93,6 +97,39 @@ impl Doc {
         let parsed = blocks::parse(content);
         self.model.set_vec(parsed.iter().map(block_data).collect::<Vec<_>>());
         *self.blocks.borrow_mut() = parsed;
+    }
+
+    /// Lay the words out again (text or paper size changed) from the tokens in ui/theme.slint.
+    fn relayout(&self, ui: &NoteWindow) {
+        let th = ui.global::<Theme>();
+        let style = |size: f32, pitch: f32| Style { size: size as f64, pitch: pitch as f64 };
+        let tokens = Tokens {
+            inset_left: th.get_text_inset_left() as f64,
+            inset_right: th.get_text_inset_right() as f64,
+            inset_top: th.get_text_inset_top() as f64,
+            heading_gap: th.get_heading_gap() as f64,
+            body_gap: th.get_body_gap() as f64,
+            title: style(th.get_title_size(), th.get_title_pitch()),
+            heading: style(th.get_heading_size(), th.get_heading_pitch()),
+            body: style(th.get_body_size(), th.get_body_pitch()),
+            tilt_deg: th.get_text_tilt() as f64,
+        };
+        let runs = textflow::layout(&self.blocks.borrow(), self.paper.get(), &tokens);
+        self.runs.set_vec(
+            runs.iter()
+                .map(|r| RunData {
+                    text: r.text.as_str().into(),
+                    x: r.x as f32,
+                    y: r.y as f32,
+                    dx: r.dx as f32,
+                    dy: r.dy as f32,
+                    width: r.width as f32,
+                    size: r.size as f32,
+                    pitch: r.pitch as f32,
+                    bold: r.kind == Kind::Heading,
+                })
+                .collect::<Vec<_>>(),
+        );
     }
 
     /// Block `i` was edited; returns the whole stored text.
@@ -137,6 +174,8 @@ impl Note {
         let doc = Doc::new();
         doc.load(content);
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
+        ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
+        doc.relayout(&ui);
         ui.set_text(content.into());
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
@@ -152,12 +191,22 @@ impl Note {
             ui.on_block_edited(move |i, block_text| {
                 let text = doc.edit(i.max(0) as usize, block_text.as_str());
                 if let Some(ui) = weak.upgrade() {
+                    doc.relayout(&ui);
                     ui.set_text(text.as_str().into());
                     ui.set_window_title(window_title(&text).into());
                 }
                 autosave.dirty.set(true);
                 let a = autosave.clone();
                 timer.start(TimerMode::SingleShot, AUTOSAVE_DELAY, move || a.flush());
+            });
+        }
+        {
+            let (weak, doc) = (ui.as_weak(), doc.clone());
+            ui.on_paper_resized(move |w, h| {
+                doc.paper.set((w as f64, h as f64));
+                if let Some(ui) = weak.upgrade() {
+                    doc.relayout(&ui);
+                }
             });
         }
         {
@@ -242,7 +291,10 @@ impl Note {
 
     /// Replace the note's text without typing it.
     pub fn set_text(&self, text: &str) {
+        // the fields of the old blocks vanish without saying they lost the focus
+        self.ui.set_text_focused_block(-1);
         self.doc.load(text);
+        self.doc.relayout(&self.ui);
         self.ui.set_text(text.into());
     }
 
