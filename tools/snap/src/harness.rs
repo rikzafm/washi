@@ -267,7 +267,9 @@ impl Harness {
         std::fs::write(self.path("key.bin"), wrapped).unwrap();
     }
 
-    pub fn damage_database_header(&self) {
+    pub fn damage_database_header(&mut self) {
+        // Close the app first: closing the database checkpoints the WAL back over the header.
+        self.app = None;
         let p = self.path("notes.db");
         let mut b = std::fs::read(&p).unwrap();
         for byte in b.iter_mut().take(32) {
