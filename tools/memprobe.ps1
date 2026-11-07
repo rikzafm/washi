@@ -119,6 +119,16 @@ function Median([double[]]$xs) {
     $s[[math]::Floor(($s.Count - 1) / 2)]
 }
 
+# Washi is single-instance per user: a washi.exe started by anyone else (another checkout, the user)
+# makes our launch hand off and exit, and makes theirs open a note in ours. Wait for a quiet machine.
+function Wait-QuietMachine {
+    $deadline = (Get-Date).AddSeconds(120)
+    while (@(Get-Process -Name washi -ErrorAction SilentlyContinue).Count -gt 0) {
+        if ((Get-Date) -gt $deadline) { throw 'another washi.exe is running (single-instance): close it and rerun' }
+        Write-Host 'memprobe: another washi.exe is running; waiting for it to exit'; Start-Sleep -Seconds 5
+    }
+}
+
 function New-Profile([int]$n) {
     $dir = Join-Path ([IO.Path]::GetTempPath()) ("washi-memprobe-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
     & $Seed --data-dir $dir --notes $n | Out-Null
@@ -143,6 +153,7 @@ $wakes = @()
 $suspendMissing = @()
 
 foreach ($n in $Notes) {
+    Wait-QuietMachine
     $dir = New-Profile $n
     $trace = Join-Path $dir 'trace.txt'
     $env:WASHI_DATA_DIR = $dir
@@ -204,6 +215,7 @@ foreach ($n in $Notes) {
 $startups = @()
 if ($Startup) {
     for ($i = 0; $i -lt $StartupRuns; $i++) {
+        Wait-QuietMachine
         $dir = New-Profile 3
         $trace = Join-Path $dir 'trace.txt'
         $env:WASHI_DATA_DIR = $dir
