@@ -14,19 +14,14 @@ hover:tape_blue
 hover:title
 hover:heading
 hover:body
-hover:toolbar
 hover:image
 
 idle:paper
 idle:shadow
 idle:tape_pink
 idle:tape_blue
-idle:no_toolbar
 idle:image
 
 invariants:tilt
 invariants:tapes
 invariants:insets
-invariants:fonts
-invariants:toolbar
-invariants:text area
