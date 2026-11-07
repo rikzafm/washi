@@ -9,5 +9,19 @@ jobs:
       - run: echo "C:\Strawberry\perl\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
         shell: pwsh
       - run: cargo test --workspace
+      # uidiff is outside the workspace (own lockfile): test it separately
+      - run: cargo test --manifest-path tools/uidiff/Cargo.toml
+      # the fidelity loop, headless: snap the note, compare with the mockups, check the size
+      # invariants. Fails on any regression against docs/design/fidelity-baseline.txt (for example
+      # a title that moved by 3 px) and uploads the reports either way.
+      - run: pwsh tools/fidelity.ps1 -NoOpen
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fidelity
+          path: target/fidelity/
       - run: cargo build --release -p washi
       - run: pwsh tools/check-release.ps1
+      # active private working set of 3 notes must stay within the 15 MB budget
+      - run: cargo build --release -p snap --bin seed
+      - run: pwsh tools/memprobe.ps1 -Notes 1,3 -IdleSec 5 -Enforce -NoLog
