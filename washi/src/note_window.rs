@@ -40,6 +40,8 @@ pub enum NoteEvent {
     WindowClosed,
     /// Right click; `at` is in screen pixels.
     ContextMenu { at: (i32, i32) },
+    /// The mouse moved over the note (wakes a suspended app).
+    PointerMoved,
     New,
     Close,
     Delete,
@@ -98,6 +100,10 @@ impl Note {
         }
         {
             let on_event = on_event.clone();
+            ui.on_pointer_moved(move || on_event(id, NoteEvent::PointerMoved));
+        }
+        {
+            let on_event = on_event.clone();
             ui.on_new_note(move || on_event(id, NoteEvent::New));
         }
         {
@@ -111,6 +117,17 @@ impl Note {
 
     pub fn id(&self) -> NoteId {
         self.id
+    }
+
+    /// The native window handle, once the window exists (never in the test harness).
+    pub fn hwnd(&self) -> Option<isize> {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let window_handle = self.ui.window().window_handle();
+        let handle = window_handle.window_handle().ok()?;
+        match handle.as_raw() {
+            RawWindowHandle::Win32(w) => Some(w.hwnd.get()),
+            _ => None,
+        }
     }
 
     pub fn ui(&self) -> &NoteWindow {
@@ -132,6 +149,21 @@ impl Note {
 
     pub fn text(&self) -> String {
         self.ui.get_text().to_string()
+    }
+
+    /// Suspension: stop this note's timers and its caret blink (a window that is not active
+    /// does not blink). Unsaved edits must have been flushed first.
+    pub fn pause(&self) {
+        self.timer.stop();
+        self.ui.window().dispatch_event(slint::platform::WindowEvent::WindowActiveChanged(false));
+    }
+
+    /// Waking: draw the whole note again; `focused` notes get their caret blink back.
+    pub fn resume(&self, focused: bool) {
+        if focused {
+            self.ui.window().dispatch_event(slint::platform::WindowEvent::WindowActiveChanged(true));
+        }
+        self.ui.window().request_redraw();
     }
 
     /// Save now if there are unsaved edits (used on close and quit).

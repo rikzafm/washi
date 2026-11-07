@@ -5,6 +5,7 @@ pub mod app;
 pub mod note_window;
 pub mod platform;
 pub mod storage;
+pub mod suspend;
 pub mod win;
 
 pub use app::{App, Env, StartError};

@@ -45,6 +45,9 @@ pub struct WindowState {
 pub trait WindowSignals {
     fn window_state(&self, note: NoteId) -> WindowState;
     fn app_in_background(&self) -> bool;
+    /// A note's native window now exists / is gone. Fakes ignore this.
+    fn attach(&self, _note: NoteId, _hwnd: isize) {}
+    fn detach(&self, _note: NoteId) {}
 }
 
 /// Efficiency mode and memory release (suspension, a later ticket).

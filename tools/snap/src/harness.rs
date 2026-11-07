@@ -5,7 +5,7 @@ use slint::ComponentHandle;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
-use washi::platform::{KeyProtector, NoteId};
+use washi::platform::{KeyProtector, NoteId, WindowState};
 use washi::{App, Env, StartError};
 
 /// One app instance's world: a temporary data folder, fakes for Windows, and the running app.
@@ -202,6 +202,77 @@ impl Harness {
     /// Whether a note is gone from the database.
     pub fn is_deleted(&self, id: NoteId) -> bool {
         self.app().saved_text(id).is_none()
+    }
+
+    // ---- window state (suspension) ----
+
+    fn set_state(&mut self, note: usize, change: impl FnOnce(&mut WindowState)) {
+        let id = self.id(note);
+        change(self.signals.states.borrow_mut().entry(id).or_default());
+        self.app().window_state_changed();
+    }
+
+    pub fn minimize(&mut self, note: usize) {
+        // What Windows does: the window goes inactive and is never painted while minimized.
+        let id = self.id(note);
+        self.app().with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(false)));
+        self.repaint_pending(note);
+        self.set_state(note, |s| {
+            s.minimized = true;
+            s.focused = false;
+        });
+    }
+
+    pub fn restore(&mut self, note: usize) {
+        self.set_state(note, |s| s.minimized = false);
+    }
+
+    pub fn focus(&mut self, note: usize) {
+        self.set_state(note, |s| s.focused = true);
+    }
+
+    /// Move the mouse over a note's margin.
+    pub fn hover(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let position = slint::LogicalPosition::new(5.0, 5.0);
+            n.ui().window().dispatch_event(WindowEvent::PointerMoved { position });
+        });
+        self.settle();
+    }
+
+    /// Windows asks a note to paint (it was uncovered).
+    pub fn paint_request(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().paint_requested(id);
+    }
+
+    pub fn is_suspended(&self) -> bool {
+        self.app().is_suspended()
+    }
+
+    /// Time until the next Slint timer is due; `None` when none is scheduled.
+    pub fn next_timer_due(&self) -> Option<Duration> {
+        slint::platform::duration_until_next_timer_update()
+    }
+
+    /// Draw a note if it asked for a repaint; says whether it did (so a second call is `false`).
+    pub fn repaint_pending(&self, note: usize) -> bool {
+        let w = platform::windows().remove(note);
+        let (pw, ph) = platform::WINDOW_SIZE;
+        let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
+        w.draw_if_needed(|r| {
+            r.render(&mut buf, pw as usize);
+        })
+    }
+
+    pub fn draw_pending(&self, note: usize) -> bool {
+        self.repaint_pending(note)
+    }
+
+    /// Position and size last written to the database for a note.
+    pub fn saved_geometry(&self, id: NoteId) -> Option<washi::storage::Geometry> {
+        self.app().saved_geometry(id)
     }
 
     // ---- check ----
