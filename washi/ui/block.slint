@@ -93,6 +93,16 @@ export component BlockView inherits Rectangle {
             if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset); }
         }
         key-pressed(e) => {
+            // Ctrl+Z undoes, Ctrl+Y (or Ctrl+Shift+Z) redoes: the note keeps the history, not the field
+            if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta) {
+                if (!e.modifiers.shift && (e.text == "z" || e.text == "\u{1a}")) {
+                    return root.key("\u{1a}", self.cursor-position-byte-offset) ? accept : reject;
+                }
+                if ((!e.modifiers.shift && (e.text == "y" || e.text == "\u{19}"))
+                    || (e.modifiers.shift && (e.text == "z" || e.text == "Z" || e.text == "\u{1a}"))) {
+                    return root.key("\u{19}", self.cursor-position-byte-offset) ? accept : reject;
+                }
+            }
             if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta
                 || self.cursor-position-byte-offset != self.anchor-position-byte-offset) {
                 return reject;
