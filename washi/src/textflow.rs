@@ -11,8 +11,11 @@
 //! face with those advances too (`fonts/WashiCaret.ttf`), and the words are drawn from this layout
 //! while editing as well, each piece in its own face.
 
-use crate::document::{Block, Caret, Kind, Range, Style as Flags};
+use crate::document::{Block, Caret, Kind, Paint, Range, Style as Flags};
 use ttf_parser::Face;
+
+/// A marker is a line pitch tall less this much at its top and bottom, so marked lines do not touch.
+const MARKER_INSET: f64 = 1.0;
 
 const REGULAR: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight.ttf");
 const BOLD: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Bold.ttf");
@@ -61,6 +64,9 @@ pub struct Run {
     pub kind: Kind,
     pub bold: bool,
     pub italic: bool,
+    /// Palette indices of the run's ink and marker (0: default ink, no marker); one value per run.
+    pub ink: u8,
+    pub marker: u8,
     /// Line within the block (0 first).
     pub line: usize,
     pub text: String,
@@ -230,9 +236,10 @@ pub fn line_width(text: &str, size: f64) -> f64 {
     Measure::new(false, false, size).width(text)
 }
 
-/// The stretches of `start..end` of a block drawn in one face (bold and italic the same).
-fn face_runs(b: &Block, start: usize, end: usize) -> Vec<(usize, usize)> {
-    let face = |i: usize| b.shown_at(i).bits() & (Flags::BOLD.bits() | Flags::ITALIC.bits());
+/// The stretches of `start..end` of a block drawn alike: in one face (bold and italic the same)
+/// and in one ink and marker.
+fn look_runs(b: &Block, start: usize, end: usize) -> Vec<(usize, usize)> {
+    let face = |i: usize| (b.shown_at(i).bits() & (Flags::BOLD.bits() | Flags::ITALIC.bits()), b.paints[i]);
     let mut out = vec![];
     let mut s = start;
     for i in start + 1..end {
@@ -316,6 +323,36 @@ pub struct Rule {
     pub dy: f64,
 }
 
+/// A marker (highlight) behind one line's stretch of one color: a rounded rect, level, in the paper's
+/// frame. Its height is the line box minus 2 px. It spans the words and the spaces between them
+/// whole, whatever the pieces they are drawn in, so the tilted drawing has no seams.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Marker {
+    pub block: usize,
+    /// Palette index (1..).
+    pub marker: u8,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Where a selection wash (level boxes) meets the markers: the boxes the wash is drawn again in,
+/// see-through, above the markers, so that a selected highlighted word shows its marker tinted.
+pub fn marker_wash(markers: &[Marker], wash: &[Rect]) -> Vec<Rect> {
+    let mut out = vec![];
+    for m in markers {
+        for w in wash {
+            let (x0, x1) = (m.x.max(w.x), (m.x + m.width).min(w.x + w.width));
+            let (y0, y1) = (m.y.max(w.y), (m.y + m.height).min(w.y + w.height));
+            if x1 > x0 && y1 > y0 {
+                out.push(Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
+            }
+        }
+    }
+    out
+}
+
 /// Where the baseline of a line is below the top of its line box: the font's ascent plus half of
 /// the leading the line pitch adds to the font's natural line height.
 fn baseline(m: &Measure, pitch: f64) -> f64 {
@@ -328,9 +365,9 @@ pub fn layout(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> Vec<Run> {
     layout_all(blocks, paper, t).0
 }
 
-/// [`layout`], and the bars that go with it: underlines and strike-throughs (a bar per line, in
-/// pieces like the words) and a bullet for each list item.
-pub fn layout_all(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> (Vec<Run>, Vec<Rule>) {
+/// [`layout`], and what goes with it: the bars (underlines and strike-throughs, a bar per line in
+/// pieces like the words, and a bullet for each list item) and the markers behind colored text.
+pub fn layout_all(blocks: &[Block], paper: (f64, f64), t: &Tokens) -> (Vec<Run>, Vec<Rule>, Vec<Marker>) {
     layout_all_with_images(blocks, paper, t, &|_| None)
 }
 
@@ -345,10 +382,11 @@ pub fn image_height(width: f64, pixels: (u32, u32)) -> f64 {
 
 /// Like [`layout_all`], where `image_size` gives an image block's size in pixels. An image block is as
 /// wide as the text area and as tall as its aspect ratio makes it (a missing size: one body line).
-pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<Run>, Vec<Rule>) {
+pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<Run>, Vec<Rule>, Vec<Marker>) {
     let avail = paper.0 - t.inset_left - t.inset_right;
     let mut runs = vec![];
     let mut rules = vec![];
+    let mut markers = vec![];
     let mut top = t.inset_top;
     for (bi, b) in blocks.iter().enumerate() {
         let st = t.style(b.kind);
@@ -380,13 +418,14 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
             let y = top + li as f64 * st.pitch;
             for Word { text: word, at, off } in line {
                 let mut x = t.inset_left + at;
-                for (s, e) in face_runs(b, *off, *off + word.len()) {
+                for (s, e) in look_runs(b, *off, *off + word.len()) {
                     let shown = b.shown_at(s);
                     let (bold, italic) = (shown.contains(Flags::BOLD), shown.contains(Flags::ITALIC));
+                    let Paint { ink, marker } = b.paints[s];
                     for piece in pieces(&b.text[s..e], t.max_run, &m) {
                         let width = m.width(&piece);
                         let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
-                        runs.push(Run { block: bi, kind: b.kind, bold, italic, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                        runs.push(Run { block: bi, kind: b.kind, bold, italic, ink, marker, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
                         x += width;
                     }
                 }
@@ -396,6 +435,16 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
                 // included, those after the last left out)
                 let (from, to) = (first.off, last.off + last.text.len());
                 let x_of = |i: usize| t.inset_left + first.at + m.width(&b.text[from..i]);
+                // a marker per stretch of one color, from the stretch's first character to its last
+                let mut i = from;
+                while i < to {
+                    let color = b.paints[i].marker;
+                    let j = (i..to).find(|&k| b.paints[k].marker != color).unwrap_or(to);
+                    if color != 0 {
+                        markers.push(Marker { block: bi, marker: color, x: x_of(i), y: y + MARKER_INSET, width: x_of(j) - x_of(i), height: st.pitch - 2.0 * MARKER_INSET });
+                    }
+                    i = j;
+                }
                 for (flag, lift) in [(Flags::UNDERLINE, -0.1), (Flags::STRIKE, 0.3)] {
                     let mut i = from;
                     while i < to {
@@ -414,7 +463,7 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
         // every block takes at least one line, even when empty
         top += lines.len() as f64 * st.pitch;
     }
-    (runs, rules)
+    (runs, rules, markers)
 }
 
 /// Vertical extent of the text in the paper's frame: the top of every block, and the bottom of the
@@ -685,7 +734,7 @@ mod tests {
         styled.toggle_style(2, 10, 13, Flags::BOLD);
         styled.toggle_style(2, 20, 23, Flags::ITALIC);
         styled.toggle_style(2, 14, 16, Flags::UNDERLINE);
-        let (runs, rules) = layout_all(styled.blocks(), (363.0, 433.0), &TOKENS);
+        let (runs, rules, _) = layout_all(styled.blocks(), (363.0, 433.0), &TOKENS);
         let plain_runs = layout(plain.blocks(), (363.0, 433.0), &TOKENS);
         assert_eq!(line_texts(&runs, 2).len(), line_texts(&plain_runs, 2).len(), "same line breaks");
         let pog = runs.iter().find(|r| r.block == 2 && r.text == "POG").unwrap();
@@ -841,6 +890,87 @@ mod tests {
         let img = r.iter().find(|s| (s.y - tops[1]).abs() < 1e-9).expect("a rect at the image's top");
         assert!((img.x - TOKENS.inset_left).abs() < 1e-9 && (img.width - avail).abs() < 1e-9);
         assert!((img.height - image_height(avail, (200, 100))).abs() < 1e-9);
+    }
+
+    /// The runs and markers of block 2 of the mockup, with ink and markers set at `spans`
+    /// `(start, end, ink, marker)` (None leaves that one alone).
+    fn painted(tokens: &Tokens, spans: &[(usize, usize, Option<u8>, Option<u8>)]) -> (Vec<Run>, Vec<Marker>) {
+        let mut d = Document::parse(MOCKUP);
+        for &(s, e, ink, marker) in spans {
+            if let Some(i) = ink {
+                d.set_ink(2, s, e, i);
+            }
+            if let Some(m) = marker {
+                d.set_marker(2, s, e, m);
+            }
+        }
+        let (runs, _, markers) = layout_all(d.blocks(), (363.0, 433.0), tokens);
+        (runs.into_iter().filter(|r| r.block == 2).collect(), markers.into_iter().filter(|m| m.block == 2).collect())
+    }
+
+    #[test]
+    fn runs_split_where_the_paint_changes_like_they_do_where_the_style_does() {
+        // "POG" blue ink; "POG no" yellow marker; "pon" of "Weapon" red ink
+        let (runs, _) = painted(&TOKENS, &[(10, 13, Some(6), None), (10, 16, None, Some(4)), (20, 23, Some(9), None)]);
+        let find = |t: &str| runs.iter().find(|r| r.text == t).unwrap_or_else(|| panic!("no run {t:?}"));
+        assert_eq!((find("POG").ink, find("POG").marker), (6, 4));
+        assert_eq!((find("no").ink, find("no").marker), (0, 4));
+        assert_eq!((find("Wea").ink, find("pon").ink), (0, 9));
+        assert!((find("Wea").x + find("Wea").width - find("pon").x).abs() < 1e-9);
+        assert_eq!((find("Currently").ink, find("Currently").marker), (0, 0));
+        // an uncolored note keeps its runs
+        let (plain, _) = painted(&TOKENS, &[]);
+        assert!(plain.iter().all(|r| r.ink == 0 && r.marker == 0));
+    }
+
+    #[test]
+    fn a_marker_is_one_rect_per_line_span_merged_across_pieces() {
+        for tokens in [TOKENS, Tokens { max_run: 16.0, ..TOKENS }] {
+            let (runs, markers) = painted(&tokens, &[(10, 16, None, Some(4))]);
+            assert_eq!(markers.len(), 1, "{markers:?}");
+            let (first, last) = (runs.iter().find(|r| r.marker == 4).unwrap(), runs.iter().rfind(|r| r.marker == 4).unwrap());
+            let m = &markers[0];
+            assert_eq!(m.marker, 4);
+            assert!((m.x - first.x).abs() < 1e-9 && (m.x + m.width - (last.x + last.width)).abs() < 1e-9, "{m:?}");
+            // the line box minus 2 px
+            assert!((m.y - (first.y + 1.0)).abs() < 1e-9 && (m.height - (first.pitch - 2.0)).abs() < 1e-9);
+        }
+        // a marker over the whole body: one rect on each of its four lines
+        let len = Document::parse(MOCKUP).blocks()[2].text.len();
+        let (runs, markers) = painted(&TOKENS, &[(0, len, None, Some(6))]);
+        assert_eq!(markers.len(), 4);
+        // a wrapping space is not washed in the marker: the rect ends with the line's last word
+        let line0_end = runs.iter().filter(|r| r.line == 0).map(|r| r.x + r.width).fold(0.0, f64::max);
+        assert!((markers[0].x + markers[0].width - line0_end).abs() < 1e-9);
+    }
+
+    #[test]
+    fn neighbouring_markers_touch_but_never_overlap() {
+        let (runs, markers) = painted(&TOKENS, &[(10, 13, None, Some(6)), (13, 16, None, Some(9))]);
+        assert_eq!(markers.iter().map(|m| m.marker).collect::<Vec<_>>(), [6, 9]);
+        assert!(markers[0].x + markers[0].width <= markers[1].x + 1e-9);
+        let no = runs.iter().find(|r| r.text == "no").unwrap();
+        assert!(markers[1].x + markers[1].width <= no.x + no.width + 1e-9);
+        // a marker that skips a word leaves a gap there
+        let (_, gap) = painted(&TOKENS, &[(10, 13, None, Some(6)), (14, 16, None, Some(6))]);
+        assert_eq!(gap.len(), 2);
+        assert!(gap[0].x + gap[0].width < gap[1].x);
+    }
+
+    #[test]
+    fn the_wash_of_a_selection_across_blocks_is_redrawn_over_the_markers_it_meets() {
+        let mut d = Document::parse(MOCKUP);
+        d.set_marker(2, 10, 16, 4);
+        let (_, _, markers) = layout_all(d.blocks(), (363.0, 433.0), &TOKENS);
+        let m = &markers[0];
+        let sel = [Rect { x: m.x + 5.0, y: 0.0, width: 10.0, height: 1000.0 }];
+        let over = marker_wash(&markers, &sel);
+        assert_eq!(over.len(), 1);
+        let want = [m.x + 5.0, 10.0, m.y, m.height];
+        for (got, want) in [over[0].x, over[0].width, over[0].y, over[0].height].into_iter().zip(want) {
+            assert!((got - want).abs() < 1e-9, "{over:?} vs {m:?}");
+        }
+        assert!(marker_wash(&markers, &[]).is_empty());
     }
 
     #[test]

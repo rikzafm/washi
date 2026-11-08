@@ -1,5 +1,56 @@
 import { Theme } from "theme.slint";
-import { BlockData, BlockKind, BlockView, RuleData, RunData, SelRect } from "block.slint";
+import { BlockData, BlockKind, BlockView, MarkerData, RuleData, RunData, SelRect } from "block.slint";
+
+// A marker: a rounded rectangle (radius 3) of one line's stretch. At rest the paper is tilted and
+// the renderer cannot rotate elements, so it is one Path whose corners are moved onto the tilted
+// baseline (like the toolbar's shapes): one shape for the whole stretch, so no seams between the
+// pieces the words are drawn in. `ts` is how much of the tilt is still on (1 at rest, 0 editing).
+component MarkerShape inherits Path {
+    in property <MarkerData> m;
+    in property <float> ts;
+    in property <length> shift-x;
+    in property <length> shift-y;
+    in property <length> paper-w;
+    in property <length> paper-h;
+    /// The corner radius, and the room the Path keeps around the rectangle on every side (so the
+    /// tilted corners stay inside its box).
+    property <float> r: 3;
+    property <float> pad: 6;
+    property <float> sn: Theme.text-tilt.sin();
+    property <float> cs: Theme.text-tilt.cos();
+    property <float> u0: root.m.x / 1px;
+    property <float> v0: root.m.y / 1px;
+    property <float> u1: (root.m.x + root.m.width) / 1px;
+    property <float> v1: (root.m.y + root.m.height) / 1px;
+    // the point (u, v) of the level layout on the (partly) tilted baseline
+    pure function px(u: float, v: float) -> float {
+        return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
+    }
+    pure function py(u: float, v: float) -> float {
+        return v + ((u - root.paper-w / 2px) * root.sn + (v - root.paper-h / 2px) * (root.cs - 1) + root.shift-y / 1px) * root.ts;
+    }
+    // the shape's own box: around the tilted rectangle (it is as high as the rectangle plus the
+    // drop along its width), so the Path is only as big as the marker
+    property <float> ox: px(root.u0, root.v0) - root.pad;
+    property <float> oy: py(root.u0, root.v0) - root.pad;
+    x: root.ox * 1px;
+    y: root.oy * 1px;
+    width: (root.u1 - root.u0 + 2 * root.pad) * 1px;
+    height: (root.v1 - root.v0 + (root.u1 - root.u0) * root.sn + 2 * root.pad) * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    fill: root.m.color;
+    MoveTo { x: px(root.u0 + root.r, root.v0) - root.ox; y: py(root.u0 + root.r, root.v0) - root.oy; }
+    LineTo { x: px(root.u1 - root.r, root.v0) - root.ox; y: py(root.u1 - root.r, root.v0) - root.oy; }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u1, root.v0 + root.r) - root.ox; y: py(root.u1, root.v0 + root.r) - root.oy; }
+    LineTo { x: px(root.u1, root.v1 - root.r) - root.ox; y: py(root.u1, root.v1 - root.r) - root.oy; }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u1 - root.r, root.v1) - root.ox; y: py(root.u1 - root.r, root.v1) - root.oy; }
+    LineTo { x: px(root.u0 + root.r, root.v1) - root.ox; y: py(root.u0 + root.r, root.v1) - root.oy; }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u0, root.v1 - root.r) - root.ox; y: py(root.u0, root.v1 - root.r) - root.oy; }
+    LineTo { x: px(root.u0, root.v0 + root.r) - root.ox; y: py(root.u0, root.v0 + root.r) - root.oy; }
+    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u0 + root.r, root.v0) - root.ox; y: py(root.u0 + root.r, root.v0) - root.oy; }
+    Close { }
+}
 
 // The note's text, in the paper's frame (fixed insets, not proportions of the size). `width` and
 // `height` are the paper's.
@@ -14,6 +65,9 @@ export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
     in property <[RunData]> runs;
     in property <[RuleData]> rules;
+    /// Highlights behind the words, and the boxes where the selection's wash meets them (Rust).
+    in property <[MarkerData]> markers;
+    in property <[SelRect]> marker-wash;
     /// A field took the focus: the caret is in this block now.
     callback focus-entered(int);
     /// While the note is suspended (covered, minimized) losing the focus does not change its look.
@@ -110,6 +164,27 @@ export component TextLayer inherits Rectangle {
         background: Theme.selection;
     }
 
+    // the markers: over the paper (and the opaque wash of a selection across blocks), under the words
+    for m in root.markers: MarkerShape {
+        m: m;
+        ts: root.tilt-scale;
+        shift-x: root.shift-x;
+        shift-y: root.shift-y;
+        paper-w: root.paper-w;
+        paper-h: root.paper-h;
+        visible: self.y + self.height >= root.edge-y(self.x + self.width / 2);
+    }
+
+    // where the selection across blocks meets a marker: the wash again, see-through, so the marker
+    // shows tinted (a selection inside one field is washed by the field over the marker anyway)
+    for s in root.marker-wash: Rectangle {
+        x: s.x;
+        y: s.y;
+        width: s.width;
+        height: s.height;
+        background: Theme.selection-over;
+    }
+
     // Each resting word is cut along that edge on its own (they are at most a few pixels wide per
     // step, so the cut follows the tilt within a pixel).
     for r in root.runs: Rectangle {
@@ -133,7 +208,7 @@ export component TextLayer inherits Rectangle {
             font-weight: r.bold ? 700 : 400;
             font-italic: r.italic;
             line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
-            color: r.hint ? Theme.ink-hint : Theme.ink;
+            color: r.hint ? Theme.ink-hint : r.ink;
         }
     }
 

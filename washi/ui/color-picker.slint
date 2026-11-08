@@ -1,0 +1,324 @@
+// The color popover (variant B, "Ink dots", of the Washi Color Picker Variants canvas): two rows,
+// Ink (ten round dots) and Marker (ten rounded chips), a hand-written caption and a Clear link,
+// above the toolbar band, with a tail pointing at the "A" button.
+//
+// Like the toolbar it is drawn in the paper's tilted frame: the software renderer cannot rotate
+// elements, so every shape is a Path through `Tilt.x/y` and text sits at rotated centers. It is
+// plain hit areas only, which never take the keyboard focus, so opening it and moving over it
+// leaves the note's text field focused and its range intact (ticket 03, see its Comments).
+import { Theme } from "theme.slint";
+import { Dot, Frame, TRect, Tilt, ToolbarMetrics } from "toolbar.slint";
+
+export struct PaletteEntry {
+    name: string,
+    ink: color,
+    marker: color,
+}
+
+/// The ten colors, in the order of the spec's table; index 0 is "Default" (ink) and "none" (marker).
+/// Rust fills it from `document::PALETTE` when a note window is made, so there is one table.
+export global PickerPalette {
+    in-out property <[PaletteEntry]> entries: [];
+    /// Out of range (-1: mixed) shows the default.
+    public pure function ink(i: int) -> color {
+        return (i >= 0 && i < 10) ? entries[i].ink : entries[0].ink;
+    }
+    public pure function marker(i: int) -> color {
+        return (i >= 0 && i < 10) ? entries[i].marker : transparent;
+    }
+    public pure function name(i: int) -> string {
+        return (i >= 0 && i < 10) ? entries[i].name : entries[0].name;
+    }
+}
+
+/// Keyboard walk over the swatches. A position is row * 10 + column (row 0 ink, row 1 marker);
+/// -1 is "no ring yet" and counts as the first ink dot. The ends stop the walk.
+export global ColorPickerNav {
+    public pure function step(cur: int, key: string) -> int {
+        let row = cur >= 10 ? 1 : 0;
+        let col = cur >= 0 ? cur - row * 10 : 0;
+        if (key == Key.LeftArrow) { return row * 10 + max(0, col - 1); }
+        if (key == Key.RightArrow) { return row * 10 + min(9, col + 1); }
+        if (key == Key.UpArrow) { return col; }
+        return 10 + col;
+    }
+}
+
+export global PickerMetrics {
+    out property <length> width: 330px;
+    out property <length> height: 116px;
+    out property <length> radius: 16px;
+    /// How far the popover's left edge sits left of the text's (the paper's left padding).
+    out property <length> left-overhang: 10px;
+    /// The popover's left edge, from the paper's left edge: the paper's left padding, less the overhang.
+    out property <length> left: Theme.text-inset-left - self.left-overhang;
+    /// Space between the popover's bottom and the toolbar band's top.
+    out property <length> gap: 10px;
+    out property <length> tail-width: 16px;
+    out property <length> tail-height: 8px;
+    out property <length> dot: 21px;
+    out property <length> step: 26px;
+    out property <length> label-x: 14px;
+    out property <length> label-width: 46px;
+    out property <length> first-swatch-x: 67px;
+    out property <length> ink-row-y: 14px;
+    out property <length> marker-row-y: 47px;
+    out property <length> caption-y: 80px;
+    out property <color> fill: #FFFFFD;
+    out property <color> border: #ECECE8;
+    out property <color> label: #6B7079;
+    out property <color> shadow: #2B2F360A;
+    /// The tight second shadow (0 2 6 #2B2F3614 in the spec), stacked in three layers like `shadow`.
+    out property <color> shadow-tight: #2B2F3605;
+    /// The selection ring on both rows: the default ink.
+    out property <color> ring: Theme.ink;
+    out property <color> focus-ring: #6FA2F5;
+}
+
+/// A filled triangle through three tilted points.
+component TTri inherits Path {
+    in property <Frame> f;
+    in property <float> u0;
+    in property <float> v0;
+    in property <float> u1;
+    in property <float> v1;
+    in property <float> u2;
+    in property <float> v2;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    MoveTo { x: Tilt.x(root.f, root.u0, root.v0); y: Tilt.y(root.f, root.u0, root.v0); }
+    LineTo { x: Tilt.x(root.f, root.u1, root.v1); y: Tilt.y(root.f, root.u1, root.v1); }
+    LineTo { x: Tilt.x(root.f, root.u2, root.v2); y: Tilt.y(root.f, root.u2, root.v2); }
+    Close { }
+}
+
+/// Text in a box whose center is a (tilted) point.
+component TextAt inherits Text {
+    in property <Frame> f;
+    in property <float> du;
+    in property <float> dv;
+    x: Tilt.x(root.f, root.du, root.dv) * 1px - self.width / 2;
+    y: Tilt.y(root.f, root.du, root.dv) * 1px - self.height / 2;
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+/// A hit area centered at a (tilted) point.
+component HitAt inherits TouchArea {
+    in property <Frame> f;
+    in property <float> du;
+    in property <float> dv;
+    x: Tilt.x(root.f, root.du, root.dv) * 1px - self.width / 2;
+    y: Tilt.y(root.f, root.du, root.dv) * 1px - self.height / 2;
+}
+
+/// The "none" chip's dashed outline: short dashes along the four sides of a square at (u0, v0).
+component DashedSquare inherits Rectangle {
+    in property <Frame> f;
+    in property <float> u0;
+    in property <float> v0;
+    in property <float> s;
+    in property <color> stroke;
+    for k in 4: TRect { f: root.f; u0: root.u0 + 1.5 + k * (root.s - 3) / 4 + 1; v0: root.v0; w: (root.s - 3) / 4 - 2; h: 1.4; fill: root.stroke; }
+    for k in 4: TRect { f: root.f; u0: root.u0 + 1.5 + k * (root.s - 3) / 4 + 1; v0: root.v0 + root.s - 1.4; w: (root.s - 3) / 4 - 2; h: 1.4; fill: root.stroke; }
+    for k in 4: TRect { f: root.f; u0: root.u0; v0: root.v0 + 1.5 + k * (root.s - 3) / 4 + 1; w: 1.4; h: (root.s - 3) / 4 - 2; fill: root.stroke; }
+    for k in 4: TRect { f: root.f; u0: root.u0 + root.s - 1.4; v0: root.v0 + 1.5 + k * (root.s - 3) / 4 + 1; w: 1.4; h: (root.s - 3) / 4 - 2; fill: root.stroke; }
+}
+
+/// The popover. It covers the whole window (it draws only the popover); the owner gives it the
+/// paper's frame, like the toolbar. Nothing is drawn or hit while it is not `open`.
+export component ColorPicker inherits Rectangle {
+    in property <bool> open: false;
+    /// The ink and marker index of the selection (-1: mixed, no ring).
+    in property <int> ink: 0;
+    in property <int> marker: 0;
+    /// The name of the swatch under the pointer, which the caption shows ("" none). Set by the hover.
+    in-out property <string> hover-name: "";
+    /// The swatch the keyboard has reached (-1 none, 0..9 ink, 10..19 marker): it gets the focus ring.
+    in property <int> focus-index: -1;
+    callback pick-ink(int);
+    callback pick-marker(int);
+    callback clear();
+    callback dismiss();
+    in property <length> paper-x;
+    in property <length> paper-y;
+    in property <length> paper-w;
+    in property <length> paper-h;
+    in property <angle> tilt;
+    visible: root.open;
+    changed open => { if (!root.open) { root.hover-name = ""; } }
+
+    property <Frame> f: {
+        w: root.width / 1px,
+        h: root.height / 1px,
+        cx: (root.paper-x + root.paper-w / 2) / 1px,
+        cy: (root.paper-y + root.paper-h / 2) / 1px,
+        cs: Math.cos(root.tilt),
+        sn: Math.sin(root.tilt),
+    };
+    // the popover's top-left corner and its tail's tip, from the paper's center (untilted px)
+    property <float> pw: PickerMetrics.width / 1px;
+    property <float> ph: PickerMetrics.height / 1px;
+    property <float> pl: (PickerMetrics.left - root.paper-w / 2) / 1px;
+    property <float> bottom: (root.paper-h / 2 - ToolbarMetrics.band-height - PickerMetrics.gap) / 1px;
+    property <float> top: root.bottom - root.ph;
+    // the tail points at the center of the "A" (fifth) button
+    property <float> tail-u: (ToolbarMetrics.first-button-x + 4 * ToolbarMetrics.pitch + ToolbarMetrics.button-size / 2 - root.paper-w / 2) / 1px;
+    property <float> tail-w: PickerMetrics.tail-width / 1px;
+    property <float> tail-h: PickerMetrics.tail-height / 1px;
+    property <float> r: PickerMetrics.radius / 1px;
+    property <float> d: PickerMetrics.dot / 1px;
+    property <float> step: PickerMetrics.step / 1px;
+    property <float> first-u: root.pl + PickerMetrics.first-swatch-x / 1px + root.d / 2;
+    property <float> ink-v: root.top + PickerMetrics.ink-row-y / 1px + root.d / 2;
+    property <float> marker-v: root.top + PickerMetrics.marker-row-y / 1px + root.d / 2;
+    property <float> caption-v: root.top + PickerMetrics.caption-y / 1px + 13;
+    property <color> ink-now: PickerPalette.ink(root.ink);
+    out property <string> caption: root.hover-name != "" ? root.hover-name
+        : PickerPalette.name(root.ink) + " ink" + (root.marker > 0 ? " · " + PickerPalette.name(root.marker) + " marker" : "");
+
+    // the shadow: layers of see-through ink (a blur cannot be tilted)
+    for k in 5: TRect {
+        f: root.f;
+        u0: root.pl - k * 3;
+        v0: root.top + 6 - k * 3;
+        w: root.pw + k * 6;
+        h: root.ph + k * 6 + 6;
+        r: root.r + k * 3;
+        fill: PickerMetrics.shadow;
+    }
+    // the tight shadow close under the body (0 2 6)
+    for k in 3: TRect {
+        f: root.f;
+        u0: root.pl - k * 2;
+        v0: root.top + 2 - k * 2;
+        w: root.pw + k * 4;
+        h: root.ph + k * 4;
+        r: root.r + k * 2;
+        fill: PickerMetrics.shadow-tight;
+    }
+    // the tail: border triangle first, then the paper-colored one over the body's border
+    TTri {
+        f: root.f;
+        u0: root.tail-u - root.tail-w / 2 - 1; v0: root.bottom - 1;
+        u1: root.tail-u + root.tail-w / 2 + 1; v1: root.bottom - 1;
+        u2: root.tail-u; v2: root.bottom + root.tail-h + 1.2;
+        fill: PickerMetrics.border;
+    }
+    TRect { f: root.f; u0: root.pl; v0: root.top; w: root.pw; h: root.ph; r: root.r; fill: PickerMetrics.border; }
+    TRect { f: root.f; u0: root.pl + 1; v0: root.top + 1; w: root.pw - 2; h: root.ph - 2; r: root.r - 1; fill: PickerMetrics.fill; }
+    TTri {
+        f: root.f;
+        u0: root.tail-u - root.tail-w / 2 + 0.6; v0: root.bottom - 1.5;
+        u1: root.tail-u + root.tail-w / 2 - 0.6; v1: root.bottom - 1.5;
+        u2: root.tail-u; v2: root.bottom + root.tail-h - 0.2;
+        fill: PickerMetrics.fill;
+    }
+
+    // swallows clicks on the body (and the tail) so they reach neither the text nor the dismissal
+    HitAt {
+        f: root.f;
+        du: root.pl + root.pw / 2;
+        dv: root.top + (root.ph + root.tail-h) / 2;
+        width: PickerMetrics.width;
+        height: PickerMetrics.height + PickerMetrics.tail-height;
+    }
+
+    // row labels
+    TextAt { f: root.f; du: root.pl + PickerMetrics.label-x / 1px + PickerMetrics.label-width / 2px; dv: root.ink-v;
+        width: PickerMetrics.label-width; height: 20px; text: "Ink"; horizontal-alignment: left;
+        font-family: "Gelasio"; font-size: 13px; color: PickerMetrics.label; }
+    TextAt { f: root.f; du: root.pl + PickerMetrics.label-x / 1px + PickerMetrics.label-width / 2px; dv: root.marker-v;
+        width: PickerMetrics.label-width; height: 20px; text: "Marker"; horizontal-alignment: left;
+        font-family: "Gelasio"; font-size: 13px; color: PickerMetrics.label; }
+
+    // ink: ten round dots; the chosen one carries a ring (2px paper gap, then 1.5px ink)
+    for i in 10: Dot {
+        f: root.f; du: root.first-u + i * root.step; dv: root.ink-v;
+        d: PickerMetrics.dot;
+        background: PickerPalette.ink(i);
+    }
+    for i in 10: Dot {
+        visible: root.ink == i;
+        f: root.f; du: root.first-u + i * root.step; dv: root.ink-v;
+        d: PickerMetrics.dot + 7px;
+        border-width: 1.5px;
+        border-color: PickerMetrics.ring;
+    }
+
+    // marker: ten rounded chips, the first "none" (dashed outline)
+    for i in 10: TRect {
+        visible: i > 0;
+        f: root.f; u0: root.first-u + i * root.step - root.d / 2; v0: root.marker-v - root.d / 2; w: root.d; h: root.d; r: 6;
+        fill: PickerPalette.marker(i);
+    }
+    DashedSquare { f: root.f; u0: root.first-u - root.d / 2; v0: root.marker-v - root.d / 2; s: root.d; stroke: #B4B9C0; }
+    for i in 10: TRect {
+        visible: root.marker == i;
+        f: root.f; u0: root.first-u + i * root.step - root.d / 2 - 3.5; v0: root.marker-v - root.d / 2 - 3.5; w: root.d + 7; h: root.d + 7; r: 9;
+        stroke: PickerMetrics.ring;
+        stroke-width: 1.5px;
+    }
+
+    // the keyboard's focus ring: 2px #6FA2F5, 2px clear of the swatch (or of its chosen ring)
+    Dot {
+        visible: root.focus-index >= 0 && root.focus-index < 10;
+        f: root.f; du: root.first-u + (root.focus-index < 10 ? root.focus-index : 0) * root.step; dv: root.ink-v;
+        d: PickerMetrics.dot + (root.ink == root.focus-index ? 11px : 8px);
+        border-width: 2px;
+        border-color: PickerMetrics.focus-ring;
+    }
+    TRect {
+        visible: root.focus-index >= 10;
+        f: root.f;
+        u0: root.first-u + (root.focus-index >= 10 ? root.focus-index - 10 : 0) * root.step - root.d / 2 - (root.marker == root.focus-index - 10 ? 5.5 : 4);
+        v0: root.marker-v - root.d / 2 - (root.marker == root.focus-index - 10 ? 5.5 : 4);
+        w: root.d + (root.marker == root.focus-index - 10 ? 11 : 8);
+        h: root.d + (root.marker == root.focus-index - 10 ? 11 : 8);
+        r: root.marker == root.focus-index - 10 ? 11 : 9;
+        stroke: PickerMetrics.focus-ring;
+        stroke-width: 2px;
+    }
+
+    // the caption, in the handwriting and the current ink, and Clear
+    TextAt { f: root.f; du: root.pl + 14 + 110; dv: root.caption-v;
+        width: 220px; height: 28px; text: root.caption; horizontal-alignment: left;
+        font-family: Theme.handwriting; font-size: 20px; color: root.ink-now; }
+    TextAt { f: root.f; du: root.pl + root.pw - 14 - 20; dv: root.caption-v;
+        width: 40px; height: 20px; text: "Clear"; horizontal-alignment: right;
+        font-family: "Gelasio"; font-size: 13px; color: PickerMetrics.label; }
+    TRect { f: root.f; u0: root.pl + root.pw - 14 - 31; v0: root.caption-v + 8; w: 31; h: 1; fill: PickerMetrics.label; }
+
+    // hit areas: one per swatch, and Clear. TouchAreas never take the keyboard focus.
+    for i in 10: HitAt {
+        f: root.f; du: root.first-u + i * root.step; dv: root.ink-v; width: 26px; height: 26px;
+        accessible-role: button;
+        accessible-label: "Text color " + PickerPalette.name(i);
+        accessible-action-default => { root.pick-ink(i); }
+        clicked => { root.pick-ink(i); }
+        changed has-hover => {
+            if (self.has-hover) { root.hover-name = PickerPalette.name(i) + " ink"; }
+            else if (root.hover-name == PickerPalette.name(i) + " ink") { root.hover-name = ""; }
+        }
+    }
+    for i in 10: HitAt {
+        f: root.f; du: root.first-u + i * root.step; dv: root.marker-v; width: 26px; height: 26px;
+        accessible-role: button;
+        accessible-label: i == 0 ? "No highlight" : "Highlight " + PickerPalette.name(i);
+        accessible-action-default => { root.pick-marker(i); }
+        clicked => { root.pick-marker(i); }
+        changed has-hover => {
+            if (self.has-hover) { root.hover-name = i == 0 ? "No marker" : PickerPalette.name(i) + " marker"; }
+            else if (root.hover-name == (i == 0 ? "No marker" : PickerPalette.name(i) + " marker")) { root.hover-name = ""; }
+        }
+    }
+    HitAt {
+        f: root.f; du: root.pl + root.pw - 14 - 20; dv: root.caption-v; width: 48px; height: 26px;
+        accessible-role: button;
+        accessible-label: "Clear color";
+        accessible-action-default => { root.clear(); root.dismiss(); }
+        clicked => { root.clear(); root.dismiss(); }
+    }
+}

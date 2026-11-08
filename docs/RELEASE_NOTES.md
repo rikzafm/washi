@@ -15,9 +15,17 @@ Lightweight encrypted sticky notes for Windows. One exe, no installer needed.
 | idle CPU, foreground | 0% | about 2% of a core, caret blink (accepted) |
 | exe size | <= 8 MB, no DLLs | 12.96 MB, no DLLs (accepted) |
 
+## Text color and highlight
+
+- A seventh toolbar button, an "A" over a bar, opens a popover with ten ink colors and nine marker (highlight) colors, a caption and Clear. It works on a selection, or on what you type next at a caret. Each pick is one undo step; the popover stays open until Escape, a click elsewhere, or Clear. Arrow keys, Enter and Space drive it from the keyboard while the text keeps the caret.
+- Colors are stored in the note as `<c=blue>` ... `</c>` and `<m=yellow>` ... `</m>` (names, not numbers). The closing tags are not mirrored: a note with both colors is stored as `<c=blue><m=yellow>body</c></m>`. Unknown names read as the default color. Export as Markdown writes the same tags.
+- Copying text gives plain text; colors are not copied.
+- Older builds show these tags as literal text (they escape `<` only when writing). Open a colored note only with this version or newer.
+
 ## Known limitations
 
-- Per-paragraph formatting only (no inline rich text).
+- Per-paragraph formatting only (no inline rich text), except text color and highlight, which are per character.
+- Screen readers get names for the color swatches but not for the keyboard ring's position.
 - The database key is tied to the Windows account (DPAPI) with no backup: a profile reset loses the notes.
 - Task Manager shows the efficiency-mode leaf, not "Suspended".
 - Windows only.

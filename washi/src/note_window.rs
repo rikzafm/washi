@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{floor_boundary, Align, Block, Caret, Document, Kind, Range, Style as Flags, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
+use crate::document::{floor_boundary, clamp_palette, Align, Block, Caret, Document, Kind, Paint, Range, Style as Flags, IMAGE_PCT_MAX, IMAGE_PCT_MIN, PALETTE, PALETTE_MAX};
 use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
@@ -184,6 +184,11 @@ struct Doc {
     right_click: Cell<Option<(f32, f32)>>,
     /// A grip drag in progress: the picture's block, and the document before the drag.
     grip: RefCell<Option<(usize, Document)>>,
+    /// The markers behind colored text as last laid out, what they are drawn from, and the boxes of
+    /// the wash that meet them.
+    markers: RefCell<Vec<textflow::Marker>>,
+    marker_data: Rc<VecModel<MarkerData>>,
+    marker_wash: Rc<VecModel<SelRect>>,
     /// The note-level range that `sel_rects` washes (a selection across blocks), if any.
     range: Cell<Option<Range>>,
     /// The selection: where it started and where the caret is now (the same caret: nothing
@@ -194,6 +199,8 @@ struct Doc {
     /// A format button pressed with nothing selected, outside a word: the style the next text
     /// typed at that caret takes. Gone once the caret moves elsewhere.
     typing: Cell<Option<(Caret, Flags)>>,
+    /// A color picked with nothing selected: the paint the next text typed at that caret takes.
+    typing_paint: Cell<Option<(Caret, Paint)>>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
     /// Sizes and decoded pixels of the note's pictures.
@@ -209,6 +216,25 @@ pub const HISTORY_PAUSE: Duration = Duration::from_millis(500);
 const UNDO_KEY: &str = "\u{1a}";
 const REDO_KEY: &str = "\u{19}";
 
+fn rgb(c: u32) -> slint::Color {
+    slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
+}
+
+/// The text color of palette entry `i` (the default ink for 0 and for an index past the table).
+pub fn ink_color(i: u8) -> slint::Color {
+    rgb(PALETTE.get(i as usize).unwrap_or(&PALETTE[0]).ink)
+}
+
+/// The marker color of palette entry `i` (see-through for none).
+pub fn marker_color(i: u8) -> slint::Color {
+    swatch_marker(PALETTE.get(i as usize).and_then(|s| s.marker))
+}
+
+/// A swatch's marker as a color: see-through when it has none.
+fn swatch_marker(marker: Option<u32>) -> slint::Color {
+    marker.map_or(slint::Color::from_argb_u8(0, 0, 0, 0), rgb)
+}
+
 /// The shown text of an empty note.
 pub const HINT: &str = "Note Something....";
 
@@ -223,10 +249,14 @@ impl Doc {
             handles: Rc::new(VecModel::default()),
             right_click: Cell::new(None),
             grip: RefCell::new(None),
+            markers: RefCell::new(vec![]),
+            marker_data: Rc::new(VecModel::default()),
+            marker_wash: Rc::new(VecModel::default()),
             range: Cell::new(None),
             selection: Cell::new(Range { anchor: START, focus: START }),
             pointer: Cell::new(Pointer::default()),
             typing: Cell::new(None),
+            typing_paint: Cell::new(None),
             paper: Cell::new((363.0, 433.0)),
             history: RefCell::new(History::new(Document::new())),
             images,
@@ -340,6 +370,7 @@ impl Doc {
     /// or `None` when there is no such snapshot.
     fn step(&self, redo: bool) -> Option<Caret> {
         self.typing.set(None);
+        self.typing_paint.set(None);
         self.checkpoint();
         let target = {
             let mut h = self.history.borrow_mut();
@@ -397,7 +428,7 @@ impl Doc {
         ui.set_pitch_scale(ui.window().scale_factor());
         let tokens = Self::tokens(ui);
         let doc = self.doc.borrow();
-        let (mut runs, rules) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
+        let (mut runs, rules, markers) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
         ui.set_content_height(textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b)).1 as f32);
         self.rules.set_vec(
             rules
@@ -405,6 +436,19 @@ impl Doc {
                 .map(|r| RuleData { block: r.block as i32, x: r.x as f32, y: r.y as f32, dx: r.dx as f32, dy: r.dy as f32, width: r.width as f32, height: r.height as f32 })
                 .collect::<Vec<_>>(),
         );
+        self.marker_data.set_vec(
+            markers
+                .iter()
+                .map(|m| MarkerData {
+                    x: m.x as f32,
+                    y: m.y as f32,
+                    width: m.width as f32,
+                    height: m.height as f32,
+                    color: marker_color(m.marker),
+                })
+                .collect::<Vec<_>>(),
+        );
+        *self.markers.borrow_mut() = markers;
         self.fill_sel_rects(&doc, &tokens);
         let hint = doc.is_empty();
         if hint {
@@ -424,6 +468,7 @@ impl Doc {
                     pitch: r.pitch as f32,
                     bold: r.bold,
                     italic: r.italic,
+                    ink: ink_color(r.ink),
                     hint,
                 })
                 .collect::<Vec<_>>(),
@@ -436,9 +481,9 @@ impl Doc {
             Some(range) if !doc.is_empty() => textflow::selection_rects(doc.blocks(), range, self.paper.get().0, tokens, &|b| self.images.size(b)),
             _ => vec![],
         };
-        self.sel_rects.set_vec(
-            rects.iter().map(|r| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 }).collect::<Vec<_>>(),
-        );
+        let rect = |r: &textflow::Rect| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 };
+        self.sel_rects.set_vec(rects.iter().map(rect).collect::<Vec<_>>());
+        self.marker_wash.set_vec(textflow::marker_wash(&self.markers.borrow(), &rects).iter().map(rect).collect::<Vec<_>>());
         self.fill_handles(doc, tokens);
     }
 
@@ -453,6 +498,7 @@ impl Doc {
     fn end_range(&self, ui: &NoteWindow) {
         self.range.set(None);
         self.sel_rects.set_vec(vec![]);
+        self.marker_wash.set_vec(vec![]);
         ui.set_wash(true);
     }
 
@@ -473,9 +519,11 @@ impl Doc {
         } else {
             self.range.set(None);
             self.sel_rects.set_vec(vec![]);
+            self.marker_wash.set_vec(vec![]);
             self.focus_with(ui, range.focus, Some(range.anchor.offset));
         }
         self.typing.set(None);
+        self.typing_paint.set(None);
         self.show_formats(ui);
     }
 
@@ -702,6 +750,7 @@ impl Doc {
         let before = self.doc.borrow().clone();
         let caret = self.doc.borrow_mut().replace_range(range, text);
         self.typing.set(None);
+        self.typing_paint.set(None);
         self.structural(before);
         caret
     }
@@ -730,6 +779,42 @@ impl Doc {
             Some((c, style)) if c == (Caret { block: i, offset: cursor }) => style,
             _ => self.doc.borrow().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
         }
+    }
+
+    /// The paint the next text typed at the caret takes: one a picked color asked for there, or
+    /// that of the text before it.
+    fn paint_at_caret(&self) -> Paint {
+        let i = self.caret_block();
+        let cursor = self.selection.get().focus.offset;
+        match self.typing_paint.get() {
+            Some((c, paint)) if c == (Caret { block: i, offset: cursor }) => paint,
+            _ => self.doc.borrow().blocks().get(i).map_or(Paint::default(), |b| b.paint_for_insert(cursor)),
+        }
+    }
+
+    /// A swatch picked (or Clear, which picks 0 for both): set the ink and/or the marker of the
+    /// selection as one undo step; with a collapsed caret, of the text typed next. True when the
+    /// document changed.
+    fn apply_paint(&self, ink: Option<u8>, marker: Option<u8>) -> bool {
+        let sel = self.clamp(self.selection.get());
+        if sel.anchor == sel.focus {
+            let mut paint = self.paint_at_caret();
+            paint.ink = clamp_palette(ink.unwrap_or(paint.ink));
+            paint.marker = clamp_palette(marker.unwrap_or(paint.marker));
+            self.typing_paint.set(Some((sel.focus, paint)));
+            return false;
+        }
+        let before = self.doc.borrow().clone();
+        let done = {
+            let mut doc = self.doc.borrow_mut();
+            let a = ink.is_some_and(|i| doc.set_ink_range(sel, i));
+            let b = marker.is_some_and(|m| doc.set_marker_range(sel, m));
+            a | b
+        };
+        if done {
+            self.structural(before);
+        }
+        done
     }
 
     /// Toolbar button or shortcut `what` (0 bold, 1 italic, 2 underline, 3 strike) on the selected
@@ -800,6 +885,18 @@ impl Doc {
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
         // a picture selected as a whole shows its frame and grip
         self.fill_handles(&doc, &Self::tokens(ui));
+        let sel = self.selection.get();
+        let (ink, marker) = if b.is_none() {
+            (Some(0), Some(0))
+        } else if sel.anchor != sel.focus {
+            (doc.common_ink_range(sel), doc.common_marker_range(sel))
+        } else {
+            drop(doc);
+            let p = self.paint_at_caret();
+            (Some(p.ink), Some(p.marker))
+        };
+        ui.set_fmt_ink(ink.map_or(-1, i32::from));
+        ui.set_fmt_marker(marker.map_or(-1, i32::from));
     }
 
     /// The caret moved to `offset` of block `block`, the selection's other end at `anchor`. A style
@@ -814,6 +911,9 @@ impl Doc {
         self.selection.set(Range { anchor: Caret { block, offset: anchor }, focus: Caret { block, offset } });
         if self.typing.get().is_some_and(|(c, _)| c != (Caret { block, offset }) || offset != anchor) {
             self.typing.set(None);
+        }
+        if self.typing_paint.get().is_some_and(|(c, _)| c != (Caret { block, offset }) || offset != anchor) {
+            self.typing_paint.set(None);
         }
         if self.range.get().is_some() {
             // the caret left a selection across blocks (a key): the wash is over
@@ -860,7 +960,8 @@ impl Doc {
             let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
             // a style asked for with a format button applies to what is typed at its caret
             let typing = self.typing.take().filter(|(c, _)| c.block == i).map(|(_, s)| s);
-            doc.edit_text(i, text, cursor, typing);
+            let paint = self.typing_paint.take().filter(|(c, _)| c.block == i).map(|(_, p)| p);
+            doc.edit_text(i, text, cursor, typing, paint);
             // `# ` or `- ` typed at the start of a paragraph
             let caret = doc.auto_format(i, &old, cursor);
             drop(doc);
@@ -1043,6 +1144,16 @@ impl Note {
         paste_image: Rc<dyn Fn(NoteId) -> bool>,
     ) -> Result<Note, slint::PlatformError> {
         let ui = NoteWindow::new()?;
+        // the popover draws the same table the renderer and the storage read
+        let entries: Vec<PaletteEntry> = PALETTE
+            .iter()
+            .map(|s| PaletteEntry {
+                name: s.name.into(),
+                ink: rgb(s.ink),
+                marker: swatch_marker(s.marker),
+            })
+            .collect();
+        ui.global::<PickerPalette>().set_entries(slint::ModelRc::from(Rc::new(VecModel::from(entries))));
         let doc = Doc::new(NoteImages::new(id, db.clone()));
         doc.load(content);
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
@@ -1050,6 +1161,8 @@ impl Note {
         ui.set_rules(slint::ModelRc::from(doc.rules.clone()));
         ui.set_sel_rects(slint::ModelRc::from(doc.sel_rects.clone()));
         ui.set_image_handles(slint::ModelRc::from(doc.handles.clone()));
+        ui.set_markers(slint::ModelRc::from(doc.marker_data.clone()));
+        ui.set_marker_wash(slint::ModelRc::from(doc.marker_wash.clone()));
         doc.relayout(&ui);
         doc.show_formats(&ui);
         ui.set_text(doc.text().as_str().into());
@@ -1113,6 +1226,28 @@ impl Note {
                 }
             });
         }
+        // a swatch or Clear in the color popover
+        let apply: Rc<dyn Fn(Option<u8>, Option<u8>)> = {
+            let (changed, doc, weak) = (changed.clone(), doc.clone(), ui.as_weak());
+            Rc::new(move |ink, marker| {
+                let Some(ui) = weak.upgrade() else { return };
+                if doc.apply_paint(ink, marker) {
+                    changed(None);
+                } else {
+                    // a color for what is typed next
+                    doc.show_formats(&ui);
+                }
+            })
+        };
+        {
+            let apply = apply.clone();
+            ui.on_pick_ink(move |i| apply(Some(i.clamp(0, PALETTE_MAX as i32) as u8), None));
+        }
+        {
+            let apply = apply.clone();
+            ui.on_pick_marker(move |i| apply(None, Some(i.clamp(0, PALETTE_MAX as i32) as u8)));
+        }
+        ui.on_clear_color(move || apply(Some(0), Some(0)));
         {
             let (doc, weak) = (doc.clone(), ui.as_weak());
             ui.on_focus_entered(move |i| {

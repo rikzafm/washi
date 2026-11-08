@@ -77,6 +77,53 @@ pub enum Align {
 /// How wide a picture is shown, in percent of the text area (the height follows the aspect ratio).
 pub const IMAGE_PCT_MIN: u8 = 10;
 pub const IMAGE_PCT_MAX: u8 = 100;
+/// The ink and marker color of a character: indices into [`PALETTE`] (0 = default ink / no marker).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Paint {
+    pub ink: u8,
+    pub marker: u8,
+}
+
+/// One palette entry: the color's name (stored lowercase in `<c=name>` / `<m=name>`), its ink as
+/// `0xRRGGBB`, and its marker (highlight) as `0xRRGGBB`, none for the default entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Swatch {
+    pub name: &'static str,
+    pub ink: u32,
+    pub marker: Option<u32>,
+}
+
+/// The ten colors, in order; a [`Paint`] indexes this table. The renderer and the popover read it.
+pub const PALETTE: [Swatch; 10] = [
+    Swatch { name: "Default", ink: 0x2B2F36, marker: None },
+    Swatch { name: "Gray", ink: 0x6B6F76, marker: Some(0xE9E9E7) },
+    Swatch { name: "Brown", ink: 0x8A5A44, marker: Some(0xEEE0DA) },
+    Swatch { name: "Orange", ink: 0xB8581A, marker: Some(0xFADEC9) },
+    Swatch { name: "Yellow", ink: 0x8F6A00, marker: Some(0xFDECC8) },
+    Swatch { name: "Green", ink: 0x3E7353, marker: Some(0xDBEDDB) },
+    Swatch { name: "Blue", ink: 0x3A6D96, marker: Some(0xD3E5EF) },
+    Swatch { name: "Purple", ink: 0x7A56A0, marker: Some(0xE8DEEE) },
+    Swatch { name: "Pink", ink: 0xA8447C, marker: Some(0xF5E0E9) },
+    Swatch { name: "Red", ink: 0xB8453D, marker: Some(0xFFE2DD) },
+];
+
+/// The last palette index: the one bound every picked or stored index is held to.
+pub const PALETTE_MAX: u8 = PALETTE.len() as u8 - 1;
+
+/// `i` held to the palette (an index past the table becomes the last entry).
+pub fn clamp_palette(i: u8) -> u8 {
+    i.min(PALETTE_MAX)
+}
+
+/// The palette index of a stored color name (case-insensitive); `None` for an unknown name and
+/// for the default entry, which is never written.
+fn palette_index(name: &str) -> Option<u8> {
+    (1..PALETTE.len()).find(|&i| PALETTE[i].name.eq_ignore_ascii_case(name)).map(|i| i as u8)
+}
+
+fn palette_name(i: u8) -> String {
+    PALETTE[i as usize].name.to_ascii_lowercase()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
@@ -85,6 +132,8 @@ pub struct Block {
     pub text: String,
     /// The style of every byte of `text` (all bytes of a character have the character's style).
     pub marks: Vec<Style>,
+    /// The ink and marker of every byte of `text`, kept the same length as `marks`.
+    pub paints: Vec<Paint>,
     /// The stored image of an `Image` block.
     pub image_id: Option<i64>,
     /// An image's shown width, percent of the text area (`IMAGE_PCT_MIN..=IMAGE_PCT_MAX`).
@@ -96,11 +145,11 @@ pub struct Block {
 impl Block {
     pub fn new(kind: Kind, text: &str) -> Block {
         let text = one_line(text);
-        Block { kind, marks: vec![Style::NONE; text.len()], text, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
+        Block { kind, marks: vec![Style::NONE; text.len()], paints: vec![Paint::default(); text.len()], text, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
     }
 
     pub fn image(id: i64) -> Block {
-        Block { kind: Kind::Image, text: String::new(), marks: vec![], image_id: Some(id), image_pct: IMAGE_PCT_MAX, align: Align::Left }
+        Block { kind: Kind::Image, text: String::new(), marks: vec![], paints: vec![], image_id: Some(id), image_pct: IMAGE_PCT_MAX, align: Align::Left }
     }
 
     /// The box of an image `avail` wide whose pixels are `px`: its x offset from the text area's
@@ -135,6 +184,32 @@ impl Block {
         if at > 0 { self.marks[at - 1] } else { self.marks.first().copied().unwrap_or_default() }
     }
 
+    /// The paint of text typed at byte `at`: that of the character before it, or at the start of
+    /// the block that of the character after it.
+    pub fn paint_for_insert(&self, at: usize) -> Paint {
+        let at = floor_boundary(&self.text, at);
+        if at > 0 { self.paints[at - 1] } else { self.paints.first().copied().unwrap_or_default() }
+    }
+
+    /// The ink every character of `start..end` has; `None` when they differ or the range is empty.
+    pub fn common_ink(&self, start: usize, end: usize) -> Option<u8> {
+        self.common_of(start, end, |p| p.ink)
+    }
+
+    /// The marker every character of `start..end` has; `None` when they differ or the range is empty.
+    pub fn common_marker(&self, start: usize, end: usize) -> Option<u8> {
+        self.common_of(start, end, |p| p.marker)
+    }
+
+    fn common_of(&self, start: usize, end: usize, f: impl Fn(&Paint) -> u8) -> Option<u8> {
+        let (s, e) = (floor_boundary(&self.text, start.min(end)), floor_boundary(&self.text, start.max(end)));
+        if s == e {
+            return None;
+        }
+        let first = f(&self.paints[s]);
+        self.paints[s..e].iter().all(|p| f(p) == first).then_some(first)
+    }
+
     /// The flags every character of `start..end` has (none for an empty range).
     pub fn common_style(&self, start: usize, end: usize) -> Style {
         let (s, e) = (floor_boundary(&self.text, start.min(end)), floor_boundary(&self.text, start.max(end)));
@@ -142,6 +217,18 @@ impl Block {
             return Style::NONE;
         }
         Style(self.marks[s..e].iter().fold(15, |acc, m| acc & m.0))
+    }
+
+    /// The stretches of one style and paint: `(start, end, style, paint)`, never empty.
+    fn runs(&self) -> Vec<(usize, usize, Style, Paint)> {
+        let mut out: Vec<(usize, usize, Style, Paint)> = vec![];
+        for (i, (&m, &p)) in self.marks.iter().zip(&self.paints).enumerate() {
+            match out.last_mut() {
+                Some(last) if last.2 == m && last.3 == p => last.1 = i + 1,
+                _ => out.push((i, i + 1, m, p)),
+            }
+        }
+        out
     }
 
     /// The stretches of one style, longest first-to-last: `(start, end, style)`, never empty.
@@ -161,18 +248,23 @@ impl Block {
         self.kind != Kind::Image
     }
 
-    /// Replace `start..end` (char boundaries) by `insert`, in `style`.
-    fn splice(&mut self, start: usize, end: usize, insert: &str, style: Style) {
+    /// Replace `start..end` (char boundaries) by `insert`, in `style` and `paint`.
+    fn splice(&mut self, start: usize, end: usize, insert: &str, style: Style, paint: Paint) {
         self.text.replace_range(start..end, insert);
         self.marks.splice(start..end, std::iter::repeat_n(style, insert.len()));
+        self.paints.splice(start..end, std::iter::repeat_n(paint, insert.len()));
     }
 
     /// One mark per byte, the same for every byte of a character.
     fn normalize_marks(&mut self) {
         self.marks.resize(self.text.len(), Style::NONE);
+        self.paints.resize(self.text.len(), Paint::default());
+        let known = |i: u8| if i <= PALETTE_MAX { i } else { 0 };
         for (i, c) in self.text.char_indices() {
-            let m = self.marks[i];
+            let (m, p) = (self.marks[i], self.paints[i]);
+            let p = Paint { ink: known(p.ink), marker: known(p.marker) };
             self.marks[i..i + c.len_utf8()].fill(m);
+            self.paints[i..i + c.len_utf8()].fill(p);
         }
     }
 }
@@ -194,6 +286,11 @@ pub struct Range {
 }
 
 impl Range {
+    /// The range `start..end` of one block's text.
+    pub fn within(block: usize, start: usize, end: usize) -> Range {
+        Range { anchor: Caret { block, offset: start }, focus: Caret { block, offset: end } }
+    }
+
     /// `(start, end)`: the earlier caret first.
     pub fn ordered(self) -> (Caret, Caret) {
         if self.anchor <= self.focus { (self.anchor, self.focus) } else { (self.focus, self.anchor) }
@@ -269,12 +366,28 @@ fn markers(out: &mut String, from: Style, to: Style) {
     }
 }
 
+/// The color markers that change the paint from `from` to `to`: an ink or marker that changes
+/// ends (`</c>`, `</m>`) and then begins (`<c=name>`, `<m=name>`).
+fn paint_markers(out: &mut String, from: Paint, to: Paint) {
+    for (a, b, tag) in [(from.ink, to.ink, 'c'), (from.marker, to.marker, 'm')] {
+        if a != b {
+            if a != 0 {
+                out.push_str(&format!("</{tag}>"));
+            }
+            if b != 0 {
+                out.push_str(&format!("<{tag}={}>", palette_name(b)));
+            }
+        }
+    }
+}
+
 /// A block's text with its styles, as stored.
 fn write_inline(b: &Block) -> String {
     let mut out = String::new();
-    let mut cur = Style::NONE;
-    for (start, end, style) in b.spans() {
+    let (mut cur, mut cur_paint) = (Style::NONE, Paint::default());
+    for (start, end, style, paint) in b.runs() {
         markers(&mut out, cur, style);
+        paint_markers(&mut out, cur_paint, paint);
         for c in b.text[start..end].chars() {
             if INLINE.contains(&c) || (out.is_empty() && LINE_START.contains(&c)) {
                 out.push('\\');
@@ -282,22 +395,41 @@ fn write_inline(b: &Block) -> String {
             out.push(c);
         }
         cur = style;
+        cur_paint = paint;
     }
     markers(&mut out, cur, Style::NONE);
+    paint_markers(&mut out, cur_paint, Paint::default());
     out
 }
 
 /// Read what [`write_inline`] writes. `None` for anything it would not have written exactly (text
 /// from an older version), which is then read the old way.
-fn read_inline(s: &str) -> Option<(String, Vec<Style>)> {
+fn read_inline(s: &str) -> Option<(String, Vec<Style>, Vec<Paint>)> {
     let (mut text, mut marks, mut cur) = (String::new(), vec![], Style::NONE);
+    let (mut paints, mut paint) = (vec![], Paint::default());
+    // the stored line without the color tags of unknown names, which are dropped
+    let mut clean = String::new();
     let mut rest = s;
     while let Some(c) = rest.chars().next() {
         let (flag, len, on) = if c == '\\' {
             let n = rest[1..].chars().next().filter(|n| INLINE.contains(n) || LINE_START.contains(n))?;
             text.push(n);
             marks.extend(std::iter::repeat_n(cur, n.len_utf8()));
+            paints.extend(std::iter::repeat_n(paint, n.len_utf8()));
+            clean.push_str(&rest[..1 + n.len_utf8()]);
             rest = &rest[1 + n.len_utf8()..];
+            continue;
+        } else if let Some((tag, len, to)) = color_tag(rest) {
+            let field = if tag == 'c' { &mut paint.ink } else { &mut paint.marker };
+            // a closing tag with nothing open and a tag of an unknown name are dropped
+            if to.is_some() || (rest.starts_with("</") && *field != 0) {
+                clean.push_str(&rest[..len]);
+            } else if *field != 0 {
+                // an unknown name switches the color off, as the writer would
+                clean.push_str(&format!("</{tag}>"));
+            }
+            *field = to.unwrap_or(0);
+            rest = &rest[len..];
             continue;
         } else if rest.starts_with("<u>") {
             (Style::UNDERLINE, 3, true)
@@ -312,20 +444,42 @@ fn read_inline(s: &str) -> Option<(String, Vec<Style>)> {
         } else {
             text.push(c);
             marks.extend(std::iter::repeat_n(cur, c.len_utf8()));
+            paints.extend(std::iter::repeat_n(paint, c.len_utf8()));
+            clean.push(c);
             rest = &rest[c.len_utf8()..];
             continue;
         };
         cur = cur.with(flag, on);
+        clean.push_str(&rest[..len]);
         rest = &rest[len..];
     }
-    let b = Block { image_pct: IMAGE_PCT_MAX, align: Align::Left, kind: Kind::Body, text, marks, image_id: None };
-    (write_inline(&b) == s).then_some((b.text, b.marks))
+    let b = Block { kind: Kind::Body, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left };
+    (write_inline(&b) == clean).then_some((b.text, b.marks, b.paints))
+}
+
+/// A color tag at the start of `s`: which (`'c'` ink, `'m'` marker), its length, and the palette
+/// index it switches to (`None` for a closing tag or an unknown name, both meaning default).
+fn color_tag(s: &str) -> Option<(char, usize, Option<u8>)> {
+    for tag in ['c', 'm'] {
+        if s.starts_with(&format!("</{tag}>")) {
+            return Some((tag, 4, None));
+        }
+        if let Some(r) = s.strip_prefix(&format!("<{tag}=")) {
+            let end = r.find('>')?;
+            let name = &r[..end];
+            if name.contains('<') {
+                return None;
+            }
+            return Some((tag, 4 + end, palette_index(name)));
+        }
+    }
+    None
 }
 
 /// A block of `kind` from the stored rest of its line (after the kind's marker).
 fn read_block(kind: Kind, rest: &str) -> Block {
     match read_inline(rest) {
-        Some((text, marks)) => Block { kind, text, marks, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left },
+        Some((text, marks, paints)) => Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left },
         None => {
             let (style, text) = unwrap_inline(rest);
             Block::new(kind, &text).with_style(style)
@@ -399,9 +553,11 @@ impl Document {
                 // a line break and the one or two bytes of it become one space
                 let mut text = String::new();
                 let mut marks = vec![];
+                let mut paints = vec![];
                 let mut chars = b.text.char_indices().peekable();
                 while let Some((at, c)) = chars.next() {
                     let m = b.marks.get(at).copied().unwrap_or_default();
+                    let p = b.paints.get(at).copied().unwrap_or_default();
                     let c = if c == '\r' || c == '\n' {
                         if c == '\r' && chars.peek().is_some_and(|&(_, n)| n == '\n') {
                             chars.next();
@@ -412,13 +568,16 @@ impl Document {
                     };
                     text.push(c);
                     marks.extend(std::iter::repeat_n(m, c.len_utf8()));
+                    paints.extend(std::iter::repeat_n(p, c.len_utf8()));
                 }
                 b.text = text;
                 b.marks = marks;
+                b.paints = paints;
             }
             if b.kind == Kind::Image {
                 b.text.clear();
                 b.marks.clear();
+                b.paints.clear();
             } else {
                 b.image_id = None;
                 b.image_pct = IMAGE_PCT_MAX;
@@ -498,19 +657,20 @@ impl Document {
         if let Some(b) = self.blocks.get_mut(block).filter(|b| b.is_text()) {
             let text = one_line(text);
             let (start, end, inserted) = diff(&b.text, &text, None);
-            let style = b.style_for_insert(start);
-            b.splice(start, end, &text[start..inserted], style);
+            let (style, paint) = (b.style_for_insert(start), b.paint_for_insert(start));
+            b.splice(start, end, &text[start..inserted], style, paint);
         }
     }
 
     /// The user edited a block's text in its field to `text`, the caret now at byte `cursor`.
     /// What was typed takes `typing` if given, else the style of the text it was typed after.
-    pub fn edit_text(&mut self, block: usize, text: &str, cursor: usize, typing: Option<Style>) {
+    pub fn edit_text(&mut self, block: usize, text: &str, cursor: usize, typing: Option<Style>, typing_paint: Option<Paint>) {
         let Some(b) = self.blocks.get_mut(block).filter(|b| b.is_text()) else { return };
         let text = one_line(text);
         let (start, end, inserted) = diff(&b.text, &text, Some(cursor));
         let style = typing.unwrap_or_else(|| b.style_for_insert(start));
-        b.splice(start, end, &text[start..inserted], style);
+        let paint = typing_paint.unwrap_or_else(|| b.paint_for_insert(start));
+        b.splice(start, end, &text[start..inserted], style, paint);
         debug_assert_eq!(b.text, text);
     }
 
@@ -531,7 +691,8 @@ impl Document {
         let b = &mut self.blocks[block];
         let tail = b.text.split_off(at);
         let marks = b.marks.split_off(at);
-        let new = following(&self.blocks[block], tail, marks);
+        let paints = b.paints.split_off(at);
+        let new = following(&self.blocks[block], tail, marks, paints);
         self.blocks.insert(block + 1, new);
         Caret { block: block + 1, offset: 0 }
     }
@@ -551,6 +712,7 @@ impl Document {
         let at = prev.text.len();
         prev.text.push_str(&cur.text);
         prev.marks.extend(cur.marks);
+        prev.paints.extend(cur.paints);
         Some(Caret { block: block - 1, offset: at })
     }
 
@@ -564,6 +726,7 @@ impl Document {
         if next.kind != Kind::Image {
             self.blocks[block].text.push_str(&next.text);
             self.blocks[block].marks.extend(next.marks);
+            self.blocks[block].paints.extend(next.paints);
         }
         Some(Caret { block, offset })
     }
@@ -587,6 +750,7 @@ impl Document {
         b.kind = kind;
         b.text.drain(..2);
         b.marks.drain(..2);
+        b.paints.drain(..2);
         Some(Caret { block, offset: 0 })
     }
 
@@ -668,6 +832,62 @@ impl Document {
             return Style::NONE;
         }
         Style(spans.iter().fold(15, |acc, &(i, s, e)| acc & self.blocks[i].common_style(s, e).0))
+    }
+
+    /// Set the ink of every character in a range to palette index `ink` (clamped to the palette).
+    /// Setting, not toggling: a range that already has it is unchanged. True when something changed.
+    pub fn set_ink_range(&mut self, range: Range, ink: u8) -> bool {
+        self.set_paint_range(range, |p| &mut p.ink, ink)
+    }
+
+    /// Set the marker of every character in a range (see [`Document::set_ink_range`]).
+    pub fn set_marker_range(&mut self, range: Range, marker: u8) -> bool {
+        self.set_paint_range(range, |p| &mut p.marker, marker)
+    }
+
+    fn set_paint_range(&mut self, range: Range, field: fn(&mut Paint) -> &mut u8, to: u8) -> bool {
+        let to = clamp_palette(to);
+        let mut changed = false;
+        for (i, s, e) in self.range_spans(range) {
+            for p in &mut self.blocks[i].paints[s..e] {
+                let f = field(p);
+                changed |= *f != to;
+                *f = to;
+            }
+        }
+        changed
+    }
+
+    /// Set the ink of `start..end` of one block (see [`Document::set_ink_range`]).
+    pub fn set_ink(&mut self, block: usize, start: usize, end: usize, ink: u8) -> bool {
+        self.set_ink_range(Range::within(block, start, end), ink)
+    }
+
+    /// Set the marker of `start..end` of one block.
+    pub fn set_marker(&mut self, block: usize, start: usize, end: usize, marker: u8) -> bool {
+        self.set_marker_range(Range::within(block, start, end), marker)
+    }
+
+    /// The ink every character of a range has; `None` when they differ or the range has no text.
+    pub fn common_ink_range(&self, range: Range) -> Option<u8> {
+        self.common_paint_range(range, Block::common_ink)
+    }
+
+    /// The marker every character of a range has; `None` when they differ or the range has no text.
+    pub fn common_marker_range(&self, range: Range) -> Option<u8> {
+        self.common_paint_range(range, Block::common_marker)
+    }
+
+    fn common_paint_range(&self, range: Range, f: fn(&Block, usize, usize) -> Option<u8>) -> Option<u8> {
+        let mut found = None;
+        for (i, s, e) in self.range_spans(range) {
+            let c = f(&self.blocks[i], s, e)?;
+            if found.is_some_and(|x| x != c) {
+                return None;
+            }
+            found = Some(c);
+        }
+        found
     }
 
     /// The word around byte `offset` of a block, when the offset is inside one (word characters
@@ -775,23 +995,25 @@ impl Document {
         };
         let start = floor_boundary(&b.text, start);
         let end = floor_boundary(&b.text, end).max(start);
-        let style = b.style_for_insert(start);
+        let (style, paint) = (b.style_for_insert(start), b.paint_for_insert(start));
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         let mut lines = normalized.split('\n');
         let first = lines.next().unwrap_or("");
         let b = &mut self.blocks[block];
         let tail = b.text.split_off(end);
         let tail_marks = b.marks.split_off(end);
-        b.splice(start, end, first, style);
+        let tail_paints = b.paints.split_off(end);
+        b.splice(start, end, first, style, paint);
         let mut caret = Caret { block, offset: b.text.len() };
         for line in lines {
-            let new = following(&self.blocks[caret.block], line.to_string(), vec![style; line.len()]);
+            let new = following(&self.blocks[caret.block], line.to_string(), vec![style; line.len()], vec![paint; line.len()]);
             caret = Caret { block: caret.block + 1, offset: new.text.len() };
             self.blocks.insert(caret.block, new);
         }
         let last = &mut self.blocks[caret.block];
         last.text.push_str(&tail);
         last.marks.extend(tail_marks);
+        last.paints.extend(tail_paints);
         caret
     }
 
@@ -842,6 +1064,7 @@ impl Document {
             let at = floor_boundary(&b.text, s.offset);
             b.text.truncate(at);
             b.marks.truncate(at);
+            b.paints.truncate(at);
             b
         } else if end.is_text() {
             Block::new(end.kind, "")
@@ -853,6 +1076,7 @@ impl Document {
             let at = floor_boundary(&end.text, e.offset);
             merged.text.push_str(&end.text[at..]);
             merged.marks.extend_from_slice(&end.marks[at..]);
+            merged.paints.extend_from_slice(&end.paints[at..]);
         }
         self.blocks.splice(s.block..=e.block, [merged]);
         self.insert_text(s.block, from, from, text)
@@ -870,9 +1094,9 @@ impl Document {
 }
 
 /// The block that follows `prev` when Enter is pressed in it, holding `text` styled `marks`.
-fn following(prev: &Block, text: String, marks: Vec<Style>) -> Block {
+fn following(prev: &Block, text: String, marks: Vec<Style>, paints: Vec<Paint>) -> Block {
     let kind = if prev.kind == Kind::ListItem { Kind::ListItem } else { Kind::Body };
-    Block { kind, text, marks, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
+    Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
 }
 
 pub(crate) fn floor_boundary(s: &str, mut i: usize) -> usize {
@@ -1248,13 +1472,13 @@ mod tests {
         let mut d = doc(&[(Kind::Title, "ab")]);
         d.toggle_style(0, 0, 1, Style::BOLD);
         // "a|b" -> "ax|b": after the bold a
-        d.edit_text(0, "axb", 2, None);
+        d.edit_text(0, "axb", 2, None, None);
         assert_eq!(d.blocks()[0].spans(), [(0, 2, Style::BOLD), (2, 3, Style::NONE)]);
         // at the start: the style of what follows
-        d.edit_text(0, "yaxb", 1, None);
+        d.edit_text(0, "yaxb", 1, None, None);
         assert_eq!(d.blocks()[0].spans(), [(0, 3, Style::BOLD), (3, 4, Style::NONE)]);
         // with a style asked for (a toolbar button with nothing selected)
-        d.edit_text(0, "yaxbz", 5, Some(Style::ITALIC));
+        d.edit_text(0, "yaxbz", 5, Some(Style::ITALIC), None);
         assert_eq!(d.blocks()[0].spans(), [(0, 3, Style::BOLD), (3, 4, Style::NONE), (4, 5, Style::ITALIC)]);
     }
 
@@ -1263,13 +1487,13 @@ mod tests {
         let mut d = doc(&[(Kind::Title, "aa")]);
         d.toggle_style(0, 1, 2, Style::BOLD);
         // the plain a was doubled: the caret after the first a
-        d.edit_text(0, "aaa", 1, None);
+        d.edit_text(0, "aaa", 1, None, None);
         assert_eq!(d.blocks()[0].spans(), [(0, 2, Style::NONE), (2, 3, Style::BOLD)]);
         // a selection replaced
-        d.edit_text(0, "aZ", 2, None);
+        d.edit_text(0, "aZ", 2, None, None);
         assert_eq!(d.blocks()[0].text, "aZ");
         // a deletion
-        d.edit_text(0, "Z", 0, None);
+        d.edit_text(0, "Z", 0, None, None);
         assert_eq!(d.blocks()[0].text, "Z");
         assert_eq!(d.blocks()[0].marks.len(), 1);
     }
@@ -1618,5 +1842,168 @@ ta");
         assert!(one.toggle_style_range(r(c(1, 1), c(1, 0)), Style::ITALIC));
         assert!(same.toggle_style(1, 0, 1, Style::ITALIC));
         assert_eq!(one, same);
+    }
+
+    // ---- color ----
+
+    fn colored(d: &Document, block: usize) -> Vec<(u8, u8)> {
+        d.blocks()[block].paints.iter().map(|p| (p.ink, p.marker)).collect()
+    }
+
+    #[test]
+    fn colors_mixed_with_every_style_round_trip_on_one_line() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "plain bold ital under strike end")]);
+        d.set_ink(1, 6, 15, 6);
+        d.set_marker(1, 10, 21, 4);
+        d.toggle_style(1, 6, 10, Style::BOLD);
+        d.toggle_style(1, 11, 17, Style::ITALIC);
+        d.toggle_style(1, 14, 25, Style::UNDERLINE);
+        d.toggle_style(1, 19, 27, Style::STRIKE);
+        let text = d.to_text();
+        assert!(text.contains("<c=blue>") && text.contains("<m=yellow>") && text.contains("</c>") && text.contains("</m>"), "{text}");
+        assert_eq!(Document::parse(&text), d, "{text}");
+    }
+
+    #[test]
+    fn a_line_without_color_markers_reads_and_writes_as_before() {
+        let d = Document::parse("# t\n**a** *b* ~~c~~ <u>d</u> \\<c=blue>x");
+        assert!(d.blocks()[1].paints.iter().all(|p| *p == Paint::default()));
+        assert_eq!(d.blocks()[1].text, "a b c d <c=blue>x");
+        assert_eq!(d.to_text(), "# t\n**a** *b* ~~c~~ <u>d</u> \\<c=blue>x");
+    }
+
+    #[test]
+    fn the_stored_markers_read_by_name() {
+        let d = Document::parse("# t\nx <c=red>y<m=green>z</c> w</m>!");
+        assert_eq!(d.blocks()[1].text, "x yz w!");
+        assert_eq!(colored(&d, 1), [(0, 0), (0, 0), (9, 0), (9, 5), (0, 5), (0, 5), (0, 0)]);
+    }
+
+    #[test]
+    fn an_unknown_color_name_is_plain_text_color_and_the_tag_is_dropped() {
+        let d = Document::parse("# t\na<c=chartreuse>b</c>c<m=none>d</m>**e**");
+        assert_eq!(d.blocks()[1].text, "abcde");
+        assert!(d.blocks()[1].paints.iter().all(|p| *p == Paint::default()));
+        assert!(d.blocks()[1].marks[4].contains(Style::BOLD), "the rest of the line is still read the new way");
+    }
+
+    #[test]
+    fn property_colored_documents_round_trip() {
+        let mut r = Rng(7);
+        for _ in 0..3000 {
+            let blocks = (0..1 + r.next(5))
+                .map(|_| {
+                    let mut b = Block::new(Kind::Body, &random_text(&mut r));
+                    let starts: Vec<usize> = b.text.char_indices().map(|(i, _)| i).collect();
+                    for (k, &i) in starts.iter().enumerate() {
+                        let end = starts.get(k + 1).copied().unwrap_or(b.text.len());
+                        b.marks[i..end].fill(Style::from_bits(r.next(16) as u8));
+                        b.paints[i..end].fill(Paint { ink: r.next(10) as u8, marker: r.next(10) as u8 });
+                    }
+                    b
+                })
+                .collect();
+            let d = Document::from_blocks(blocks);
+            assert_eq!(Document::parse(&d.to_text()), d, "{:?}", d.to_text());
+        }
+    }
+
+    #[test]
+    fn a_range_over_three_blocks_takes_one_ink_and_a_mixed_range_has_no_common_color() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "abc"), (Kind::Body, "def"), (Kind::Body, "ghi")]);
+        let range = r(c(1, 1), c(3, 2));
+        assert_eq!(d.common_ink_range(range), Some(0));
+        assert!(d.set_ink_range(range, 6));
+        assert_eq!(d.common_ink_range(range), Some(6));
+        assert_eq!(colored(&d, 1), [(0, 0), (6, 0), (6, 0)]);
+        assert_eq!(colored(&d, 3), [(6, 0), (6, 0), (0, 0)]);
+        assert_eq!(d.common_ink_range(r(c(1, 0), c(3, 3))), None);
+        assert_eq!(d.common_marker_range(r(c(1, 0), c(3, 3))), Some(0));
+        assert!(d.set_marker(1, 0, 1, 2));
+        assert_eq!(d.common_marker_range(r(c(1, 0), c(3, 3))), None);
+    }
+
+    #[test]
+    fn setting_a_color_is_idempotent_and_clear_sets_default() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "abc")]);
+        let all = d.all();
+        assert!(d.set_ink_range(all, 3));
+        assert!(!d.set_ink_range(all, 3), "picking the color the range has is a no-op, not a toggle");
+        assert_eq!(d.common_ink_range(all), Some(3));
+        assert!(d.set_marker_range(all, 5));
+        assert!(d.set_ink_range(all, 0) && d.set_marker_range(all, 0));
+        assert_eq!(colored(&d, 1), [(0, 0); 3]);
+    }
+
+    #[test]
+    fn color_over_an_empty_range_or_an_image_changes_nothing() {
+        let mut d = Document::from_blocks(vec![Block::new(Kind::Title, "t"), Block::image(1), Block::new(Kind::Body, "ab")]);
+        assert!(!d.set_ink_range(r(c(1, 0), c(1, 0)), 2));
+        assert_eq!(d.common_ink_range(r(c(1, 0), c(1, 0))), None);
+        assert!(d.set_ink_range(r(c(0, 0), c(2, 2)), 2), "an image in the range is skipped");
+        assert_eq!(colored(&d, 2), [(2, 0); 2]);
+        assert!(d.blocks()[1].paints.is_empty());
+    }
+
+    #[test]
+    fn typing_takes_the_paint_of_the_character_before_or_the_next_at_a_block_start() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "ab")]);
+        d.set_ink(1, 0, 1, 6);
+        d.set_marker(1, 0, 1, 4);
+        d.edit_text(1, "aXb", 2, None, None);
+        assert_eq!(colored(&d, 1), [(6, 4), (6, 4), (0, 0)]);
+        d.edit_text(1, "YaXb", 1, None, None);
+        assert_eq!(colored(&d, 1)[0], (6, 4), "at the start it takes the next character's");
+        assert_eq!(d.blocks()[1].paint_for_insert(0), Paint { ink: 6, marker: 4 });
+    }
+
+    #[test]
+    fn paints_stay_as_long_as_the_text_through_every_operation() {
+        let mut d = doc(&[(Kind::Title, "title"), (Kind::Body, "héllo wörld"), (Kind::Body, "second")]);
+        d.set_ink_range(d.all(), 9);
+        let ok = |d: &Document| {
+            for b in d.blocks() {
+                assert_eq!(b.paints.len(), b.text.len(), "{b:?}");
+                assert_eq!(b.paints.len(), b.marks.len());
+            }
+        };
+        d.split(1, 3);
+        ok(&d);
+        d.backspace(2, 0);
+        ok(&d);
+        d.delete(1, d.blocks()[1].text.len());
+        ok(&d);
+        d.insert_text(1, 2, 4, "a\nbc\nd");
+        ok(&d);
+        d.replace_range(r(c(0, 2), c(2, 1)), "zz");
+        ok(&d);
+        d.delete_range(r(c(0, 0), c(d.len() - 1, 1)));
+        ok(&d);
+        d.set_text(0, "new text");
+        ok(&d);
+        let mut e = doc(&[(Kind::Title, "t"), (Kind::Body, "# x")]);
+        e.auto_format(1, "#x", 2);
+        ok(&e);
+    }
+
+    #[test]
+    fn paints_survive_a_clone_for_undo_and_redo() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "abc")]);
+        let before = d.clone();
+        d.set_ink_range(d.all(), 2);
+        let after = d.clone();
+        assert_ne!(before, after);
+        d = before.clone();
+        assert_eq!(colored(&d, 1), [(0, 0); 3]);
+        d = after;
+        assert_eq!(colored(&d, 1), [(2, 0); 3]);
+    }
+
+    #[test]
+    fn the_palette_has_ten_entries_with_the_spec_colors() {
+        assert_eq!(PALETTE.len(), 10);
+        assert_eq!((PALETTE[0].name, PALETTE[0].ink, PALETTE[0].marker), ("Default", 0x2B2F36, None));
+        assert_eq!((PALETTE[6].name, PALETTE[6].ink, PALETTE[6].marker), ("Blue", 0x3A6D96, Some(0xD3E5EF)));
+        assert_eq!(PALETTE[9].marker, Some(0xFFE2DD));
     }
 }

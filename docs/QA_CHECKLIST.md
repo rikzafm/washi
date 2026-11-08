@@ -49,6 +49,24 @@ Tip: use a throwaway profile so your own notes stay untouched:
 - [ ] Emoji picker (Win+.) and emoji fallback rendering. Pasting rich text from a browser gives plain text.
 - [ ] Clipboard: copy and paste in the text, paste a screenshot (inserts an image paragraph), "Export as Markdown..." writes the .md and PNGs and the .md opens correctly in a Markdown viewer.
 
+## Text color and highlight (text-color-and-highlight spec, ticket 05)
+
+Unchecked on purpose, like the rest of this file. Run on the release build.
+
+- [ ] The "A" button (fifth of seven): its letter shows the selection's ink and its bar the marker. The button fill is on while the popover is open or the selection has a color. Known: the bar is near-invisible for a pale marker on the button's fill (`#F0F0EE`); judge by eye whether that is acceptable.
+- [ ] Popover look against the claude.ai canvas "B · Ink dots" (https://claude.ai/artifact/66MmBXsWquEdiGhr2BFA6x): tilt follows the paper (1.5 degrees), the tail's tip sits on the center of the "A", the shadow is soft, the caption is in the handwriting font, the rings are right. The `uidiff` comparison against the board was never run (needs the board's PNG): do it by eye.
+- [ ] Popover close paths: Escape, a click in the text, a click on another toolbar button, the pink tape or a resize zone, resizing, minimising, clicking another note or app (the note loses focus), typing over the selection, Clear. Opening it never blurs the text or collapses the selection.
+- [ ] Keyboard: with the popover open, Left/Right walk a row, Up/Down switch rows, Enter or Space picks, Escape closes. The ring is blue (`#6FA2F5`, 2 px, 2 px off the swatch), also on the chosen swatch. The caret and selection stay in the text the whole time. Enter or Space before any arrow key types a space (and closes the popover).
+- [ ] Accessibility: swatches carry the names `Text color Blue`, `Highlight Yellow`, `No highlight`, and Clear is `Clear color` (set through Slint's `accessible-label`). Check in Narrator or Accessibility Insights that they are exposed. Not verified: Slint shows them as buttons only when the popover is open, and the keyboard walk above is a Washi-level focus ring, not screen-reader focus (Narrator will not announce the swatch the ring is on). Accepted for v1.
+- [ ] Colored text at rest (tilted, stepped baseline) and while editing (level): ink and marker both show, a marker is one rounded bar per line with no hairline seams at piece boundaries, over a heading and the title too. A selected highlighted word is the marker tinted by the blue wash, not hidden.
+- [ ] Picking with a collapsed caret colors only what is typed next (nothing changes in the existing text).
+- [ ] Undo and redo step back through ink and marker picks one at a time.
+- [ ] Copy and paste: copying colored text and pasting elsewhere (Notepad, a browser, another note) gives plain text; colors are not copied.
+- [ ] IME composition (Microsoft Japanese or Pinyin) over a colored range: the composing text is drawn in the ink, the marker stays behind it, the candidate window opens at the caret, commit keeps or drops the color as the typed-text rule says (the committed text takes the color of the character before it).
+- [ ] Palette is in sync: the popover's names and colors are the stored ones (pick every swatch once and check `notes.db` text via Export as Markdown). The popover reads `document::PALETTE` directly, so there is one table.
+- [ ] Contrast: the lowest ink-on-marker pair over the ten inks and nine markers is **3.62:1** (Orange ink `#B8581A` on Purple marker `#E8DEEE`; Orange on Blue, Brown and Orange markers are next, up to 3.68). Every pair passes the spec's 3:1 (large handwriting) but 57 of the 90 pairs are under 4.5:1, so small non-handwriting text would not pass. Look at Orange on Purple, Orange on Blue and Yellow ink on its markers at 100% scale in the handwriting font and confirm they read. Every ink on the paper (`#FFFFFD`) is at least 4.71:1 (lowest: Orange).
+- [ ] Older build: open a note saved with colors in 0.1.0 without the feature: the `<c=blue>` tags show as text (accepted, see the release notes).
+
 ## DPI and multi-monitor
 
 - [ ] 100%, 125%, 150%, 200% display scale: the note looks right at each (the geometry is checked by `tools/capture.ps1`; look at the paper edge, tape and fonts).
