@@ -1,0 +1,62 @@
+// Dropdown menu window for note Quick Jump and actions.
+// Floats relative to the parent note's "..." trigger button.
+
+export component DropdownMenuWindow inherits Window {
+    title: "Washi Menu";
+    no-frame: true;
+    background: transparent;
+    always-on-top: true;
+
+    in property <length> card-width: 260px;
+    in property <length> card-height: 320px;
+    in property <length> shadow-margin: 16px;
+
+    width: card-width + 2 * shadow-margin;
+    height: card-height + 2 * shadow-margin;
+
+    callback dismiss();
+    in-out property <bool> pinned: false;
+
+    // Detect clicks outside the card (in the shadow margin) to dismiss
+    background-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => {
+            root.dismiss();
+        }
+    }
+
+    // Dismiss on Escape key
+    focus-scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // The upright card
+    card := Rectangle {
+        x: root.shadow-margin;
+        y: root.shadow-margin;
+        width: root.card-width;
+        height: root.card-height;
+        background: #FFFFFF;
+        border-radius: 14px;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000028;
+        drop-shadow-offset-y: 6px;
+        clip: true;
+
+        // Absorb clicks on the card itself so they don't fall through to background-touch
+        card-touch := TouchArea {
+            width: 100%;
+            height: 100%;
+        }
+    }
+}
