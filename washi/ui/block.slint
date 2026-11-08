@@ -38,6 +38,18 @@ export struct RunData {
     italic: bool,
     /// The empty-note hint rather than note text.
     hint: bool,
+    /// The run's ink (the palette's, `Theme.ink` for the default).
+    ink: color,
+}
+
+/// A marker (highlight) behind one line's stretch of one color: a level box in the paper's frame
+/// (Rust lays it out, src/textflow.rs). Drawn by the note on the tilted baseline at rest.
+export struct MarkerData {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    color: color,
 }
 
 /// One level box of the selection wash, in the paper's frame (Rust lays them out, src/textflow.rs).
