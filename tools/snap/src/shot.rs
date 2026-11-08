@@ -44,6 +44,11 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    pub fn from_rgb(width: u32, height: u32, rgb: Vec<u8>) -> Self {
+        assert_eq!(rgb.len(), (width * height * 3) as usize);
+        Snapshot { width, height, rgb }
+    }
+
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 3] {
         let i = ((y * self.width + x) * 3) as usize;
         [self.rgb[i], self.rgb[i + 1], self.rgb[i + 2]]

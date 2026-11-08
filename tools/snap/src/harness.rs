@@ -1079,6 +1079,47 @@ impl Harness {
         Some((pw, ph, buf))
     }
 
+    /// Render the open `AllNotesWindow` at `scale` onto a `#D6DBE2` desk canvas of `canvas` physical pixels.
+    pub fn render_all_notes_canvas(&self, scale: f32, canvas: (u32, u32)) -> Option<crate::shot::Snapshot> {
+        if !self.is_all_notes_open() {
+            return None;
+        }
+        let wins = platform::windows();
+        let w = wins.into_iter().rev().find(|w| {
+            let s = w.window().size();
+            s.width == 603 && s.height == 625
+        })?;
+        w.window().dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale });
+        w.window().set_size(slint::LogicalSize::new(603.0, 625.0));
+        w.window().request_redraw();
+        let s = w.window().size();
+        let (pw, ph) = (s.width, s.height);
+        let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
+        w.draw_if_needed(|r| {
+            r.render(&mut buf, pw as usize);
+        });
+        // Restore 1.0x logical window size for subsequent interactions
+        w.window().dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
+        w.window().set_size(slint::LogicalSize::new(603.0, 625.0));
+
+        let desk = [0xD6u8, 0xDB, 0xE2];
+        let (cw, ch) = canvas;
+        let (ox, oy) = ((cw as i64 - pw as i64) / 2, (ch as i64 - ph as i64) / 2);
+        let mut rgb = Vec::with_capacity((cw * ch * 3) as usize);
+        for y in 0..ch as i64 {
+            for x in 0..cw as i64 {
+                let (sx, sy) = (x - ox, y - oy);
+                if sx >= 0 && sy >= 0 && sx < pw as i64 && sy < ph as i64 {
+                    let p = buf[(sy as u32 * pw + sx as u32) as usize];
+                    rgb.extend_from_slice(&[p.r, p.g, p.b]);
+                } else {
+                    rgb.extend_from_slice(&desk);
+                }
+            }
+        }
+        Some(crate::shot::Snapshot::from_rgb(cw, ch, rgb))
+    }
+
     pub fn press_all_notes_escape(&mut self) {
         if let Some(app) = &self.app {
             app.dispatch_all_notes_event(slint::platform::WindowEvent::KeyPressed {
