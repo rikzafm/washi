@@ -782,6 +782,10 @@ impl Harness {
         self.app().note_ids().len()
     }
 
+    pub fn exit_candidates(&self) -> Vec<washi::ClosedCandidate> {
+        self.app().exit_candidates()
+    }
+
     /// Text currently in the note's editor.
     pub fn note_text(&self, note: usize) -> String {
         self.app().with_note(self.id(note), |n| n.text()).unwrap()
