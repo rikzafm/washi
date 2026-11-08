@@ -855,6 +855,43 @@ impl Harness {
         std::fs::write(p, b).unwrap();
     }
 
+    pub fn is_dropdown_open(&self) -> bool {
+        self.app.as_ref().map(|a| a.is_dropdown_open()).unwrap_or(false)
+    }
+
+    pub fn dropdown_note_id(&self) -> Option<NoteId> {
+        self.app.as_ref().and_then(|a| a.dropdown_note_id())
+    }
+
+    pub fn dropdown_pinned(&self) -> Option<bool> {
+        self.app.as_ref().and_then(|a| a.dropdown_pinned())
+    }
+
+    pub fn toggle_dropdown(&mut self, note: usize) {
+        let id = self.note_id(note);
+        if let Some(app) = &self.app {
+            app.toggle_dropdown(id);
+        }
+    }
+
+    pub fn invoke_dropdown_toggle_pin(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_toggle_pin();
+        }
+    }
+
+    pub fn invoke_dropdown_delete_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_delete_note();
+        }
+    }
+
+    pub fn invoke_dropdown_new_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_new_note();
+        }
+    }
+
     pub(crate) fn path(&self, name: &str) -> PathBuf {
         self.dir.path().join(name)
     }

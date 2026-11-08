@@ -129,6 +129,14 @@ impl DropdownMenu {
         &self.ui
     }
 
+    pub fn pinned(&self) -> bool {
+        self.ui.get_pinned()
+    }
+
+    pub fn set_pinned(&self, pinned: bool) {
+        self.ui.set_pinned(pinned);
+    }
+
     pub fn hwnd(&self) -> Option<isize> {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         let window_handle = self.ui.window().window_handle();
@@ -256,6 +264,56 @@ mod tests {
 
         ui.invoke_dismiss();
         assert!(dismissed.get());
+    }
+
+    #[test]
+    fn dropdown_menu_window_callbacks_and_pinned_property() {
+        init_test_platform();
+        let ui = DropdownMenuWindow::new().expect("DropdownMenuWindow::new");
+        assert!(!ui.get_pinned());
+        ui.set_pinned(true);
+        assert!(ui.get_pinned());
+
+        let pin_toggled = Rc::new(Cell::new(false));
+        let pt = pin_toggled.clone();
+        ui.on_toggle_pin(move || {
+            pt.set(true);
+        });
+        ui.invoke_toggle_pin();
+        assert!(pin_toggled.get());
+
+        let note_deleted = Rc::new(Cell::new(false));
+        let nd = note_deleted.clone();
+        ui.on_delete_note(move || {
+            nd.set(true);
+        });
+        ui.invoke_delete_note();
+        assert!(note_deleted.get());
+
+        let new_created = Rc::new(Cell::new(false));
+        let nc = new_created.clone();
+        ui.on_new_note(move || {
+            nc.set(true);
+        });
+        ui.invoke_new_note();
+        assert!(new_created.get());
+    }
+
+    #[test]
+    fn dropdown_menu_pinned_state_helpers() {
+        init_test_platform();
+        let menu = DropdownMenu::open(
+            99,
+            (100.0, 200.0),
+            Rc::new(|_| ()),
+        )
+        .expect("DropdownMenu::open");
+
+        assert!(!menu.pinned());
+        menu.set_pinned(true);
+        assert!(menu.pinned());
+        menu.set_pinned(false);
+        assert!(!menu.pinned());
     }
 
     #[test]
