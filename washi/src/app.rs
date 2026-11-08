@@ -1,5 +1,6 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
+use crate::all_notes::AllNotesView;
 use crate::delete_dialog::{calculate_dialog_position, DeleteDialog};
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
 use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
@@ -8,7 +9,7 @@ use crate::image_viewer::{ImageViewer, ViewerEvent};
 use crate::note_window::{app_icon, note_title, Note, NoteEvent};
 use crate::platform::*;
 use crate::suspend::{SuspendController, SuspendHost};
-use crate::storage::{keystore, Db, DbError, Geometry, KeyStoreError, NoteRow};
+use crate::storage::{keystore, AllNoteRow, Db, DbError, Geometry, KeyStoreError, NoteRow};
 use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -91,6 +92,8 @@ struct Inner {
     dropdown: RefCell<Option<Rc<DropdownMenu>>>,
     /// Currently open delete confirmation dialog window, if any.
     delete_dialog: RefCell<Option<Rc<DeleteDialog>>>,
+    /// Currently open All Notes window, if any.
+    all_notes: RefCell<Option<Rc<AllNotesView>>>,
 }
 
 /// A picture on its way into a note.
@@ -190,6 +193,7 @@ impl App {
             next_viewer: Cell::new(0),
             dropdown: RefCell::new(None),
             delete_dialog: RefCell::new(None),
+            all_notes: RefCell::new(None),
         });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
@@ -374,6 +378,108 @@ impl App {
         }
     }
 
+    /// Invoke the all notes callback on the active dropdown (for testing).
+    pub fn invoke_dropdown_all_notes(&self) {
+        if let Some(d) = self.dropdown() {
+            d.invoke_all_notes();
+        }
+    }
+
+    /// Clone the handle to the open All Notes view, if any.
+    pub fn all_notes(&self) -> Option<Rc<AllNotesView>> {
+        self.0.all_notes.borrow().clone()
+    }
+
+    /// Whether the All Notes window is currently open.
+    pub fn is_all_notes_open(&self) -> bool {
+        self.0.all_notes.borrow().is_some()
+    }
+
+    /// The currently selected note ID in the open All Notes window, if any.
+    pub fn all_notes_selected_id(&self) -> Option<NoteId> {
+        self.all_notes().and_then(|v| v.selected_note_id())
+    }
+
+    /// Open note count displayed in the open All Notes window, if any.
+    pub fn all_notes_open_count(&self) -> Option<usize> {
+        self.all_notes().map(|v| v.open_count())
+    }
+
+    /// Closed note count displayed in the open All Notes window, if any.
+    pub fn all_notes_closed_count(&self) -> Option<usize> {
+        self.all_notes().map(|v| v.closed_count())
+    }
+
+    /// Open note items in the open All Notes window.
+    pub fn all_notes_open_items(&self) -> Vec<crate::note_window::AllNoteItem> {
+        self.all_notes().map(|v| v.open_notes()).unwrap_or_default()
+    }
+
+    /// Closed note items in the open All Notes window.
+    pub fn all_notes_closed_items(&self) -> Vec<crate::note_window::AllNoteItem> {
+        self.all_notes().map(|v| v.closed_notes()).unwrap_or_default()
+    }
+
+    /// Dispatch a window event to the active All Notes window (for testing).
+    pub fn dispatch_all_notes_event(&self, event: slint::platform::WindowEvent) {
+        if let Some(v) = self.all_notes() {
+            v.dispatch_event(event);
+        }
+    }
+
+    /// Close the open All Notes window, if any.
+    pub fn dismiss_all_notes(&self) {
+        if let Some(v) = self.0.all_notes.borrow_mut().take() {
+            v.close();
+        }
+    }
+
+    fn all_notes_rows(&self) -> Vec<AllNoteRow> {
+        for n in self.0.notes.borrow().iter() {
+            n.flush_text();
+        }
+        let mut rows = self.0.db.all_notes().unwrap_or_default();
+        for r in &mut rows {
+            if let Some(live) = self.with_note(r.id, |n| n.text()) {
+                r.content = live;
+            }
+        }
+        rows
+    }
+
+    /// Refresh the open All Notes window if it is open.
+    pub fn refresh_all_notes(&self, preferred_selected_id: Option<NoteId>) {
+        if let Some(v) = self.all_notes() {
+            let rows = self.all_notes_rows();
+            v.refresh(&rows, preferred_selected_id);
+        }
+    }
+
+    /// Open the All Notes window with `initial_selected_id` selected.
+    pub fn open_all_notes(&self, initial_selected_id: NoteId) {
+        let rows = self.all_notes_rows();
+        if let Some(v) = self.all_notes() {
+            v.refresh(&rows, Some(initial_selected_id));
+            let _ = v.ui().show();
+            self.0.env.window_control.bring_to_front(0, v.hwnd());
+            return;
+        }
+
+        let weak = Rc::downgrade(&self.0);
+        let on_close = Rc::new(move || {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).dismiss_all_notes();
+            }
+        });
+
+        match AllNotesView::open(initial_selected_id, &rows, on_close) {
+            Ok(view) => {
+                *self.0.all_notes.borrow_mut() = Some(Rc::new(view));
+            }
+            Err(e) => eprintln!("washi: could not open All Notes window: {e}"),
+        }
+    }
+
     /// The list of notes in the currently open dropdown menu.
     pub fn dropdown_notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
         self.dropdown().map(|d| d.notes()).unwrap_or_default()
@@ -550,6 +656,15 @@ impl App {
                         let app = App(inner);
                         app.dismiss_dropdown();
                         app.new_note_from(id);
+                    }
+                });
+
+                let weak = Rc::downgrade(&self.0);
+                menu.ui().on_all_notes(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App(inner);
+                        app.dismiss_dropdown();
+                        app.open_all_notes(id);
                     }
                 });
 
@@ -1140,7 +1255,7 @@ impl App {
             self.0.env.signals.detach(id);
             slint::Timer::single_shot(Duration::ZERO, move || drop(note));
             self.0.suspend.evaluate();
-            if now_empty {
+            if now_empty && !self.is_all_notes_open() {
                 self.0.restore_exit_candidates();
                 self.0.quit.set(true);
                 let _ = slint::quit_event_loop();

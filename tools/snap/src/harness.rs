@@ -944,6 +944,49 @@ impl Harness {
         }
     }
 
+    pub fn invoke_dropdown_all_notes(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_all_notes();
+        }
+        self.settle();
+    }
+
+    pub fn is_all_notes_open(&self) -> bool {
+        self.app.as_ref().is_some_and(|a| a.is_all_notes_open())
+    }
+
+    pub fn all_notes_selected_id(&self) -> Option<NoteId> {
+        self.app.as_ref().and_then(|a| a.all_notes_selected_id())
+    }
+
+    pub fn all_notes_open_count(&self) -> Option<usize> {
+        self.app.as_ref().and_then(|a| a.all_notes_open_count())
+    }
+
+    pub fn all_notes_closed_count(&self) -> Option<usize> {
+        self.app.as_ref().and_then(|a| a.all_notes_closed_count())
+    }
+
+    pub fn all_notes_open_items(&self) -> Vec<washi::note_window::AllNoteItem> {
+        self.app.as_ref().map(|a| a.all_notes_open_items()).unwrap_or_default()
+    }
+
+    pub fn all_notes_closed_items(&self) -> Vec<washi::note_window::AllNoteItem> {
+        self.app.as_ref().map(|a| a.all_notes_closed_items()).unwrap_or_default()
+    }
+
+    pub fn press_all_notes_escape(&mut self) {
+        if let Some(app) = &self.app {
+            app.dispatch_all_notes_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+            app.dispatch_all_notes_event(slint::platform::WindowEvent::KeyReleased {
+                text: slint::platform::Key::Escape.into(),
+            });
+        }
+        self.settle();
+    }
+
     pub fn invoke_dropdown_select_note(&mut self, id: NoteId) {
         if let Some(app) = &self.app {
             app.invoke_dropdown_select_note(id);

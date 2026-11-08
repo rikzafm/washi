@@ -298,6 +298,35 @@ impl Db {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
+
+    /// All notes (open first ordered by `z_order DESC, updated_at DESC, id DESC`, then closed ordered by `updated_at DESC, id DESC`).
+    pub fn all_notes(&self) -> Result<Vec<AllNoteRow>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, content, updated_at, is_open, z_order FROM notes
+             ORDER BY is_open DESC, CASE WHEN is_open != 0 THEN z_order ELSE 0 END DESC, updated_at DESC, id DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(AllNoteRow {
+                    id: r.get(0)?,
+                    content: r.get(1)?,
+                    updated_at: r.get(2)?,
+                    is_open: r.get::<_, i64>(3)? != 0,
+                    z_order: r.get(4)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllNoteRow {
+    pub id: NoteId,
+    pub content: String,
+    pub updated_at: i64,
+    pub is_open: bool,
+    pub z_order: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -340,5 +369,48 @@ mod tests {
         assert_eq!(recent[1].id, id1);
         assert_eq!(recent[1].content, "Note 1");
         assert_eq!(recent[1].updated_at, 1000);
+    }
+
+    #[test]
+    fn all_notes_returns_open_then_closed_ordered_appropriately() {
+        let (_dir, db) = test_db();
+        let id1 = db.create_note(1000).unwrap();
+        db.save_content(id1, "Open Low Z", 1000).unwrap();
+
+        let id2 = db.create_note(2000).unwrap();
+        db.save_content(id2, "Closed Old", 2000).unwrap();
+        db.set_open(id2, false).unwrap();
+
+        let id3 = db.create_note(1500).unwrap();
+        db.save_content(id3, "Open High Z", 1500).unwrap();
+        db.save_stacking(&[id1, id3]).unwrap();
+
+        let id4 = db.create_note(3000).unwrap();
+        db.save_content(id4, "Closed New", 3000).unwrap();
+        db.set_open(id4, false).unwrap();
+
+        let all = db.all_notes().unwrap();
+        assert_eq!(all.len(), 4);
+        assert_eq!(all[0].id, id3);
+        assert_eq!(all[0].content, "Open High Z");
+        assert_eq!(all[0].updated_at, 1500);
+        assert!(all[0].is_open);
+        assert_eq!(all[0].z_order, 1);
+
+        assert_eq!(all[1].id, id1);
+        assert_eq!(all[1].content, "Open Low Z");
+        assert_eq!(all[1].updated_at, 1000);
+        assert!(all[1].is_open);
+        assert_eq!(all[1].z_order, 0);
+
+        assert_eq!(all[2].id, id4);
+        assert_eq!(all[2].content, "Closed New");
+        assert_eq!(all[2].updated_at, 3000);
+        assert!(!all[2].is_open);
+
+        assert_eq!(all[3].id, id2);
+        assert_eq!(all[3].content, "Closed Old");
+        assert_eq!(all[3].updated_at, 2000);
+        assert!(!all[3].is_open);
     }
 }

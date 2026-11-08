@@ -397,3 +397,33 @@ fn dropdown_new_note_spawns_near_origin_note_with_multiple_notes() {
     assert_eq!(g2.x, g0.x + washi::NEW_NOTE_OFFSET);
     assert_eq!(g2.y, g0.y + washi::NEW_NOTE_OFFSET);
 }
+
+#[test]
+fn dropdown_all_notes_dismisses_dropdown_opens_all_notes_and_closes_on_escape() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "First Note\nBody 1");
+    h.right_click(0, Some(&["New note"]));
+    h.set_note_text(1, "Second Note\nBody 2");
+    h.right_click(1, Some(&["New note"]));
+    h.set_note_text(2, "Third Note\nBody 3");
+    h.right_click(2, Some(&["Close"]));
+
+    assert_eq!(h.open_note_count(), 2);
+    let id1 = h.note_id(1);
+
+    h.toggle_dropdown(1);
+    assert!(h.is_dropdown_open());
+    assert!(!h.is_all_notes_open());
+
+    h.invoke_dropdown_all_notes();
+
+    assert!(!h.is_dropdown_open(), "clicking All notes dismisses dropdown");
+    assert!(h.is_all_notes_open(), "clicking All notes opens AllNotesWindow");
+    assert_eq!(h.all_notes_selected_id(), Some(id1));
+    assert_eq!(h.all_notes_open_count(), Some(2));
+    assert_eq!(h.all_notes_closed_count(), Some(1));
+
+    h.press_all_notes_escape();
+    assert!(!h.is_all_notes_open(), "pressing Escape closes AllNotesWindow");
+}

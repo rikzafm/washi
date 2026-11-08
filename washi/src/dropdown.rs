@@ -278,6 +278,10 @@ impl DropdownMenu {
         self.ui.invoke_new_note();
     }
 
+    pub fn invoke_all_notes(&self) {
+        self.ui.invoke_all_notes();
+    }
+
     pub fn invoke_select_note(&self, id: NoteId) {
         self.ui.invoke_select_note(id as i32);
     }
@@ -457,6 +461,14 @@ mod tests {
         });
         ui.invoke_new_note();
         assert!(new_created.get());
+
+        let all_notes_clicked = Rc::new(Cell::new(false));
+        let anc = all_notes_clicked.clone();
+        ui.on_all_notes(move || {
+            anc.set(true);
+        });
+        ui.invoke_all_notes();
+        assert!(all_notes_clicked.get());
     }
 
     #[test]
@@ -497,6 +509,13 @@ mod tests {
         .expect("DropdownMenu::open");
 
         assert_eq!(menu.note_id(), 42);
+        let all_notes_called = Rc::new(Cell::new(false));
+        let anc = all_notes_called.clone();
+        menu.ui().on_all_notes(move || {
+            anc.set(true);
+        });
+        menu.invoke_all_notes();
+        assert!(all_notes_called.get());
         menu.ui().invoke_dismiss();
         assert!(dismissed.get());
     }

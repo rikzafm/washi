@@ -1,0 +1,55 @@
+// All Notes ("Notes") window shell.
+// Canvas: 603 x 625 logical px, desk color #D6DBE2.
+
+import "../../fonts/ShadowsIntoLight.ttf";
+import "../../fonts/ShadowsIntoLight-Bold.ttf";
+
+export struct AllNoteItem {
+    id: int,
+    title: string,
+    is-open: bool,
+}
+
+export component AllNotesWindow inherits Window {
+    title: "All Notes";
+    width: 603px;
+    height: 625px;
+    no-frame: true;
+    background: #D6DBE2;
+
+    in-out property <int> selected-note-id: -1;
+    in-out property <int> open-count: 0;
+    in-out property <int> closed-count: 0;
+    in-out property <[AllNoteItem]> open-notes: [];
+    in-out property <[AllNoteItem]> closed-notes: [];
+    in-out property <bool> selected-note-open: false;
+    in-out property <bool> confirming-delete: false;
+
+    callback close-window();
+    callback select-note(int);
+    callback new-note();
+    callback open-or-focus-note();
+    callback close-note();
+    callback export-note();
+    callback request-delete();
+    callback cancel-delete();
+    callback confirm-delete();
+
+    focus-scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                if (root.confirming-delete) {
+                    root.confirming-delete = false;
+                    root.cancel-delete();
+                } else {
+                    root.close-window();
+                }
+                return accept;
+            }
+            reject
+        }
+    }
+}

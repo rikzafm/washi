@@ -70,6 +70,7 @@ export component DropdownMenuWindow inherits Window {
     callback toggle_pin();
     callback delete_note();
     callback new_note();
+    callback all_notes();
     callback select_note(int);
     in-out property <bool> pinned: false;
     in property <[DropdownNoteItem]> notes: [];
@@ -353,6 +354,10 @@ export component DropdownMenuWindow inherits Window {
 
             // All notes
             BottomActionButton {
+                clicked => {
+                    root.all_notes();
+                }
+
                 VerticalLayout {
                     alignment: center;
                     spacing: 2px;
