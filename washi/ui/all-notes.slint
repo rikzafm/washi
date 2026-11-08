@@ -3,11 +3,77 @@
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
+import { Frame, TRect } from "toolbar.slint";
 
 export struct AllNoteItem {
     id: int,
     title: string,
     is-open: bool,
+}
+
+component SidebarRow inherits Rectangle {
+    in property <AllNoteItem> item;
+    in property <bool> selected: false;
+    in property <float> row-cy;
+    in property <length> text-x: 41px;
+    in property <length> text-y;
+    callback clicked();
+
+    x: 0px;
+    y: 0px;
+    width: 603px;
+    height: 625px;
+
+    property <Frame> pill-frame: {
+        w: 603.0,
+        h: 625.0,
+        cx: 124.0,
+        cy: root.row-cy,
+        cs: Math.cos(-1.0deg),
+        sn: Math.sin(-1.0deg),
+    };
+
+    for growth in [6.0, 4.0, 2.0, 0.5]: TRect {
+        visible: root.selected;
+        f: root.pill-frame;
+        u0: -94.0 - growth;
+        v0: -17.5 - growth + 2.5;
+        w: 188.0 + 2.0 * growth;
+        h: 35.0 + 2.0 * growth;
+        r: 8.0 + growth;
+        fill: #00000008;
+    }
+
+    if root.selected : TRect {
+        f: root.pill-frame;
+        u0: -94.0;
+        v0: -17.5;
+        w: 188.0;
+        h: 35.0;
+        r: 8.0;
+        fill: #FFFFFD;
+    }
+
+    Text {
+        x: root.text-x;
+        y: root.text-y;
+        width: 170px;
+        text: root.item.title;
+        font-family: "Shadows Into Light";
+        font-size: 15.5px;
+        font-weight: root.selected ? 700 : 400;
+        color: #2B2F36;
+        overflow: elide;
+    }
+
+    TouchArea {
+        x: 30px;
+        y: (root.row-cy - 17.5) * 1px;
+        width: 188px;
+        height: 35px;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
 }
 
 export component AllNotesWindow inherits Window {
@@ -35,6 +101,17 @@ export component AllNotesWindow inherits Window {
     callback cancel-delete();
     callback confirm-delete();
 
+    property <float> closed-header-y: 217.0 + root.open-notes.length * 42.0;
+    property <float> new-button-cy: root.closed-header-y + 45.5 + root.closed-notes.length * 38.0;
+    property <Frame> new-button-frame: {
+        w: 603.0,
+        h: 625.0,
+        cx: 83.5,
+        cy: root.new-button-cy,
+        cs: Math.cos(-1.0deg),
+        sn: Math.sin(-1.0deg),
+    };
+
     focus-scope := FocusScope {
         width: 100%;
         height: 100%;
@@ -50,6 +127,105 @@ export component AllNotesWindow inherits Window {
                 return accept;
             }
             reject
+        }
+    }
+
+    // --- Left Sidebar ("Notes") ---
+    Text {
+        x: 33px;
+        y: 114px;
+        text: "Notes";
+        font-family: "Shadows Into Light";
+        font-size: 30px;
+        color: #2B2F36;
+    }
+
+    Text {
+        x: 33px;
+        y: 161px;
+        text: root.open-count + " open · " + root.closed-count + " closed";
+        font-family: "Shadows Into Light";
+        font-size: 13px;
+        color: #5B616B;
+    }
+
+    Text {
+        x: 39px;
+        y: 195px;
+        text: "OPEN";
+        font-family: "Shadows Into Light";
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        color: #5B616B;
+    }
+
+    for item[i] in root.open-notes: SidebarRow {
+        item: item;
+        selected: item.id == root.selected-note-id;
+        row-cy: 234.5 + i * 42.0;
+        text-x: 41px;
+        text-y: (222.0 + i * 42.0) * 1px;
+        clicked => {
+            root.confirming-delete = false;
+            root.select-note(item.id);
+        }
+    }
+
+    Text {
+        x: 41px;
+        y: root.closed-header-y * 1px;
+        text: "CLOSED";
+        font-family: "Shadows Into Light";
+        font-size: 13px;
+        letter-spacing: 0.5px;
+        color: #5B616B;
+    }
+
+    for item[j] in root.closed-notes: SidebarRow {
+        item: item;
+        selected: item.id == root.selected-note-id;
+        row-cy: root.closed-header-y + 39.5 + j * 38.0;
+        text-x: 42px;
+        text-y: (root.closed-header-y + 26.0 + j * 38.0) * 1px;
+        clicked => {
+            root.confirming-delete = false;
+            root.select-note(item.id);
+        }
+    }
+
+    // "+ New note" button
+    TRect {
+        f: root.new-button-frame;
+        u0: -45.5;
+        v0: -15.0;
+        w: 91.0;
+        h: 30.0;
+        r: 8.0;
+        fill: #2B2F36;
+    }
+
+    Text {
+        x: (83.5 - 45.5) * 1px;
+        y: (root.new-button-cy - 15.0) * 1px;
+        width: 91px;
+        height: 30px;
+        text: "+ New note";
+        font-family: "Shadows Into Light";
+        font-size: 14.5px;
+        color: #FFFFFD;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        x: (83.5 - 45.5) * 1px;
+        y: (root.new-button-cy - 15.0) * 1px;
+        width: 91px;
+        height: 30px;
+        mouse-cursor: pointer;
+        clicked => {
+            root.confirming-delete = false;
+            root.new-note();
         }
     }
 }

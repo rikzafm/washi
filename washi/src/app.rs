@@ -420,6 +420,51 @@ impl App {
         self.all_notes().map(|v| v.closed_notes()).unwrap_or_default()
     }
 
+    /// Whether the inline delete confirmation bar is active in All Notes.
+    pub fn all_notes_confirming_delete(&self) -> Option<bool> {
+        self.all_notes().map(|v| v.confirming_delete())
+    }
+
+    /// Set the inline delete confirmation state in All Notes (for testing).
+    pub fn set_all_notes_confirming_delete(&self, confirming: bool) {
+        if let Some(v) = self.all_notes() {
+            v.ui().set_confirming_delete(confirming);
+        }
+    }
+
+    /// Select note `id` in the open All Notes window and reset inline delete confirmation.
+    pub fn select_all_notes_note(&self, id: NoteId) {
+        if let Some(v) = self.all_notes() {
+            v.ui().set_confirming_delete(false);
+            let rows = self.all_notes_rows();
+            v.refresh(&rows, Some(id));
+        }
+    }
+
+    /// Create a new note from the All Notes window, refresh All Notes, and select the new note.
+    pub fn all_notes_new_note(&self) {
+        if let Some(v) = self.all_notes() {
+            v.ui().set_confirming_delete(false);
+        }
+        self.new_note();
+        let new_id = self.note_ids().last().copied();
+        self.refresh_all_notes(new_id);
+    }
+
+    /// Invoke the select-note callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_select_note(&self, id: NoteId) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_select_note(id);
+        }
+    }
+
+    /// Invoke the new-note callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_new_note(&self) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_new_note();
+        }
+    }
+
     /// Dispatch a window event to the active All Notes window (for testing).
     pub fn dispatch_all_notes_event(&self, event: slint::platform::WindowEvent) {
         if let Some(v) = self.all_notes() {
@@ -438,6 +483,7 @@ impl App {
         for n in self.0.notes.borrow().iter() {
             n.flush_text();
         }
+        self.0.save_stacking();
         let mut rows = self.0.db.all_notes().unwrap_or_default();
         for r in &mut rows {
             if let Some(live) = self.with_note(r.id, |n| n.text()) {
@@ -474,6 +520,22 @@ impl App {
 
         match AllNotesView::open(initial_selected_id, &rows, on_close) {
             Ok(view) => {
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_select_note(move |selected_id| {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).select_all_notes_note(selected_id as NoteId);
+                        }
+                    });
+                }
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_new_note(move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_new_note();
+                        }
+                    });
+                }
                 *self.0.all_notes.borrow_mut() = Some(Rc::new(view));
             }
             Err(e) => eprintln!("washi: could not open All Notes window: {e}"),

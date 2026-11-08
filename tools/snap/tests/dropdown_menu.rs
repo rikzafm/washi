@@ -427,3 +427,56 @@ fn dropdown_all_notes_dismisses_dropdown_opens_all_notes_and_closes_on_escape() 
     h.press_all_notes_escape();
     assert!(!h.is_all_notes_open(), "pressing Escape closes AllNotesWindow");
 }
+
+#[test]
+fn all_notes_sidebar_selection_and_new_note_button() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "Endfield Note\nThermite Cutter");
+    h.right_click(0, Some(&["New note"]));
+    h.set_note_text(1, "Grocery run\nMilk");
+    h.right_click(1, Some(&["New note"]));
+    h.set_note_text(2, "Meeting ideas\nRoadmap");
+    let closed_id = h.note_id(2);
+    h.right_click(2, Some(&["Close"]));
+
+    let id0 = h.note_id(0);
+    let id1 = h.note_id(1);
+    h.set_stacking(vec![id1, id0]);
+
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    assert!(h.is_all_notes_open());
+    assert_eq!(h.all_notes_selected_id(), Some(id0));
+
+    let open_items = h.all_notes_open_items();
+    let closed_items = h.all_notes_closed_items();
+    assert_eq!(open_items.len(), 2);
+    assert_eq!(open_items[0].title.as_str(), "Endfield Note");
+    assert_eq!(open_items[1].title.as_str(), "Grocery run");
+    assert_eq!(closed_items.len(), 1);
+    assert_eq!(closed_items[0].title.as_str(), "Meeting ideas");
+
+    // Selecting a closed note updates selection and resets confirming-delete
+    h.set_all_notes_confirming_delete(true);
+    assert_eq!(h.all_notes_confirming_delete(), Some(true));
+    h.invoke_all_notes_select_note(closed_id);
+    assert_eq!(h.all_notes_selected_id(), Some(closed_id));
+    assert_eq!(h.all_notes_confirming_delete(), Some(false));
+
+    // Clicking "+ New note" creates a new note on the desktop and refreshes All Notes
+    h.set_all_notes_confirming_delete(true);
+    h.invoke_all_notes_new_note();
+    assert_eq!(h.open_note_count(), 3);
+    assert_eq!(h.all_notes_open_count(), Some(3));
+    let new_id = h.note_id(2);
+    assert_eq!(h.all_notes_selected_id(), Some(new_id));
+    assert_eq!(h.all_notes_confirming_delete(), Some(false));
+
+    // Verify rendering of All Notes window (603 x 625)
+    let (w, h_px, pixels) = h.render_all_notes().expect("render all notes");
+    assert_eq!((w, h_px), (603, 625));
+    // Desk background at top-left (10, 10) is #D6DBE2 (214, 219, 226)
+    let bg = pixels[(10 * w + 10) as usize];
+    assert_eq!((bg.r, bg.g, bg.b), (214, 219, 226));
+}
