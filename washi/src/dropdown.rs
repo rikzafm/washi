@@ -3,10 +3,59 @@
 //! Manages the frameless secondary `DropdownMenuWindow` anchored relative to
 //! a note's top-right "..." button.
 
+use crate::document::Document;
 use crate::note_window::DropdownMenuWindow;
 use crate::platform::NoteId;
 use slint::ComponentHandle;
 use std::rc::Rc;
+
+/// Format a relative timestamp like `· today`, `· yesterday`, or `· Oct 14`.
+pub fn format_relative_timestamp(updated_at_ms: i64, now_ms: i64) -> String {
+    use chrono::{Local, TimeZone};
+    let updated = match Local.timestamp_millis_opt(updated_at_ms).single() {
+        Some(dt) => dt,
+        None => return String::new(),
+    };
+    let now = match Local.timestamp_millis_opt(now_ms).single() {
+        Some(dt) => dt,
+        None => return String::new(),
+    };
+
+    let updated_date = updated.date_naive();
+    let now_date = now.date_naive();
+
+    if updated_date == now_date {
+        "· today".to_string()
+    } else if now_date > updated_date && (now_date - updated_date).num_days() == 1 {
+        "· yesterday".to_string()
+    } else if updated_date > now_date {
+        "· today".to_string()
+    } else {
+        format!("· {}", updated.format("%b %-d"))
+    }
+}
+
+/// Extract title and preview snippet from raw note content.
+pub fn extract_title_and_preview(content: &str) -> (String, String) {
+    let doc = Document::parse(content);
+    let blocks = doc.blocks();
+    let title = blocks
+        .first()
+        .map(|b| b.text.trim())
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string())
+        .unwrap_or_else(|| "Untitled".to_string());
+
+    let preview = blocks
+        .iter()
+        .skip(1)
+        .map(|b| b.text.trim())
+        .find(|t| !t.is_empty())
+        .unwrap_or("")
+        .to_string();
+
+    (title, preview)
+}
 
 /// A rectangle in logical coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -335,5 +384,83 @@ mod tests {
         assert_eq!(menu.note_id(), 42);
         menu.ui().invoke_dismiss();
         assert!(dismissed.get());
+    }
+
+    #[test]
+    fn relative_timestamp_formatting() {
+        use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+        let date_oct_14 = NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+        let time = NaiveTime::from_hms_opt(12, 0, 0).unwrap();
+        let dt_oct_14 = NaiveDateTime::new(date_oct_14, time);
+        let ms_oct_14 = Local.from_local_datetime(&dt_oct_14).unwrap().timestamp_millis();
+
+        let dt_oct_14_later = NaiveDateTime::new(date_oct_14, NaiveTime::from_hms_opt(15, 30, 0).unwrap());
+        let ms_today = Local.from_local_datetime(&dt_oct_14_later).unwrap().timestamp_millis();
+        assert_eq!(format_relative_timestamp(ms_oct_14, ms_today), "· today");
+
+        let date_oct_15 = NaiveDate::from_ymd_opt(2026, 10, 15).unwrap();
+        let dt_oct_15 = NaiveDateTime::new(date_oct_15, time);
+        let ms_yesterday = Local.from_local_datetime(&dt_oct_15).unwrap().timestamp_millis();
+        assert_eq!(format_relative_timestamp(ms_oct_14, ms_yesterday), "· yesterday");
+
+        let date_oct_17 = NaiveDate::from_ymd_opt(2026, 10, 17).unwrap();
+        let dt_oct_17 = NaiveDateTime::new(date_oct_17, time);
+        let ms_oct_17 = Local.from_local_datetime(&dt_oct_17).unwrap().timestamp_millis();
+        assert_eq!(format_relative_timestamp(ms_oct_14, ms_oct_17), "· Oct 14");
+    }
+
+    #[test]
+    fn note_title_and_preview_extraction() {
+        let content = "Project Ideas\nFirst thought about UI\nSecond idea";
+        let (title, preview) = extract_title_and_preview(content);
+        assert_eq!(title, "Project Ideas");
+        assert_eq!(preview, "First thought about UI");
+
+        let content_md = "# Shopping List\n- Milk\n- Eggs";
+        let (title, preview) = extract_title_and_preview(content_md);
+        assert_eq!(title, "Shopping List");
+        assert_eq!(preview, "Milk");
+
+        let content_no_title = "\nJust a note without title";
+        let (title, preview) = extract_title_and_preview(content_no_title);
+        assert_eq!(title, "Untitled");
+        assert_eq!(preview, "Just a note without title");
+
+        let (title, preview) = extract_title_and_preview("");
+        assert_eq!(title, "Untitled");
+        assert_eq!(preview, "");
+    }
+
+    #[test]
+    fn dropdown_menu_notes_model_and_select_callback() {
+        init_test_platform();
+        let ui = DropdownMenuWindow::new().expect("DropdownMenuWindow::new");
+
+        let selected_id = Rc::new(Cell::new(None));
+        let sel = selected_id.clone();
+        ui.on_select_note(move |id| {
+            sel.set(Some(id));
+        });
+
+        let items = vec![
+            crate::note_window::DropdownNoteItem {
+                id: 10,
+                title: "First Note".into(),
+                preview: "Snippet of note".into(),
+                timestamp: "· today".into(),
+                has_tape: true,
+            },
+            crate::note_window::DropdownNoteItem {
+                id: 20,
+                title: "Second Note".into(),
+                preview: "Another preview".into(),
+                timestamp: "· yesterday".into(),
+                has_tape: false,
+            },
+        ];
+        ui.set_notes(slint::ModelRc::from(Rc::new(slint::VecModel::from(items))));
+
+        ui.invoke_select_note(10);
+        assert_eq!(selected_id.get(), Some(10));
     }
 }

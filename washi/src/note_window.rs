@@ -1883,6 +1883,7 @@ impl Note {
         self.doc.relayout(&self.ui);
         self.ui.set_text(self.doc.text().as_str().into());
         self.ui.set_window_title(window_title(text).into());
+        self.autosave.dirty.set(true);
     }
 
     pub fn text(&self) -> String {
