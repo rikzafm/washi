@@ -218,6 +218,14 @@ export component BlockView inherits Rectangle {
                     return root.key("\u{19}", self.cursor-position-byte-offset) ? accept : reject;
                 }
             }
+            // Shift+arrows may carry the selection over this paragraph's edge: the note decides
+            if (e.modifiers.shift && !e.modifiers.alt && !e.modifiers.meta
+                && (e.modifiers.control ? (e.text == Key.Home || e.text == Key.End)
+                    : (e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.UpArrow || e.text == Key.DownArrow))) {
+                if (root.key((e.modifiers.control ? "ctrl+shift+" : "shift+") + e.text, self.cursor-position-byte-offset)) {
+                    return accept;
+                }
+            }
             if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta
                 || self.cursor-position-byte-offset != self.anchor-position-byte-offset) {
                 return reject;

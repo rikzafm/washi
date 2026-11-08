@@ -81,6 +81,9 @@ export component NoteWindow inherits Window {
     in-out property <length> scroll-y: 0px;
     /// The height of the text area (it ends above the toolbar band).
     out property <length> text-view-height: text-view.height;
+    /// Where the text layer's top is in the text area (minus the scroll): a pointer's place in the
+    /// text area is its place in the layer plus this.
+    out property <length> text-layer-y: text-layer.y;
     /// The caret moved to this byte offset of this block, the selection's other end at the last
     /// (Rust keeps the caret in view and shows the selection's formats).
     callback caret-moved(int, int, int);
