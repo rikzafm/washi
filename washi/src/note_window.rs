@@ -1029,6 +1029,16 @@ impl Note {
         paste_image: Rc<dyn Fn(NoteId) -> bool>,
     ) -> Result<Note, slint::PlatformError> {
         let ui = NoteWindow::new()?;
+        // the popover draws the same table the renderer and the storage read
+        let entries: Vec<PaletteEntry> = PALETTE
+            .iter()
+            .map(|s| PaletteEntry {
+                name: s.name.into(),
+                ink: rgb(s.ink),
+                marker: s.marker.map_or(slint::Color::from_argb_u8(0, 0, 0, 0), rgb),
+            })
+            .collect();
+        ui.global::<PickerPalette>().set_entries(slint::ModelRc::from(Rc::new(VecModel::from(entries))));
         let doc = Doc::new(NoteImages::new(id, db.clone()));
         doc.load(content);
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));

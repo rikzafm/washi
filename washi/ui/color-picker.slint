@@ -16,20 +16,9 @@ export struct PaletteEntry {
 }
 
 /// The ten colors, in the order of the spec's table; index 0 is "Default" (ink) and "none" (marker).
-/// This is the one place to swap when the paint model's own palette lands.
+/// Rust fills it from `document::PALETTE` when a note window is made, so there is one table.
 export global PickerPalette {
-    out property <[PaletteEntry]> entries: [
-        { name: "Default", ink: #2B2F36, marker: transparent },
-        { name: "Gray", ink: #6B6F76, marker: #E9E9E7 },
-        { name: "Brown", ink: #8A5A44, marker: #EEE0DA },
-        { name: "Orange", ink: #B8581A, marker: #FADEC9 },
-        { name: "Yellow", ink: #8F6A00, marker: #FDECC8 },
-        { name: "Green", ink: #3E7353, marker: #DBEDDB },
-        { name: "Blue", ink: #3A6D96, marker: #D3E5EF },
-        { name: "Purple", ink: #7A56A0, marker: #E8DEEE },
-        { name: "Pink", ink: #A8447C, marker: #F5E0E9 },
-        { name: "Red", ink: #B8453D, marker: #FFE2DD },
-    ];
+    in-out property <[PaletteEntry]> entries: [];
     /// Out of range (-1: mixed) shows the default.
     public pure function ink(i: int) -> color {
         return (i >= 0 && i < 10) ? entries[i].ink : entries[0].ink;
@@ -39,6 +28,19 @@ export global PickerPalette {
     }
     public pure function name(i: int) -> string {
         return (i >= 0 && i < 10) ? entries[i].name : entries[0].name;
+    }
+}
+
+/// Keyboard walk over the swatches. A position is row * 10 + column (row 0 ink, row 1 marker);
+/// -1 is "no ring yet" and counts as the first ink dot. The ends stop the walk.
+export global ColorPickerNav {
+    public pure function step(cur: int, key: string) -> int {
+        let row = cur >= 10 ? 1 : 0;
+        let col = cur >= 0 ? cur - row * 10 : 0;
+        if (key == Key.LeftArrow) { return row * 10 + max(0, col - 1); }
+        if (key == Key.RightArrow) { return row * 10 + min(9, col + 1); }
+        if (key == Key.UpArrow) { return col; }
+        return 10 + col;
     }
 }
 
@@ -64,6 +66,7 @@ export global PickerMetrics {
     out property <color> border: #ECECE8;
     out property <color> label: #6B7079;
     out property <color> shadow: #2B2F360A;
+    out property <color> focus-ring: #6FA2F5;
 }
 
 /// A filled triangle through three tilted points.
@@ -127,6 +130,8 @@ export component ColorPicker inherits Rectangle {
     in property <int> marker: 0;
     /// The name of the swatch under the pointer, which the caption shows ("" none). Set by the hover.
     in-out property <string> hover-name: "";
+    /// The swatch the keyboard has reached (-1 none, 0..9 ink, 10..19 marker): it gets the focus ring.
+    in property <int> focus-index: -1;
     callback pick-ink(int);
     callback pick-marker(int);
     callback clear();
@@ -241,6 +246,26 @@ export component ColorPicker inherits Rectangle {
         stroke-width: 1.5px;
     }
 
+    // the keyboard's focus ring: 2px #6FA2F5, 2px clear of the swatch (or of its chosen ring)
+    Dot {
+        visible: root.focus-index >= 0 && root.focus-index < 10;
+        f: root.f; du: root.first-u + (root.focus-index < 10 ? root.focus-index : 0) * root.step; dv: root.ink-v;
+        d: PickerMetrics.dot + (root.ink == root.focus-index ? 11px : 8px);
+        border-width: 2px;
+        border-color: PickerMetrics.focus-ring;
+    }
+    TRect {
+        visible: root.focus-index >= 10;
+        f: root.f;
+        u0: root.first-u + (root.focus-index >= 10 ? root.focus-index - 10 : 0) * root.step - root.d / 2 - (root.marker == root.focus-index - 10 ? 5.5 : 4);
+        v0: root.marker-v - root.d / 2 - (root.marker == root.focus-index - 10 ? 5.5 : 4);
+        w: root.d + (root.marker == root.focus-index - 10 ? 11 : 8);
+        h: root.d + (root.marker == root.focus-index - 10 ? 11 : 8);
+        r: root.marker == root.focus-index - 10 ? 11 : 9;
+        stroke: PickerMetrics.focus-ring;
+        stroke-width: 2px;
+    }
+
     // the caption, in the handwriting and the current ink, and Clear
     TextAt { f: root.f; du: root.pl + 14 + 110; dv: root.caption-v;
         width: 220px; height: 28px; text: root.caption; horizontal-alignment: left;
@@ -253,6 +278,9 @@ export component ColorPicker inherits Rectangle {
     // hit areas: one per swatch, and Clear. TouchAreas never take the keyboard focus.
     for i in 10: HitAt {
         f: root.f; du: root.first-u + i * root.step; dv: root.ink-v; width: 26px; height: 26px;
+        accessible-role: button;
+        accessible-label: "Text color " + PickerPalette.name(i);
+        accessible-action-default => { root.pick-ink(i); }
         clicked => { root.pick-ink(i); }
         changed has-hover => {
             if (self.has-hover) { root.hover-name = PickerPalette.name(i) + " ink"; }
@@ -261,6 +289,9 @@ export component ColorPicker inherits Rectangle {
     }
     for i in 10: HitAt {
         f: root.f; du: root.first-u + i * root.step; dv: root.marker-v; width: 26px; height: 26px;
+        accessible-role: button;
+        accessible-label: i == 0 ? "No highlight" : "Highlight " + PickerPalette.name(i);
+        accessible-action-default => { root.pick-marker(i); }
         clicked => { root.pick-marker(i); }
         changed has-hover => {
             if (self.has-hover) { root.hover-name = i == 0 ? "No marker" : PickerPalette.name(i) + " marker"; }
@@ -269,6 +300,9 @@ export component ColorPicker inherits Rectangle {
     }
     HitAt {
         f: root.f; du: root.pl + root.pw - 14 - 20; dv: root.caption-v; width: 48px; height: 26px;
+        accessible-role: button;
+        accessible-label: "Clear color";
+        accessible-action-default => { root.clear(); root.dismiss(); }
         clicked => { root.clear(); root.dismiss(); }
     }
 }

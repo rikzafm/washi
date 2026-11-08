@@ -410,6 +410,13 @@ impl Harness {
         (w as f32 / 2.0 + du * c - dv * s, h as f32 / 2.0 + du * s + dv * c)
     }
 
+    /// The swatch the keyboard has reached in the open popover as (row, index), `None` before any
+    /// arrow key (row 0 ink, row 1 marker).
+    pub fn picker_focus(&self, note: usize) -> Option<(usize, usize)> {
+        let f = self.app().with_note(self.id(note), |n| n.ui().get_picker_focus()).unwrap();
+        (f >= 0).then(|| ((f / 10) as usize, (f % 10) as usize))
+    }
+
     /// Whether the color popover is open.
     pub fn picker_open(&self, note: usize) -> bool {
         self.app().with_note(self.id(note), |n| n.ui().get_picker_open()).unwrap()

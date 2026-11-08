@@ -6,8 +6,9 @@ import { TextLayer } from "text.slint";
 
 export { BlockData, BlockKind, MarkerData, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
+export { PaletteEntry, PickerPalette } from "color-picker.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
-import { ColorPicker, PickerPalette } from "color-picker.slint";
+import { ColorPicker, ColorPickerNav, PickerPalette } from "color-picker.slint";
 import { WindowHandles } from "resize-zones.slint";
 import { ScrollBar, ScrollMetrics } from "scroll.slint";
 
@@ -56,6 +57,9 @@ export component NoteWindow inherits Window {
     /// The color popover is open. It closes on Escape, a click elsewhere, losing the focus,
     /// minimising, resizing and typing; opening it never moves the focus.
     in-out property <bool> picker-open: false;
+    /// The swatch the keyboard has reached: -1 none (no ring), 0..9 an ink dot, 10..19 a marker chip.
+    in-out property <int> picker-focus: -1;
+    changed picker-open => { if (!root.picker-open) { root.picker-focus = -1; } }
     /// The popover's caption: the summary of the selection's colors, or the hovered swatch's name.
     out property <string> picker-caption: color-picker.caption;
     /// A swatch was picked (0..9), or Clear: Rust applies it to the selection.
@@ -167,6 +171,22 @@ export component NoteWindow inherits Window {
         }
 
         FocusScope {
+            // While the popover is open its keys are taken here, before the focused text field sees
+            // them: the field keeps the focus, the caret and the range, and the popover has no
+            // focus of its own (its hit areas never take it). Space and Enter pick only once an
+            // arrow has put the focus ring on a swatch; before that they stay plain typing.
+            capture-key-pressed(e) => {
+                if (!root.picker-open || e.modifiers.control || e.modifiers.alt || e.modifiers.meta || e.modifiers.shift) { return reject; }
+                if (e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.UpArrow || e.text == Key.DownArrow) {
+                    root.picker-focus = ColorPickerNav.step(root.picker-focus, e.text);
+                    return accept;
+                }
+                if ((e.text == Key.Return || e.text == " ") && root.picker-focus >= 0) {
+                    if (root.picker-focus < 10) { root.pick-ink(root.picker-focus); } else { root.pick-marker(root.picker-focus - 10); }
+                    return accept;
+                }
+                reject
+            }
             key-pressed(e) => {
                 if (e.text == Key.Escape && root.picker-open) { root.picker-open = false; return accept; }
                 if (e.modifiers.control && !e.modifiers.shift && !e.modifiers.alt) {
@@ -322,6 +342,7 @@ export component NoteWindow inherits Window {
         paper-h: root.height - 2 * root.margin;
         tilt: root.tilt;
         open: root.picker-open;
+        focus-index: root.picker-focus;
         ink: root.fmt-ink;
         marker: root.fmt-marker;
         pick-ink(i) => { root.pick-ink(i); }
