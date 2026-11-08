@@ -69,6 +69,8 @@ struct Inner {
     /// Candidates for reopening if the app exits via consecutive closes within 30s.
     exit_candidates: RefCell<Vec<ClosedCandidate>>,
     exit_timer: slint::Timer,
+    /// Stacking order (bottom to top) captured when exit candidate sequence begins.
+    exit_stacking: RefCell<Vec<NoteId>>,
     /// Pictures being prepared on their worker threads, and the timer that collects them (it runs
     /// only while there are any).
     imports: RefCell<Vec<Import>>,
@@ -170,6 +172,7 @@ impl App {
             suspend,
             exit_candidates: RefCell::new(Vec::new()),
             exit_timer: slint::Timer::default(),
+            exit_stacking: RefCell::new(Vec::new()),
             imports: RefCell::new(Vec::new()),
             import_timer: slint::Timer::default(),
             attach_timer: slint::Timer::default(),
@@ -185,6 +188,7 @@ impl App {
         inner.env.signals.set_session_end_handler(Rc::new(move || {
             if let Some(inner) = weak.upgrade() {
                 inner.save_all();
+                inner.restore_exit_candidates();
             }
         }));
         let app = App(inner);
@@ -427,7 +431,11 @@ impl App {
         if let Some(last) = self.0.exit_candidates.borrow().last() {
             if now.saturating_sub(last.closed_at) > EXIT_WINDOW {
                 self.0.exit_candidates.borrow_mut().clear();
+                self.0.exit_stacking.borrow_mut().clear();
             }
+        }
+        if self.0.exit_candidates.borrow().is_empty() {
+            *self.0.exit_stacking.borrow_mut() = self.0.current_stacking();
         }
         self.0.exit_candidates.borrow_mut().push(ClosedCandidate {
             id,
@@ -439,6 +447,7 @@ impl App {
         self.0.exit_timer.start(slint::TimerMode::SingleShot, EXIT_WINDOW, move || {
             if let Some(inner) = weak.upgrade() {
                 inner.exit_candidates.borrow_mut().clear();
+                inner.exit_stacking.borrow_mut().clear();
             }
         });
 
@@ -499,6 +508,7 @@ impl App {
         self.0.exit_candidates.borrow_mut().retain(|c| c.id != id);
         if self.0.exit_candidates.borrow().is_empty() {
             self.0.exit_timer.stop();
+            self.0.exit_stacking.borrow_mut().clear();
         }
         let Ok(Some(row)) = self.0.db.note(id) else { return };
         if self.0.db.set_open(id, true).is_ok() {
@@ -695,6 +705,7 @@ impl App {
             slint::Timer::single_shot(Duration::ZERO, move || drop(note));
             self.0.suspend.evaluate();
             if now_empty {
+                self.0.restore_exit_candidates();
                 self.0.quit.set(true);
                 let _ = slint::quit_event_loop();
             }
@@ -709,15 +720,62 @@ impl App {
 }
 
 impl Inner {
-    /// Remember which note window is above which, for the next start.
-    fn save_stacking(&self) {
-        let Ok(notes) = self.notes.try_borrow() else { return };
+    /// Stacking order (bottom to top) of the currently open notes.
+    fn current_stacking(&self) -> Vec<NoteId> {
+        let Ok(notes) = self.notes.try_borrow() else { return Vec::new() };
         let windows: Vec<(NoteId, Option<isize>)> = notes.iter().map(|n| (n.id(), n.hwnd())).collect();
         drop(notes);
-        let order = self.env.window_control.stacking_order(&windows);
+        self.env.window_control.stacking_order(&windows)
+    }
+
+    /// Remember which note window is above which, for the next start.
+    fn save_stacking(&self) {
+        let order = self.current_stacking();
         if let Err(e) = self.db.save_stacking(&order) {
             eprintln!("washi: could not save the stacking order of the notes: {e}");
         }
+    }
+
+    /// Restore notes closed during the exit sequence (or session end) back to open in the DB.
+    fn restore_exit_candidates(&self) {
+        let non_empty: Vec<NoteId> = self.exit_candidates.borrow().iter().filter(|c| !c.was_empty).map(|c| c.id).collect();
+        if non_empty.is_empty() {
+            self.exit_candidates.borrow_mut().clear();
+            self.exit_stacking.borrow_mut().clear();
+            self.exit_timer.stop();
+            return;
+        }
+
+        for &id in &non_empty {
+            if let Err(e) = self.db.set_open(id, true) {
+                eprintln!("washi: could not mark note {id} open on exit: {e}");
+            }
+        }
+
+        // Stacking order: combine currently open notes (if any) and restored candidates.
+        let open_ids: Vec<NoteId> = self.notes.try_borrow().map(|n| n.iter().map(|n| n.id()).collect()).unwrap_or_default();
+        let mut all_ids: Vec<NoteId> = open_ids;
+        for &id in &non_empty {
+            if !all_ids.contains(&id) {
+                all_ids.push(id);
+            }
+        }
+
+        let stacking: Vec<NoteId> = self.exit_stacking.borrow().clone();
+        let mut ordered: Vec<NoteId> = stacking.into_iter().filter(|id| all_ids.contains(id)).collect();
+        for id in all_ids {
+            if !ordered.contains(&id) {
+                ordered.push(id);
+            }
+        }
+
+        if let Err(e) = self.db.save_stacking(&ordered) {
+            eprintln!("washi: could not save stacking order on exit: {e}");
+        }
+
+        self.exit_candidates.borrow_mut().clear();
+        self.exit_stacking.borrow_mut().clear();
+        self.exit_timer.stop();
     }
 }
 

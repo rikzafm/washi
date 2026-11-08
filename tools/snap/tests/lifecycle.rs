@@ -222,7 +222,7 @@ fn restart_reopens_exactly_the_notes_that_were_open() {
 }
 
 #[test]
-fn start_after_everything_was_closed_gives_one_empty_note() {
+fn closing_single_non_empty_note_quits_and_restarts_with_that_note() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "closed for the night");
@@ -231,9 +231,146 @@ fn start_after_everything_was_closed_gives_one_empty_note() {
 
     h.restart().unwrap();
     assert_eq!(h.open_note_count(), 1);
-    assert_eq!(h.note_text(0), "", "a fresh empty note, not the closed one");
+    assert_eq!(h.note_text(0), "# closed for the night");
+}
+
+#[test]
+fn closing_empty_note_to_exit_restarts_with_one_empty_note() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.press_ctrl(0, 'w');
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.note_text(0), "");
+}
+
+#[test]
+fn closing_multiple_notes_in_rapid_succession_restores_all_on_restart() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "first note");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "second note");
+    assert_eq!(h.open_note_count(), 2);
+
+    let id0 = h.note_id(0);
+    let id1 = h.note_id(1);
+
+    h.close_note(1);
+    h.advance(Duration::from_secs(5));
+    h.close_note(0);
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 2);
+    let ids: Vec<_> = (0..2).map(|i| h.note_id(i)).collect();
+    assert!(ids.contains(&id0));
+    assert!(ids.contains(&id1));
+}
+
+#[test]
+fn closing_note_after_exit_window_restores_only_last_note() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "note A");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "note B");
+    assert_eq!(h.open_note_count(), 2);
+
+    let id_b = h.note_id(1);
+
+    h.close_note(0);
+    h.advance(Duration::from_secs(35));
+    h.close_note(0); // note B is now at index 0
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.note_id(0), id_b);
+    assert_eq!(h.note_text(0), "# note B");
     h.right_click(0, None);
-    assert_eq!(labels(&h.last_menu()[1].children), ["closed for the night"]);
+    assert_eq!(labels(&h.last_menu()[1].children), ["note A"]);
+}
+
+#[test]
+fn deleting_last_note_leaves_it_deleted_and_restores_previous_candidates() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "note A");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "note B");
+    assert_eq!(h.open_note_count(), 2);
+
+    let id_a = h.note_id(0);
+
+    h.close_note(0);
+    h.advance(Duration::from_secs(5));
+    // Note B is now at index 0. Delete it.
+    h.dialogs.confirm_answer.set(true);
+    h.right_click(0, Some(&["Delete"]));
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.note_id(0), id_a);
+    assert_eq!(h.note_text(0), "# note A");
+}
+
+#[test]
+fn exit_sequence_preserves_stacking_order_on_restart() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "bottom note");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "middle note");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(2, "top note");
+    let ids: Vec<_> = (0..3).map(|i| h.note_id(i)).collect();
+    // stacking order bottom to top: ids[1], ids[0], ids[2]
+    h.set_stacking(vec![ids[1], ids[0], ids[2]]);
+
+    // Close in arbitrary order: top first, then middle, then bottom
+    h.close_note(2);
+    h.advance(Duration::from_secs(2));
+    h.close_note(1);
+    h.advance(Duration::from_secs(2));
+    h.close_note(0);
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 3);
+    let after: Vec<_> = (0..3).map(|i| h.note_id(i)).collect();
+    assert_eq!(after, vec![ids[1], ids[0], ids[2]], "stacking order preserved on restart");
+}
+
+#[test]
+fn session_end_with_pending_exit_candidates_restores_them_on_restart() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "note 0");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "note 1");
+    assert_eq!(h.open_note_count(), 2);
+
+    let id0 = h.note_id(0);
+    let id1 = h.note_id(1);
+
+    // Close note 1
+    h.close_note(1);
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.exit_candidates().len(), 1);
+
+    // Windows session ends (e.g. shutdown)
+    h.end_session();
+
+    // Restart app
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 2);
+    let ids: Vec<_> = (0..2).map(|i| h.note_id(i)).collect();
+    assert!(ids.contains(&id0));
+    assert!(ids.contains(&id1));
 }
 
 fn contains(hay: &[u8], needle: &[u8]) -> bool {
