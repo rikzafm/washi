@@ -92,6 +92,10 @@ export component BlockView inherits Rectangle {
     in property <bool> wanted: false;
     in property <int> focus-serial: 0;
     in property <int> focus-offset: 0;
+    /// The selection's other end when the field is focused from code; -1: none (just a caret).
+    in property <int> focus-anchor: -1;
+    /// The field draws its own selection (off while the note draws a selection across blocks).
+    in property <bool> wash: true;
     callback focus-changed(bool);
     /// The caret of this block's field moved, or its selection changed: the caret's byte offset
     /// and the selection's other end (the same offset when nothing is selected).
@@ -126,7 +130,15 @@ export component BlockView inherits Rectangle {
             if (root.reported) { root.caret-moved(input.cursor-position-byte-offset, input.anchor-position-byte-offset); }
         }
     }
-    changed focused => { root.report(); }
+    changed focused => { root.report(); root.drop-selection(); }
+    changed wanted => { root.drop-selection(); }
+    // Slint keeps a field's selection when the focus moves to another field from code; the note's
+    // selection is somewhere else now, so nothing may stay selected here (it would be washed twice).
+    function drop-selection() {
+        if (!input.has-focus && !root.wanted) {
+            input.set-selection-offsets(input.cursor-position-byte-offset, input.cursor-position-byte-offset);
+        }
+    }
 
     property <length> image-height: root.img-w > 0 ? root.width * root.img-h / root.img-w : 0px;
     preferred-height: root.gap-before + (root.kind == BlockKind.image ? root.image-height : input.preferred-height);
@@ -161,7 +173,7 @@ export component BlockView inherits Rectangle {
         line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
         color: Theme.ink;
         // see-through: the words under it stay readable
-        selection-background-color: Theme.selection-over;
+        selection-background-color: root.wash ? Theme.selection-over : transparent;
         selection-foreground-color: Theme.ink;
         // hidden, not removed: a click still lands in the field and starts editing
         opacity: root.show-input ? 1 : 0;
@@ -216,7 +228,7 @@ export component BlockView inherits Rectangle {
 
     function take-focus() {
         input.focus();
-        input.set-selection-offsets(root.focus-offset, root.focus-offset);
+        input.set-selection-offsets(root.focus-anchor >= 0 ? root.focus-anchor : root.focus-offset, root.focus-offset);
     }
     changed focus-serial => { if (root.wanted) { root.take-focus(); } }
 

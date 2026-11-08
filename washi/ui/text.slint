@@ -36,6 +36,18 @@ export component TextLayer inherits Rectangle {
     in property <int> focus-block: -1;
     in property <int> focus-offset: 0;
     in property <int> focus-serial: 0;
+    /// With the request: the selection's other end (-1: none), and whether the fields draw their own
+    /// selection (false while the note draws a selection across blocks).
+    in property <int> focus-anchor: -1;
+    in property <bool> wash: true;
+    /// The note owns the pointer (Rust makes the selection): a left press (in this layer's
+    /// frame, with Shift held or not), a drag with the button down, and the release.
+    callback pointer-down(length, length, bool);
+    callback pointer-drag(length, length);
+    callback pointer-up();
+    /// The overlay takes every pointer event, so what the paper listens to is forwarded.
+    callback right-click(length, length);
+    callback pointer-moved();
     /// Ctrl+V in a field: true when the note took it (a picture on the clipboard).
     callback paste-image() -> bool;
     /// The wash of the note's selection (Rust): one level box per line the selection touches.
@@ -201,6 +213,8 @@ export component TextLayer inherits Rectangle {
             wanted: i == root.focus-block;
             focus-serial: root.focus-serial;
             focus-offset: root.focus-offset;
+            focus-anchor: root.focus-anchor;
+            wash: root.wash;
             edited(t, c) => { root.block-edited(i, t, c); }
             key(k, o) => { return root.block-key(i, k, o); }
             caret-moved(o, a) => { root.caret-moved(i, o, a); }
@@ -210,6 +224,29 @@ export component TextLayer inherits Rectangle {
             focus-changed(f) => {
                 if (f) { root.focused-block = i; root.last-focused = i; root.focus-entered(i); } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
             }
+        }
+    }
+
+    // The note owns the pointer: transparent, over the fields (which no longer see the mouse).
+    TouchArea {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.move) { root.pointer-moved(); }
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.pointer-down(self.mouse-x, self.mouse-y, e.modifiers.shift);
+            }
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                root.pointer-up();
+            }
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+                root.right-click(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+        moved => {
+            if (self.pressed) { root.pointer-drag(self.mouse-x, self.mouse-y); }
         }
     }
 }

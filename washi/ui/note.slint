@@ -72,6 +72,14 @@ export component NoteWindow inherits Window {
     in-out property <int> focus-block: -1;
     in-out property <int> focus-offset: 0;
     in-out property <int> focus-serial: 0;
+    /// With that request: the selection's other end (-1 none), and whether the fields draw their
+    /// own selection (false while a selection across blocks is drawn from `sel-rects`).
+    in-out property <int> focus-anchor: -1;
+    in-out property <bool> wash: true;
+    /// The note owns the pointer (see text.slint): Rust turns these into the selection.
+    callback pointer-down(length, length, bool);
+    callback pointer-drag(length, length);
+    callback pointer-up();
     /// The text's height (Rust lays it out) and how far it is scrolled up; the wheel changes it.
     in property <length> content-height;
     in-out property <length> scroll-y: 0px;
@@ -196,6 +204,13 @@ export component NoteWindow inherits Window {
                     focus-block: root.focus-block;
                     focus-offset: root.focus-offset;
                     focus-serial: root.focus-serial;
+                    focus-anchor: root.focus-anchor;
+                    wash: root.wash;
+                    pointer-down(x, y, shift) => { root.pointer-down(x, y, shift); }
+                    pointer-drag(x, y) => { root.pointer-drag(x, y); }
+                    pointer-up => { root.pointer-up(); }
+                    right-click(x, y) => { root.context-menu(x, y); }
+                    pointer-moved => { root.pointer-moved(); }
                     paste-image => { return root.paste-image(); }
                     all-text => { return root.all-text(); }
                     replace-all(t) => { root.replace-all(t); }
