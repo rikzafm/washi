@@ -200,11 +200,35 @@ pub trait WindowControl {
     fn stacking_order(&self, notes: &[(NoteId, Option<isize>)]) -> Vec<NoteId>;
 }
 
-/// The picture on the clipboard, if any (Ctrl+V pastes it into a note).
+/// What to put on the clipboard when copying rich or visual content.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClipboardPayload {
+    pub plain: Option<String>,
+    pub html: Option<String>,
+    pub image: Option<crate::images::Rgba>,
+}
+
+/// The picture and rich text on the clipboard (Ctrl+C, Ctrl+X, Ctrl+V).
 pub trait ImageClipboard {
     /// A bitmap on the clipboard, only when no text is there too (copying text from a page or
     /// spreadsheet often puts a bitmap beside it; that paste is text).
     fn image(&self) -> Option<crate::images::Rgba>;
+    /// Put a picture on the clipboard (CF_DIB and CF_HTML).
+    fn set_image(&self, img: &crate::images::Rgba) -> Result<(), String>;
+    /// Put rich content on the clipboard (CF_HTML, CF_UNICODETEXT, and optional CF_DIB).
+    fn set_rich(&self, payload: ClipboardPayload) -> Result<(), String>;
+    /// HTML from the clipboard, if any.
+    fn html(&self) -> Option<String>;
+    /// Plain text from the clipboard, if any.
+    fn text(&self) -> Option<String>;
+    /// Whether an image is available on the clipboard.
+    fn has_image(&self) -> bool {
+        self.image().is_some()
+    }
+    /// Whether text (plain or rich HTML) is available on the clipboard.
+    fn has_text(&self) -> bool {
+        self.text().is_some() || self.html().is_some()
+    }
 }
 
 /// Message boxes and file pickers.

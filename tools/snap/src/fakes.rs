@@ -178,15 +178,47 @@ impl Dialogs for FakeDialogs {
     }
 }
 
-/// The clipboard's picture, set by tests.
+/// The clipboard's picture and rich text, set by tests.
 #[derive(Default)]
 pub struct FakeClipboard {
     pub image: RefCell<Option<washi::images::Rgba>>,
+    pub html: RefCell<Option<String>>,
+    pub text: RefCell<Option<String>>,
 }
 
 impl ImageClipboard for FakeClipboard {
     fn image(&self) -> Option<washi::images::Rgba> {
         self.image.borrow().clone()
+    }
+
+    fn set_image(&self, img: &washi::images::Rgba) -> Result<(), String> {
+        *self.image.borrow_mut() = Some(img.clone());
+        *self.text.borrow_mut() = None;
+        *self.html.borrow_mut() = None;
+        Ok(())
+    }
+
+    fn set_rich(&self, payload: ClipboardPayload) -> Result<(), String> {
+        *self.image.borrow_mut() = payload.image;
+        *self.html.borrow_mut() = payload.html;
+        *self.text.borrow_mut() = payload.plain;
+        Ok(())
+    }
+
+    fn html(&self) -> Option<String> {
+        self.html.borrow().clone()
+    }
+
+    fn text(&self) -> Option<String> {
+        self.text.borrow().clone()
+    }
+
+    fn has_image(&self) -> bool {
+        self.image.borrow().is_some()
+    }
+
+    fn has_text(&self) -> bool {
+        self.text.borrow().is_some() || self.html.borrow().is_some()
     }
 }
 

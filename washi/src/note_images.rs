@@ -130,6 +130,13 @@ impl NoteImages {
         self.slots.borrow().get(&block.image_id?).map(|s| s.size)
     }
 
+    /// The decoded original full-resolution picture of a block (read from the database).
+    pub fn rgba(&self, block: &Block) -> Option<Rgba> {
+        let id = block.image_id?;
+        let stored = self.db.image(id).ok()??;
+        crate::images::decode(&stored.data).ok()
+    }
+
     /// The decoded picture of a block (empty while freed).
     pub fn pixels(&self, block: &Block) -> slint::Image {
         block.image_id.and_then(|id| self.slots.borrow().get(&id).and_then(|s| s.pixels.clone())).unwrap_or_default()

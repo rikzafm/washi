@@ -95,8 +95,12 @@ const MENU_DELETE: u32 = 4;
 const MENU_TOP: u32 = 5;
 const MENU_STARTUP: u32 = 6;
 const MENU_EXPORT: u32 = 7;
-/// The menu of a picture: delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
+const MENU_PASTE: u32 = 8;
+const MENU_PASTE_IMAGE: u32 = 9;
+/// The menu of a picture: cut it, copy it, delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
 /// or show it `n` percent wide (`MENU_IMAGE_SIZE + n`).
+const MENU_IMAGE_CUT: u32 = 18;
+const MENU_IMAGE_COPY: u32 = 19;
 const MENU_IMAGE_DELETE: u32 = 20;
 const MENU_IMAGE_ALIGN: u32 = 21;
 const MENU_IMAGE_SIZE: u32 = 200;
@@ -176,8 +180,18 @@ impl App {
         });
         let weak = Rc::downgrade(&self.0);
         let paste_image: Rc<dyn Fn(NoteId) -> bool> = Rc::new(move |id| weak.upgrade().is_some_and(|inner| App(inner).paste_image(id)));
-        let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, row.always_on_top, on_event, paste_image)
-            .map_err(StartError::Ui)?;
+        let note = Note::open(
+            row.id,
+            &row.content,
+            self.0.db.clone(),
+            self.0.env.clock.clone(),
+            row.geometry,
+            row.always_on_top,
+            on_event,
+            paste_image,
+            self.0.env.clipboard.clone(),
+        )
+        .map_err(StartError::Ui)?;
         if row.geometry.is_some() {
             // a note saved on a monitor that is gone comes back on the main screen
             note.keep_on_screen(&self.0.env.window_control.work_areas());
@@ -222,12 +236,19 @@ impl App {
     /// Show the picture of `block` of note `id` in a window of its own.
     fn open_viewer(&self, id: NoteId, block: usize) {
         let Some((picture, size)) = self.with_note(id, |n| n.picture_at(block)).flatten() else { return };
+        let rgba = self.with_note(id, |n| n.image_rgba(block)).flatten();
         let caption = self.saved_text(id).and_then(|t| note_title(&t)).unwrap_or_else(|| "Picture".to_string());
         let number = self.0.next_viewer.get();
         self.0.next_viewer.set(number + 1);
         let weak = Rc::downgrade(&self.0);
         let on_event: Rc<dyn Fn(ViewerEvent)> = Rc::new(move |ev| {
             if let Some(inner) = weak.upgrade() {
+                if ev == ViewerEvent::Copy {
+                    if let Some(ref img) = rgba {
+                        let _ = inner.env.clipboard.set_image(img);
+                    }
+                    return;
+                }
                 App(inner).viewer_event(number, ev);
             }
         });
@@ -245,6 +266,7 @@ impl App {
             ViewerEvent::Close => self.0.viewers.borrow_mut().retain(|(n, _)| *n != number),
             ViewerEvent::StartMove => self.0.env.window_control.begin_move(0, viewer.hwnd()),
             ViewerEvent::StartResize(edge) => self.0.env.window_control.begin_resize(0, viewer.hwnd(), edge),
+            ViewerEvent::Copy => {}
         }
     }
 
@@ -573,17 +595,23 @@ impl App {
             .enumerate()
             .map(|(i, c)| item(MENU_OPEN_BASE + i as u32, &title_of(&c.preview), true, vec![]))
             .collect();
+        let has_image = self.0.env.clipboard.has_image();
+        let has_paste = has_image || self.0.env.clipboard.has_text();
         let mut items = vec![];
         // right click on a picture: its own items come first
         if let Some((pct, align)) = image.and_then(|b| self.with_note(id, |n| n.image_state(b))?) {
             let aligns = [(Align::Left, "Left"), (Align::Center, "Center"), (Align::Right, "Right")];
             let align_items = aligns.iter().enumerate().map(|(i, &(a, label))| toggle(MENU_IMAGE_ALIGN + i as u32, label, a == align)).collect();
             let size_items = IMAGE_SIZES.iter().map(|&s| toggle(MENU_IMAGE_SIZE + s as u32, &format!("{s}%"), s == pct)).collect();
+            items.push(item(MENU_IMAGE_CUT, "Cut image", true, vec![]));
+            items.push(item(MENU_IMAGE_COPY, "Copy image", true, vec![]));
             items.push(item(MENU_IMAGE_DELETE, "Delete image", true, vec![]));
             items.push(item(0, "Align image", true, align_items));
             items.push(item(0, "Resize image", true, size_items));
         }
         items.extend([
+            item(MENU_PASTE, "Paste", has_paste, vec![]),
+            item(MENU_PASTE_IMAGE, "Paste image", has_image, vec![]),
             item(MENU_NEW, "New note", true, vec![]),
             item(MENU_OPEN, "Open note", !open_children.is_empty(), open_children),
             item(MENU_CLOSE, "Close", true, vec![]),
@@ -594,6 +622,12 @@ impl App {
         ]);
         let picture = image;
         match self.0.env.menu.show(&items, at) {
+            Some(MENU_IMAGE_CUT) if picture.is_some() => {
+                self.with_note(id, |n| n.cut_image(picture.unwrap()));
+            }
+            Some(MENU_IMAGE_COPY) if picture.is_some() => {
+                self.with_note(id, |n| n.copy_image(picture.unwrap()));
+            }
             Some(MENU_IMAGE_DELETE) if picture.is_some() => {
                 self.with_note(id, |n| n.delete_image(picture.unwrap()));
             }
@@ -603,6 +637,12 @@ impl App {
             }
             Some(c) if (MENU_IMAGE_SIZE + IMAGE_PCT_MIN as u32..=MENU_IMAGE_SIZE + IMAGE_PCT_MAX as u32).contains(&c) && picture.is_some() => {
                 self.with_note(id, |n| n.set_image_pct(picture.unwrap(), (c - MENU_IMAGE_SIZE) as u8));
+            }
+            Some(MENU_PASTE) => {
+                self.with_note(id, |n| n.paste());
+            }
+            Some(MENU_PASTE_IMAGE) => {
+                self.with_note(id, |n| n.paste_image());
             }
             Some(MENU_NEW) => self.new_note_from(id),
             Some(MENU_CLOSE) => self.close_note(id),

@@ -87,6 +87,7 @@ export component ImageViewerWindow inherits Window {
     /// The user pressed a resize zone (0 north, then clockwise: see resize-zones.slint).
     callback start-resize(int);
     callback close-viewer();
+    callback copy-picture();
 
     // true: the whole picture fits the window (never enlarged past 100%); false: `zoom` rules
     in-out property <bool> fit: true;
@@ -141,6 +142,9 @@ export component ImageViewerWindow inherits Window {
         init => { self.focus(); }
         key-pressed(e) => {
             if (e.text == Key.Escape) { root.close-viewer(); return accept; }
+            if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta && !e.modifiers.shift) {
+                if (e.text == "c" || e.text == "\u{3}") { root.copy-picture(); return accept; }
+            }
             if (e.text == "+" || e.text == "=") { root.zoom-by(1.25); return accept; }
             if (e.text == "-") { root.zoom-by(0.8); return accept; }
             if (e.text == "0") { root.show-fit(); return accept; }

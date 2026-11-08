@@ -192,7 +192,17 @@ impl Harness {
 
     /// The text on the clipboard (what Ctrl+C or Ctrl+X put there).
     pub fn clipboard_text(&self) -> Option<String> {
-        platform::clipboard()
+        self.clipboard.text.borrow().clone().or_else(platform::clipboard)
+    }
+
+    /// The image on the clipboard, if any.
+    pub fn clipboard_image(&self) -> Option<washi::images::Rgba> {
+        self.clipboard.image.borrow().clone()
+    }
+
+    /// The rich HTML on the clipboard, if any.
+    pub fn clipboard_html(&self) -> Option<String> {
+        self.clipboard.html.borrow().clone()
     }
 
     /// The pieces of the empty-note hint currently shown, joined (empty when not shown).
@@ -225,9 +235,14 @@ impl Harness {
 
     /// Right-click on the paper. The menu answers with `choose` (a label path) or is dismissed.
     pub fn right_click(&mut self, note: usize, choose: Option<&[&str]>) {
+        self.right_click_at(note, 5.0, 5.0, choose);
+    }
+
+    /// Right-click at `(x, y)`. The menu answers with `choose` (a label path) or is dismissed.
+    pub fn right_click_at(&mut self, note: usize, x: f32, y: f32, choose: Option<&[&str]>) {
         *self.menu.next_path.borrow_mut() = choose.map(|p| p.iter().map(|s| s.to_string()).collect());
         self.menu.next_choice.set(None);
-        self.click_right(note, 5.0, 5.0);
+        self.click_right(note, x, y);
         self.settle();
     }
 
