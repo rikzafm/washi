@@ -5,7 +5,7 @@ import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PaperTheme } from "paper-theme.slint";
 import { PaperGeometry } from "paper.slint";
-import { Frame, TRect } from "toolbar.slint";
+import { Frame, Tilt, TRect } from "toolbar.slint";
 
 export struct AllNoteItem {
     id: int,
@@ -128,6 +128,14 @@ export component AllNotesWindow inherits Window {
         cy: root.new-button-cy,
         cs: Math.cos(-1.0deg),
         sn: Math.sin(-1.0deg),
+    };
+    property <Frame> paper-frame: {
+        w: 603.0,
+        h: 625.0,
+        cx: 411.4,
+        cy: 311.1,
+        cs: Math.cos(1.5deg),
+        sn: Math.sin(1.5deg),
     };
 
     focus-scope := FocusScope {
@@ -290,6 +298,266 @@ export component AllNotesWindow inherits Window {
         font-weight: r.bold ? 700 : 400;
         font-italic: r.italic;
         color: r.color;
+    }
+
+    // --- Bottom Bar: Normal State (4 tilted icon buttons) ---
+    if !root.confirming-delete && root.selected-note-id >= 0 : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 603px;
+        height: 625px;
+
+        // 1. Open / Focus on desktop (u_center = 39.5, du = -127.5, dv = 181.5)
+        TRect {
+            f: root.paper-frame;
+            u0: -127.5 - 15.5;
+            v0: 181.5 - 15.5;
+            w: 31.0;
+            h: 31.0;
+            r: 8.0;
+            fill: root.selected-note-open ? #F0F0EE : (open-hit.has-hover ? #F0F0EE : transparent);
+        }
+
+        Path {
+            x: Tilt.x(root.paper-frame, -127.5, 181.5) * 1px - 8px;
+            y: Tilt.y(root.paper-frame, -127.5, 181.5) * 1px - 8px;
+            width: 16px;
+            height: 16px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M9 9h10v10H9zM5 15H4V4h11v1";
+            fill: transparent;
+            stroke: root.selected-note-open ? #2B2F36 : #5B616B;
+            stroke-width: 1.5px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+
+        open-hit := TouchArea {
+            x: Tilt.x(root.paper-frame, -127.5, 181.5) * 1px - 15.5px;
+            y: Tilt.y(root.paper-frame, -127.5, 181.5) * 1px - 15.5px;
+            width: 31px;
+            height: 31px;
+            mouse-cursor: pointer;
+            clicked => { root.open-or-focus-note(); }
+        }
+
+        // 2. Close (×) (u_center = 76.5, du = -90.5, dv = 181.5)
+        TRect {
+            f: root.paper-frame;
+            u0: -90.5 - 15.5;
+            v0: 181.5 - 15.5;
+            w: 31.0;
+            h: 31.0;
+            r: 8.0;
+            fill: close-hit.has-hover ? #F0F0EE : transparent;
+        }
+
+        Path {
+            x: Tilt.x(root.paper-frame, -90.5, 181.5) * 1px - 7px;
+            y: Tilt.y(root.paper-frame, -90.5, 181.5) * 1px - 7px;
+            width: 14px;
+            height: 14px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M6 6l12 12M18 6L6 18";
+            fill: transparent;
+            stroke: #5B616B;
+            stroke-width: 1.6px;
+            stroke-line-cap: round;
+        }
+
+        close-hit := TouchArea {
+            x: Tilt.x(root.paper-frame, -90.5, 181.5) * 1px - 15.5px;
+            y: Tilt.y(root.paper-frame, -90.5, 181.5) * 1px - 15.5px;
+            width: 31px;
+            height: 31px;
+            mouse-cursor: pointer;
+            clicked => { root.close-note(); }
+        }
+
+        // 3. Export (↓) (u_center = 112.5, du = -54.5, dv = 181.5)
+        TRect {
+            f: root.paper-frame;
+            u0: -54.5 - 15.5;
+            v0: 181.5 - 15.5;
+            w: 31.0;
+            h: 31.0;
+            r: 8.0;
+            fill: export-hit.has-hover ? #F0F0EE : transparent;
+        }
+
+        Path {
+            x: Tilt.x(root.paper-frame, -54.5, 181.5) * 1px - 7.5px;
+            y: Tilt.y(root.paper-frame, -54.5, 181.5) * 1px - 7.5px;
+            width: 15px;
+            height: 15px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M12 4v11M7.5 11l4.5 4.5 4.5-4.5M5 19.5h14";
+            fill: transparent;
+            stroke: #5B616B;
+            stroke-width: 1.6px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+
+        export-hit := TouchArea {
+            x: Tilt.x(root.paper-frame, -54.5, 181.5) * 1px - 15.5px;
+            y: Tilt.y(root.paper-frame, -54.5, 181.5) * 1px - 15.5px;
+            width: 31px;
+            height: 31px;
+            mouse-cursor: pointer;
+            clicked => { root.export-note(); }
+        }
+
+        // 4. Delete (🗑) (u_center = 149.0, du = -18.0, dv = 181.5)
+        TRect {
+            f: root.paper-frame;
+            u0: -18.0 - 15.5;
+            v0: 181.5 - 15.5;
+            w: 31.0;
+            h: 31.0;
+            r: 8.0;
+            fill: del-hit.has-hover ? #F6E7E9 : transparent;
+        }
+
+        Path {
+            x: Tilt.x(root.paper-frame, -18.0, 181.5) * 1px - 8px;
+            y: Tilt.y(root.paper-frame, -18.0, 181.5) * 1px - 8px;
+            width: 16px;
+            height: 16px;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13";
+            fill: transparent;
+            stroke: #8A1F2B;
+            stroke-width: 1.5px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
+
+        del-hit := TouchArea {
+            x: Tilt.x(root.paper-frame, -18.0, 181.5) * 1px - 15.5px;
+            y: Tilt.y(root.paper-frame, -18.0, 181.5) * 1px - 15.5px;
+            width: 31px;
+            height: 31px;
+            mouse-cursor: pointer;
+            clicked => {
+                root.confirming-delete = true;
+                root.request-delete();
+            }
+        }
+    }
+
+    // --- Bottom Bar: Delete Confirmation State ---
+    if root.confirming-delete && root.selected-note-id >= 0 : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 603px;
+        height: 625px;
+
+        // "Delete for good?" along the 1.5deg paper baseline (u = 25px, v = 378px)
+        Text {
+            x: (Tilt.x(root.paper-frame, -124.0, 180.0) - 18.0) * 1px;
+            y: (Tilt.y(root.paper-frame, -124.0, 180.0) - 11.0) * 1px;
+            text: "Delete";
+            wrap: no-wrap;
+            font-family: "Shadows Into Light";
+            font-size: 15.5px;
+            color: #2B2F36;
+        }
+
+        Text {
+            x: (Tilt.x(root.paper-frame, -94.0, 180.0) - 8.5) * 1px;
+            y: (Tilt.y(root.paper-frame, -94.0, 180.0) - 11.0) * 1px;
+            text: "for";
+            wrap: no-wrap;
+            font-family: "Shadows Into Light";
+            font-size: 15.5px;
+            color: #2B2F36;
+        }
+
+        Text {
+            x: (Tilt.x(root.paper-frame, -66.0, 180.0) - 16.0) * 1px;
+            y: (Tilt.y(root.paper-frame, -66.0, 180.0) - 11.0) * 1px;
+            text: "good?";
+            wrap: no-wrap;
+            font-family: "Shadows Into Light";
+            font-size: 15.5px;
+            color: #2B2F36;
+        }
+
+        // "Keep" button (u0 = 191 - 167 = 24.0, v0 = 376 - 209 = 167.0, w = 53, h = 31, r = 7.5)
+        TRect {
+            f: root.paper-frame;
+            u0: 24.0;
+            v0: 167.0;
+            w: 53.0;
+            h: 31.0;
+            r: 7.5;
+            fill: keep-hit.pressed ? #E4E4E2 : (keep-hit.has-hover ? #EAEAE8 : #F0F0EE);
+        }
+
+        Text {
+            x: Tilt.x(root.paper-frame, 50.5, 182.5) * 1px - 26.5px;
+            y: Tilt.y(root.paper-frame, 50.5, 182.5) * 1px - 15.5px;
+            width: 53px;
+            height: 31px;
+            text: "Keep";
+            font-family: "Shadows Into Light";
+            font-size: 14.5px;
+            color: #2B2F36;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        keep-hit := TouchArea {
+            x: Tilt.x(root.paper-frame, 50.5, 182.5) * 1px - 26.5px;
+            y: Tilt.y(root.paper-frame, 50.5, 182.5) * 1px - 15.5px;
+            width: 53px;
+            height: 31px;
+            mouse-cursor: pointer;
+            clicked => {
+                root.confirming-delete = false;
+                root.cancel-delete();
+            }
+        }
+
+        // "Delete" button (u0 = 251 - 167 = 84.0, v0 = 376 - 209 = 167.0, w = 58, h = 31, r = 7.5)
+        TRect {
+            f: root.paper-frame;
+            u0: 84.0;
+            v0: 167.0;
+            w: 58.0;
+            h: 31.0;
+            r: 7.5;
+            fill: confirm-hit.pressed ? #721923 : (confirm-hit.has-hover ? #9B2331 : #8A1F2B);
+        }
+
+        Text {
+            x: Tilt.x(root.paper-frame, 113.0, 182.5) * 1px - 29px;
+            y: Tilt.y(root.paper-frame, 113.0, 182.5) * 1px - 15.5px;
+            width: 58px;
+            height: 31px;
+            text: "Delete";
+            font-family: "Shadows Into Light";
+            font-size: 14.5px;
+            color: #FFFFFD;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        confirm-hit := TouchArea {
+            x: Tilt.x(root.paper-frame, 113.0, 182.5) * 1px - 29px;
+            y: Tilt.y(root.paper-frame, 113.0, 182.5) * 1px - 15.5px;
+            width: 58px;
+            height: 31px;
+            mouse-cursor: pointer;
+            clicked => {
+                root.confirm-delete();
+            }
+        }
     }
 
     Image {

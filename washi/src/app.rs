@@ -462,6 +462,67 @@ impl App {
         self.refresh_all_notes(new_id);
     }
 
+    /// Open or focus the currently selected note in the All Notes window.
+    pub fn all_notes_open_or_focus(&self) {
+        let Some(selected_id) = self.all_notes_selected_id() else { return };
+        if let Some(v) = self.all_notes() {
+            v.ui().set_confirming_delete(false);
+        }
+        self.activate_note(selected_id);
+        self.refresh_all_notes(Some(selected_id));
+    }
+
+    /// Close the desktop window of the currently selected note in the All Notes window.
+    pub fn all_notes_close_note(&self) {
+        let Some(selected_id) = self.all_notes_selected_id() else { return };
+        if let Some(v) = self.all_notes() {
+            v.ui().set_confirming_delete(false);
+        }
+        if self.with_note(selected_id, |_| ()).is_some() {
+            self.close_note(selected_id);
+        }
+        self.refresh_all_notes(Some(selected_id));
+    }
+
+    /// Export the currently selected note in the All Notes window as Markdown.
+    pub fn all_notes_export_note(&self) {
+        let Some(selected_id) = self.all_notes_selected_id() else { return };
+        self.export_note(selected_id);
+    }
+
+    /// Request inline delete confirmation for the currently selected note in the All Notes window.
+    pub fn all_notes_request_delete(&self) {
+        if self.all_notes_selected_id().is_some() {
+            self.set_all_notes_confirming_delete(true);
+        }
+    }
+
+    /// Cancel inline delete confirmation in the All Notes window.
+    pub fn all_notes_cancel_delete(&self) {
+        self.set_all_notes_confirming_delete(false);
+    }
+
+    /// Permanently delete the currently selected note in the All Notes window and select the next available note.
+    pub fn all_notes_confirm_delete(&self) {
+        let Some(selected_id) = self.all_notes_selected_id() else { return };
+        let old_rows = self.all_notes_rows();
+        let old_idx = old_rows.iter().position(|r| r.id == selected_id).unwrap_or(0);
+
+        self.set_all_notes_confirming_delete(false);
+        self.0.remove_exit_candidate(selected_id);
+        self.confirm_delete_note(selected_id);
+
+        let new_rows = self.all_notes_rows();
+        let next_id = new_rows
+            .get(old_idx)
+            .or_else(|| new_rows.last())
+            .map(|r| r.id);
+        if let Some(v) = self.all_notes() {
+            let now_ms = self.0.env.clock.unix_millis();
+            v.refresh(&new_rows, next_id, now_ms);
+        }
+    }
+
     /// Invoke the select-note callback on the open All Notes window (for testing).
     pub fn invoke_all_notes_select_note(&self, id: NoteId) {
         if let Some(v) = self.all_notes() {
@@ -473,6 +534,48 @@ impl App {
     pub fn invoke_all_notes_new_note(&self) {
         if let Some(v) = self.all_notes() {
             v.invoke_new_note();
+        }
+    }
+
+    /// Invoke the open-or-focus-note callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_open_or_focus(&self) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_open_or_focus_note();
+        }
+    }
+
+    /// Invoke the close-note callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_close_note(&self) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_close_note();
+        }
+    }
+
+    /// Invoke the export-note callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_export_note(&self) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_export_note();
+        }
+    }
+
+    /// Invoke the request-delete callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_request_delete(&self) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_request_delete();
+        }
+    }
+
+    /// Invoke the cancel-delete callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_cancel_delete(&self) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_cancel_delete();
+        }
+    }
+
+    /// Invoke the confirm-delete callback on the open All Notes window (for testing).
+    pub fn invoke_all_notes_confirm_delete(&self) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_confirm_delete();
         }
     }
 
@@ -546,6 +649,54 @@ impl App {
                     view.ui().on_new_note(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_new_note();
+                        }
+                    });
+                }
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_open_or_focus_note(move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_open_or_focus();
+                        }
+                    });
+                }
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_close_note(move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_close_note();
+                        }
+                    });
+                }
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_export_note(move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_export_note();
+                        }
+                    });
+                }
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_request_delete(move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_request_delete();
+                        }
+                    });
+                }
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_cancel_delete(move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_cancel_delete();
+                        }
+                    });
+                }
+                {
+                    let weak = Rc::downgrade(&self.0);
+                    view.ui().on_confirm_delete(move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_confirm_delete();
                         }
                     });
                 }
@@ -1213,10 +1364,17 @@ impl App {
     /// "Export as Markdown...": a save dialog, then the note as a plain .md file with its pictures
     /// as PNG files beside it.
     pub fn export_note(&self, id: NoteId) {
-        let Some((text, title)) = self.with_note(id, |n| {
-            n.flush();
-            (n.text(), n.title())
-        }) else {
+        let Some((text, title)) = self
+            .with_note(id, |n| {
+                n.flush();
+                (n.text(), n.title())
+            })
+            .or_else(|| {
+                let text = self.0.db.content(id).ok().flatten()?;
+                let title = note_title(&text).unwrap_or_else(|| "Washi".to_string());
+                Some((text, title))
+            })
+        else {
             return;
         };
         let Some(path) = self.0.env.dialogs.pick_save_file(&crate::export::suggested_name(&title), "Markdown|*.md") else { return };

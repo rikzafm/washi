@@ -505,3 +505,105 @@ fn all_notes_sidebar_selection_and_new_note_button() {
     let paper = pixels[(311 * w + 411) as usize];
     assert!(paper.r >= 252 && paper.g >= 252 && paper.b >= 250);
 }
+
+#[test]
+fn all_notes_bottom_actions_open_close_export_and_delete_confirmation() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "# Endfield Note\nThermite Cutter");
+    h.right_click(0, Some(&["New note"]));
+    h.set_note_text(1, "# Grocery run\nMilk and eggs");
+    h.right_click(1, Some(&["New note"]));
+    h.set_note_text(2, "# Meeting ideas\nQ4 roadmap");
+    let closed_id = h.note_id(2);
+    h.right_click(2, Some(&["Close"]));
+
+    let id0 = h.note_id(0);
+    let id1 = h.note_id(1);
+    h.set_stacking(vec![id1, id0]);
+
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    assert!(h.is_all_notes_open());
+    assert_eq!(h.all_notes_selected_id(), Some(id0));
+    assert_eq!(h.open_note_count(), 2);
+
+    // 1. Open/Focus on an already-open note brings it to front
+    let log_len_before = h.control.log.borrow().len();
+    h.invoke_all_notes_open_or_focus();
+    let log = h.control.log.borrow();
+    assert!(
+        log[log_len_before..].contains(&snap::WindowCommand::BringToFront(id0)),
+        "Open/Focus on open note should bring it to front"
+    );
+    drop(log);
+
+    // 2. Open/Focus on a closed note reopens it onto the desktop and updates sidebar & status
+    h.invoke_all_notes_select_note(closed_id);
+    assert_eq!(h.all_notes_status_text().as_deref(), Some("Closed · edited today"));
+    h.invoke_all_notes_open_or_focus();
+    assert_eq!(h.open_note_count(), 3);
+    assert_eq!(h.all_notes_open_count(), Some(3));
+    assert_eq!(h.all_notes_closed_count(), Some(0));
+    assert_eq!(h.all_notes_selected_id(), Some(closed_id));
+    assert_eq!(
+        h.all_notes_status_text().as_deref(),
+        Some("Open on your desktop · edited today")
+    );
+
+    // 3. Close (×) closes the selected note's desktop window and moves it to CLOSED
+    h.invoke_all_notes_close_note();
+    assert_eq!(h.open_note_count(), 2);
+    assert_eq!(h.all_notes_open_count(), Some(2));
+    assert_eq!(h.all_notes_closed_count(), Some(1));
+    assert_eq!(h.all_notes_selected_id(), Some(closed_id));
+    assert_eq!(
+        h.all_notes_status_text().as_deref(),
+        Some("Closed · edited today")
+    );
+    assert!(!h.has_quit());
+
+    // 4. Export (↓) exports both closed and open notes as Markdown via save dialog
+    let export_dir = tempfile::tempdir().unwrap();
+    let closed_md = export_dir.path().join("closed.md");
+    *h.dialogs.save_path.borrow_mut() = Some(closed_md.clone());
+    h.invoke_all_notes_export_note();
+    let closed_exported = std::fs::read_to_string(&closed_md).expect("closed note exported");
+    assert!(closed_exported.contains("# Meeting ideas"));
+    assert!(closed_exported.contains("Q4 roadmap"));
+
+    h.invoke_all_notes_select_note(id0);
+    let open_md = export_dir.path().join("open.md");
+    *h.dialogs.save_path.borrow_mut() = Some(open_md.clone());
+    h.invoke_all_notes_export_note();
+    let open_exported = std::fs::read_to_string(&open_md).expect("open note exported");
+    assert!(open_exported.contains("# Endfield Note"));
+    assert!(open_exported.contains("Thermite Cutter"));
+
+    // 5. Delete (🗑) enters confirmation; Keep and Escape cancel without deleting
+    assert_eq!(h.all_notes_confirming_delete(), Some(false));
+    h.invoke_all_notes_request_delete();
+    assert_eq!(h.all_notes_confirming_delete(), Some(true));
+
+    h.invoke_all_notes_cancel_delete();
+    assert_eq!(h.all_notes_confirming_delete(), Some(false));
+    assert!(!h.is_deleted(id0));
+
+    h.invoke_all_notes_request_delete();
+    assert_eq!(h.all_notes_confirming_delete(), Some(true));
+    h.press_all_notes_escape();
+    assert_eq!(h.all_notes_confirming_delete(), Some(false));
+    assert!(h.is_all_notes_open(), "Escape while confirming delete only cancels delete");
+    assert!(!h.is_deleted(id0));
+
+    // 6. Confirm Delete permanently deletes the open note and selects the next available note (id1)
+    h.invoke_all_notes_request_delete();
+    assert_eq!(h.all_notes_confirming_delete(), Some(true));
+    h.invoke_all_notes_confirm_delete();
+    assert_eq!(h.all_notes_confirming_delete(), Some(false));
+    assert!(h.is_deleted(id0), "id0 should be permanently deleted from SQLite");
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.all_notes_open_count(), Some(1));
+    assert_eq!(h.all_notes_closed_count(), Some(1));
+    assert_eq!(h.all_notes_selected_id(), Some(id1), "next available note id1 should be selected");
+}
