@@ -486,7 +486,8 @@ impl App {
             }
         });
 
-        match DropdownMenu::open(id, pos, on_dismiss) {
+        let owner_hwnd = note.hwnd();
+        match DropdownMenu::open(id, pos, owner_hwnd, on_dismiss) {
             Ok(menu) => {
                 let recent = self.0.db.recent_notes(id).unwrap_or_default();
                 let now_ms = self.0.env.clock.unix_millis();
@@ -804,6 +805,15 @@ impl App {
         if let Some(d) = self.dropdown() {
             if d.note_id() == id {
                 d.set_pinned(on);
+                d.ensure_on_top();
+                let d_clone = d.clone();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                    d_clone.ensure_on_top();
+                });
+                let d_clone2 = d.clone();
+                slint::Timer::single_shot(std::time::Duration::from_millis(20), move || {
+                    d_clone2.ensure_on_top();
+                });
             }
         }
         if let Err(e) = self.0.db.set_always_on_top(id, on) {

@@ -165,6 +165,7 @@ impl DropdownMenu {
     pub fn open(
         note_id: NoteId,
         position: (f32, f32),
+        owner_hwnd: Option<isize>,
         on_dismiss: Rc<dyn Fn(NoteId)>,
     ) -> Result<Self, slint::PlatformError> {
         let ui = DropdownMenuWindow::new()?;
@@ -185,7 +186,54 @@ impl DropdownMenu {
         }
 
         ui.show()?;
-        Ok(Self { note_id, ui })
+        let menu = Self { note_id, ui };
+
+        #[cfg(target_os = "windows")]
+        if let Some(owner) = owner_hwnd {
+            menu.set_owner(owner);
+        }
+        menu.ensure_on_top();
+
+        Ok(menu)
+    }
+
+    pub fn set_owner(&self, owner_hwnd: isize) {
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = self.hwnd() {
+            use windows_sys::Win32::Foundation::HWND;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_HWNDPARENT};
+            unsafe {
+                SetWindowLongPtrW(
+                    hwnd as HWND,
+                    GWLP_HWNDPARENT,
+                    owner_hwnd as isize,
+                );
+            }
+        }
+    }
+
+    pub fn ensure_on_top(&self) {
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = self.hwnd() {
+            use windows_sys::Win32::Foundation::HWND;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                IsWindowVisible, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            };
+            unsafe {
+                let hwnd = hwnd as HWND;
+                if IsWindowVisible(hwnd) != 0 {
+                    SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                }
+            }
+        }
     }
 
     pub fn note_id(&self) -> NoteId {
@@ -417,6 +465,7 @@ mod tests {
         let menu = DropdownMenu::open(
             99,
             (100.0, 200.0),
+            None,
             Rc::new(|_| ()),
         )
         .expect("DropdownMenu::open");
@@ -426,6 +475,8 @@ mod tests {
         assert!(menu.pinned());
         menu.set_pinned(false);
         assert!(!menu.pinned());
+        menu.set_owner(0);
+        menu.ensure_on_top();
     }
 
     #[test]
@@ -436,6 +487,7 @@ mod tests {
         let menu = DropdownMenu::open(
             42,
             (100.0, 200.0),
+            None,
             Rc::new(move |id| {
                 if id == 42 {
                     dismissed_clone.set(true);
