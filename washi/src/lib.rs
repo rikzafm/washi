@@ -19,4 +19,4 @@ pub mod suspend;
 pub mod trace;
 pub mod win;
 
-pub use app::{App, Env, StartError};
+pub use app::{App, ClosedCandidate, Env, StartError, EXIT_WINDOW};

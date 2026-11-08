@@ -51,12 +51,24 @@ impl std::fmt::Display for StartError {
 }
 impl std::error::Error for StartError {}
 
+/// A note closed within the exit window (30s) as a candidate for reopening if the app exits.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClosedCandidate {
+    pub id: NoteId,
+    pub closed_at: Duration,
+    pub was_empty: bool,
+    pub geometry: Option<Geometry>,
+}
+
 struct Inner {
     env: Env,
     db: Rc<Db>,
     notes: RefCell<Vec<Rc<Note>>>,
     quit: Cell<bool>,
     suspend: Rc<SuspendController>,
+    /// Candidates for reopening if the app exits via consecutive closes within 30s.
+    exit_candidates: RefCell<Vec<ClosedCandidate>>,
+    exit_timer: slint::Timer,
     /// Pictures being prepared on their worker threads, and the timer that collects them (it runs
     /// only while there are any).
     imports: RefCell<Vec<Import>>,
@@ -84,6 +96,8 @@ struct Import {
 const IMPORT_POLL: Duration = Duration::from_millis(20);
 /// Quiet time after the last window opened before the working set is trimmed once.
 const TRIM_DELAY: Duration = Duration::from_millis(1500);
+/// If notes are closed within this window, they are grouped as candidates for app exit.
+pub const EXIT_WINDOW: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct App(Rc<Inner>);
@@ -148,7 +162,22 @@ impl App {
             rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
-        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, imports: RefCell::new(Vec::new()), import_timer: slint::Timer::default(), attach_timer: slint::Timer::default(), trim_timer: slint::Timer::default(), trim_enabled: Cell::new(false), viewers: RefCell::new(Vec::new()), next_viewer: Cell::new(0) });
+        let inner = Rc::new(Inner {
+            env,
+            db,
+            notes: RefCell::new(Vec::new()),
+            quit: Cell::new(false),
+            suspend,
+            exit_candidates: RefCell::new(Vec::new()),
+            exit_timer: slint::Timer::default(),
+            imports: RefCell::new(Vec::new()),
+            import_timer: slint::Timer::default(),
+            attach_timer: slint::Timer::default(),
+            trim_timer: slint::Timer::default(),
+            trim_enabled: Cell::new(false),
+            viewers: RefCell::new(Vec::new()),
+            next_viewer: Cell::new(0),
+        });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
         // Windows ending the session (shutdown, restart, sign-out): save everything before returning
@@ -383,11 +412,38 @@ impl App {
         self.0.quit.get()
     }
 
+    /// Notes closed within the exit window (30s) that would reopen if the app exits.
+    pub fn exit_candidates(&self) -> Vec<ClosedCandidate> {
+        self.0.exit_candidates.borrow().clone()
+    }
+
     /// Close a note: save it, remember where it was, mark it closed and release its window.
     /// Closing the last open note quits Washi.
     pub fn close_note(&self, id: NoteId) {
+        let Some((was_empty, geometry)) = self.with_note(id, |n| (n.text().trim().is_empty(), n.geometry())) else {
+            return;
+        };
+        let now = self.0.env.clock.monotonic();
+        if let Some(last) = self.0.exit_candidates.borrow().last() {
+            if now.saturating_sub(last.closed_at) > EXIT_WINDOW {
+                self.0.exit_candidates.borrow_mut().clear();
+            }
+        }
+        self.0.exit_candidates.borrow_mut().push(ClosedCandidate {
+            id,
+            closed_at: now,
+            was_empty,
+            geometry: Some(geometry),
+        });
+        let weak = Rc::downgrade(&self.0);
+        self.0.exit_timer.start(slint::TimerMode::SingleShot, EXIT_WINDOW, move || {
+            if let Some(inner) = weak.upgrade() {
+                inner.exit_candidates.borrow_mut().clear();
+            }
+        });
+
         // an empty note is not worth keeping: closing it discards it instead of saving it
-        if self.with_note(id, |n| n.text().trim().is_empty()) == Some(true) && self.0.db.delete_note(id).is_ok() {
+        if was_empty && self.0.db.delete_note(id).is_ok() {
             self.0.save_stacking();
             self.remove_note(id);
             return;
@@ -439,6 +495,10 @@ impl App {
     pub fn reopen_note(&self, id: NoteId) {
         if self.with_note(id, |_| ()).is_some() {
             return;
+        }
+        self.0.exit_candidates.borrow_mut().retain(|c| c.id != id);
+        if self.0.exit_candidates.borrow().is_empty() {
+            self.0.exit_timer.stop();
         }
         let Ok(Some(row)) = self.0.db.note(id) else { return };
         if self.0.db.set_open(id, true).is_ok() {
