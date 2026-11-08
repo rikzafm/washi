@@ -36,24 +36,40 @@ pub fn format_relative_timestamp(updated_at_ms: i64, now_ms: i64) -> String {
     }
 }
 
+/// Longest preview snippet shown in a menu row, in characters (the design cuts at 22).
+pub const PREVIEW_CHARS: usize = 22;
+
+/// Collapse every run of whitespace (spaces, tabs, line breaks) to one space.
+fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Cut a snippet to [`PREVIEW_CHARS`] characters and mark the cut with an ellipsis.
+pub fn shorten_preview(preview: &str) -> String {
+    let flat = collapse_whitespace(preview);
+    if flat.chars().count() <= PREVIEW_CHARS {
+        return flat;
+    }
+    let cut: String = flat.chars().take(PREVIEW_CHARS).collect();
+    format!("{}…", cut.trim_end())
+}
+
 /// Extract title and preview snippet from raw note content.
 pub fn extract_title_and_preview(content: &str) -> (String, String) {
     let doc = Document::parse(content);
     let blocks = doc.blocks();
     let title = blocks
         .first()
-        .map(|b| b.text.trim())
+        .map(|b| collapse_whitespace(&b.text))
         .filter(|t| !t.is_empty())
-        .map(|t| t.to_string())
         .unwrap_or_else(|| "Untitled".to_string());
 
     let preview = blocks
         .iter()
         .skip(1)
-        .map(|b| b.text.trim())
+        .map(|b| collapse_whitespace(&b.text))
         .find(|t| !t.is_empty())
-        .unwrap_or("")
-        .to_string();
+        .unwrap_or_default();
 
     (title, preview)
 }
@@ -476,6 +492,27 @@ mod tests {
         let (title, preview) = extract_title_and_preview("");
         assert_eq!(title, "Untitled");
         assert_eq!(preview, "");
+    }
+
+    #[test]
+    fn preview_is_flattened_and_cut_with_an_ellipsis() {
+        assert_eq!(shorten_preview("short snippet"), "short snippet");
+        // Exactly 22 characters stay whole.
+        assert_eq!(shorten_preview("First thought about UI"), "First thought about UI");
+        assert_eq!(shorten_preview("Ask who owns the launch checklist"), "Ask who owns the launc…");
+        // Runs of spaces, tabs and line breaks collapse to a single space.
+        assert_eq!(shorten_preview("a   b\t\tc\n d"), "a b c d");
+        assert_eq!(
+            shorten_preview("sdfsdf sdf v        libopenssl_sys-bfe51"),
+            "sdfsdf sdf v libopenss…"
+        );
+    }
+
+    #[test]
+    fn title_and_preview_collapse_whitespace() {
+        let (title, preview) = extract_title_and_preview("a  \t b\nx    y");
+        assert_eq!(title, "a b");
+        assert_eq!(preview, "x y");
     }
 
     #[test]

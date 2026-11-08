@@ -1,7 +1,7 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
-use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
+use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
 use crate::images::{self, ImageError, Source, Stored};
 use crate::image_viewer::{ImageViewer, ViewerEvent};
 use crate::note_window::{app_icon, note_title, Note, NoteEvent};
@@ -499,9 +499,9 @@ impl App {
                         crate::note_window::DropdownNoteItem {
                             id: r.id as i32,
                             title: title.into(),
-                            preview: preview.into(),
+                            preview: shorten_preview(&preview).into(),
                             timestamp: timestamp.into(),
-                            has_tape: r.tape_style > 0,
+                            has_tape: r.is_open,
                         }
                     })
                     .collect();

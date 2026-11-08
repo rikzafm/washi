@@ -266,7 +266,7 @@ impl Db {
     /// Other notes ordered by most recently updated first, excluding `exclude_id`.
     pub fn recent_notes(&self, exclude_id: NoteId) -> Result<Vec<RecentNote>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content, tape_style, updated_at FROM notes WHERE id != ?1 ORDER BY updated_at DESC, id DESC",
+            "SELECT id, content, tape_style, updated_at, is_open FROM notes WHERE id != ?1 ORDER BY updated_at DESC, id DESC",
         )?;
         let rows = stmt
             .query_map([exclude_id], |r| {
@@ -275,6 +275,7 @@ impl Db {
                     content: r.get(1)?,
                     tape_style: r.get(2)?,
                     updated_at: r.get(3)?,
+                    is_open: r.get::<_, i64>(4)? != 0,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -288,6 +289,8 @@ pub struct RecentNote {
     pub content: String,
     pub tape_style: i64,
     pub updated_at: i64,
+    /// The note has a window on the desktop right now (the menu marks these with a tape).
+    pub is_open: bool,
 }
 
 #[cfg(test)]

@@ -97,8 +97,11 @@ fn dropdown_populates_notes_list_excluding_active_note() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].id, id1 as i32);
     assert_eq!(items[0].title.as_str(), "Second Note Title");
-    assert_eq!(items[0].preview.as_str(), "Preview line for note 1");
+    // Long snippets are cut at 22 characters, like the design.
+    assert_eq!(items[0].preview.as_str(), "Preview line for note…");
     assert_eq!(items[0].timestamp.as_str(), "· today");
+    // Note 1 has a window on the desktop, so its row carries the tape marker.
+    assert!(items[0].has_tape);
 }
 
 #[test]
