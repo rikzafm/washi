@@ -263,6 +263,9 @@ impl App {
                 let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
                 self.0.env.window_control.begin_resize(id, hwnd, edge);
             }
+            NoteEvent::OpenDropdown => {
+                // Dropdown window lifecycle controller will handle this in Ticket 02.
+            }
         }
     }
 
