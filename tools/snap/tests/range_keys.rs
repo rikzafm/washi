@@ -181,15 +181,44 @@ fn a_click_on_an_image_selects_the_image_block_and_backspace_removes_it() {
     h.wait_for_images();
     h.advance(ms(600));
     assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
-    // the upper part of the picture, found by its colour in the rendering
+    // both halves of the picture, found by its colour in the rendering
     let (w, _, px) = h.render(0);
     let red: Vec<usize> = px.iter().enumerate().filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12).map(|(i, _)| i).collect();
     let (top, bottom) = (red.first().unwrap() / w as usize, red.last().unwrap() / w as usize);
-    let (x, y) = ((red[0] % w as usize) as f32 + 40.0, (top + (bottom - top) / 4) as f32);
-    h.click(0, x, y);
-    h.advance(ms(400));
-    assert_eq!(h.selection(0), ((1, 0), (1, 0)), "the image block holds the selection");
-    assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+    let x = (red[0] % w as usize) as f32 + 40.0;
+    for y in [top + (bottom - top) / 4, top + (bottom - top) * 3 / 4] {
+        h.click(0, 5.0, 5.0);
+        h.advance(ms(400));
+        h.click(0, x, y as f32);
+        h.advance(ms(400));
+        assert_eq!(h.selection(0), ((1, 0), (1, 0)), "the image block holds the selection (click at y {y})");
+        assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+    }
     h.press(0, Key::Backspace);
     assert_eq!(h.block_kinds(0), ["title", "body"]);
+}
+
+#[test]
+fn a_range_edit_right_after_unsnapshotted_typing_undoes_alone_then_the_typing() {
+    let mut h = note(TEXT);
+    h.place_caret(0, 1);
+    h.advance(ms(5));
+    h.type_text(0, "ZZ");
+    let typed = h.note_text(0);
+    assert_eq!(typed, "# Title\nZZfirst paragraph here\nsecond one\nthird paragraph words");
+    // select across paragraphs before the typing pauses long enough to be snapshotted
+    let (from, to) = (word(&h, "paragraph", 0, false), word(&h, "paragraph", 1, false));
+    h.pointer_move(0, from.0, from.1);
+    h.press_button(0, from.0, from.1, false);
+    h.pointer_move(0, to.0, to.1);
+    h.release_button(0, to.0, to.1, false);
+    h.advance(ms(100));
+    assert_eq!(h.selection(0).0.0, 1);
+    assert_eq!(h.selection(0).1.0, 3);
+    h.type_text(0, "x");
+    assert_ne!(h.note_text(0), typed);
+    h.press_ctrl(0, 'z');
+    assert_eq!(h.note_text(0), typed, "the range edit alone is undone");
+    h.press_ctrl(0, 'z');
+    assert_eq!(h.note_text(0), TEXT, "then the typing");
 }
