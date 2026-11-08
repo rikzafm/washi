@@ -92,7 +92,7 @@ pub struct DropdownMetrics {
 impl Default for DropdownMetrics {
     fn default() -> Self {
         Self {
-            card_width: 260.0,
+            card_width: 268.0,
             card_height: 320.0,
             shadow_margin: 16.0,
             gap: 4.0,
@@ -196,8 +196,49 @@ impl DropdownMenu {
         }
     }
 
-    pub fn close(&mut self) {
+    pub fn close(&self) {
         let _ = self.ui.hide();
+    }
+
+    pub fn invoke_toggle_pin(&self) {
+        self.ui.invoke_toggle_pin();
+    }
+
+    pub fn invoke_delete_note(&self) {
+        self.ui.invoke_delete_note();
+    }
+
+    pub fn invoke_new_note(&self) {
+        self.ui.invoke_new_note();
+    }
+
+    pub fn invoke_select_note(&self, id: NoteId) {
+        self.ui.invoke_select_note(id as i32);
+    }
+
+    pub fn invoke_dismiss(&self) {
+        self.ui.invoke_dismiss();
+    }
+
+    pub fn notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
+        use slint::Model;
+        self.ui.get_notes().iter().collect()
+    }
+
+    pub fn position(&self) -> (f32, f32) {
+        let pos = self.ui.window().position();
+        let scale = self.ui.window().scale_factor();
+        (pos.x as f32 / scale, pos.y as f32 / scale)
+    }
+
+    pub fn size(&self) -> (f32, f32) {
+        let size = self.ui.window().size();
+        let scale = self.ui.window().scale_factor();
+        (size.width as f32 / scale, size.height as f32 / scale)
+    }
+
+    pub fn dispatch_event(&self, event: slint::platform::WindowEvent) {
+        self.ui.window().dispatch_event(event);
     }
 }
 
@@ -233,11 +274,11 @@ mod tests {
 
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
         // button.right() = 528.0
-        // card_x = 528.0 - 260.0 = 268.0
+        // card_x = 528.0 - 268.0 = 260.0
         // card_y = 100.0 + 24.0 + 4.0 = 128.0
-        // win_x = card_x - 16.0 = 252.0
+        // win_x = card_x - 16.0 = 244.0
         // win_y = card_y - 16.0 = 112.0
-        assert_eq!((win_x, win_y), (252.0, 112.0));
+        assert_eq!((win_x, win_y), (244.0, 112.0));
     }
 
     #[test]
@@ -249,9 +290,9 @@ mod tests {
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
         // Candidate below: 900 + 24 + 4 + 320 = 1248 > 1080.
         // Candidate above: 900 - 320 - 4 = 576.0 (>= 0).
-        // win_x = 252.0
+        // win_x = 244.0
         // win_y = 576.0 - 16.0 = 560.0
-        assert_eq!((win_x, win_y), (252.0, 560.0));
+        assert_eq!((win_x, win_y), (244.0, 560.0));
     }
 
     #[test]
@@ -261,7 +302,7 @@ mod tests {
         let work_area = Some(Rect::new(0.0, 0.0, 1920.0, 1080.0));
 
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
-        // card_right = 128.0 -> card_x = 128 - 260 = -132 < 0. Clamped to 0.
+        // card_right = 128.0 -> card_x = 128 - 268 = -140 < 0. Clamped to 0.
         // win_x = 0 - 16.0 = -16.0
         // win_y = 112.0
         assert_eq!((win_x, win_y), (-16.0, 112.0));
@@ -274,9 +315,9 @@ mod tests {
         let work_area = Some(Rect::new(0.0, 0.0, 800.0, 600.0));
 
         let (win_x, _win_y) = calculate_dropdown_position(button, &metrics, work_area);
-        // card_x clamped to 800 - 260 = 540.
-        // win_x = 540 - 16 = 524.0
-        assert_eq!(win_x, 524.0);
+        // card_x clamped to 800 - 268 = 532.
+        // win_x = 532 - 16 = 516.0
+        assert_eq!(win_x, 516.0);
     }
 
     #[test]
@@ -285,7 +326,9 @@ mod tests {
         let button = Rect::new(100.0, 900.0, 28.0, 24.0);
 
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, None);
-        assert_eq!((win_x, win_y), (-148.0, 912.0));
+        // card_x = 128 - 268 = -140
+        // win_x = -140 - 16 = -156.0
+        assert_eq!((win_x, win_y), (-156.0, 912.0));
     }
 
     #[test]

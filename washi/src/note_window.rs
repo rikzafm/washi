@@ -125,6 +125,8 @@ pub enum NoteEvent {
     ContextMenu { at: (i32, i32), image: Option<usize> },
     /// The mouse moved over the note (wakes a suspended app).
     PointerMoved,
+    /// The note's canvas was pressed with the pointer.
+    PointerDown,
     /// The pink tape or top margin was pressed: drag the window.
     StartMove,
     /// A resize zone was pressed.
@@ -1428,6 +1430,7 @@ impl Note {
             let (doc, weak, clock, on_event) = (doc.clone(), ui.as_weak(), autosave.clock.clone(), on_event.clone());
             ui.on_pointer_down(move |x, y, shift| {
                 if let Some(ui) = weak.upgrade() {
+                    on_event(id, NoteEvent::PointerDown);
                     if doc.grab_grip(&ui, (x, y)) {
                         return;
                     }

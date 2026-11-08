@@ -21,4 +21,4 @@ pub mod suspend;
 pub mod trace;
 pub mod win;
 
-pub use app::{App, ClosedCandidate, Env, StartError, EXIT_WINDOW};
+pub use app::{App, ClosedCandidate, Env, StartError, EXIT_WINDOW, NEW_NOTE_OFFSET};
