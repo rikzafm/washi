@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{Block, Caret, Document, Kind, Range, Style as Flags};
+use crate::document::{floor_boundary, Block, Caret, Document, Kind, Range, Style as Flags};
 use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
@@ -394,11 +394,7 @@ impl Doc {
         let fix = |c: Caret| {
             let block = c.block.min(doc.len().saturating_sub(1));
             let text = doc.blocks().get(block).map_or("", |b| b.text.as_str());
-            let mut offset = c.offset.min(text.len());
-            while !text.is_char_boundary(offset) {
-                offset -= 1;
-            }
-            Caret { block, offset }
+            Caret { block, offset: floor_boundary(text, c.offset) }
         };
         Range { anchor: fix(range.anchor), focus: fix(range.focus) }
     }
@@ -437,10 +433,10 @@ impl Doc {
             // by whole words or paragraphs: the unit under the pointer joins the one pressed first
             let (first_start, first_end) = p.origin.ordered();
             let (start, end) = self.unit_at(hit, p.clicks).ordered();
-            if (hit.block, hit.offset) < (first_start.block, first_start.offset) {
+            if hit < first_start {
                 Range { anchor: first_end, focus: start }
             } else {
-                Range { anchor: first_start, focus: if (end.block, end.offset) >= (first_end.block, first_end.offset) { end } else { first_end } }
+                Range { anchor: first_start, focus: if end >= first_end { end } else { first_end } }
             }
         };
         if range != self.selection.get() {
@@ -482,9 +478,9 @@ impl Doc {
         true
     }
 
-    /// Shift+`key` (`shift+<arrow>` or `ctrl+shift+<Home or End>`) with the caret at `offset` of
-    /// block `i`: the focus end of the selection moves, over a paragraph's edge if need be. False
-    /// when the field keeps the key (inside one paragraph, with nothing across paragraphs).
+    /// Shift+`key` (`shift+<arrow>` or `ctrl+shift+<Home or End>`) from the focus end of the
+    /// selection: that end moves, over a paragraph's edge if need be. False when the field keeps
+    /// the key (inside one paragraph, with nothing across paragraphs).
     fn extend(&self, ui: &NoteWindow, key: &str) -> bool {
         use slint::platform::Key;
         let sel = self.selection.get();
@@ -506,11 +502,7 @@ impl Doc {
                 if !across {
                     return false;
                 }
-                let mut o = offset - 1;
-                while !block.text.is_char_boundary(o) {
-                    o -= 1;
-                }
-                Caret { block: focus.block, offset: o }
+                Caret { block: focus.block, offset: floor_boundary(&block.text, offset - 1) }
             } else if focus.block > 0 {
                 let prev = focus.block - 1;
                 Caret { block: prev, offset: doc.blocks()[prev].text.len() }
@@ -582,7 +574,7 @@ impl Doc {
     /// What a key does over a selection across blocks (its text): 1 taken without a change (a
     /// modifier key alone, or an arrow without Shift, which collapses the selection to its start or
     /// end); 2 Backspace, Delete, Enter or a character replaced the selection (the caret to place is
-    /// returned too); 0 any other key (Shift+arrows are ticket 06's).
+    /// returned too); 0 any other key (Shift+arrows are `extend`'s).
     fn range_key(&self, ui: &NoteWindow, key: &str, shift: bool) -> (i32, Option<Caret>) {
         use slint::platform::Key;
         let mut chars = key.chars();

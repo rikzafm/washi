@@ -148,7 +148,7 @@ impl Block {
 }
 
 /// A caret position: block index and byte offset into its text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Caret {
     pub block: usize,
     pub offset: usize,
@@ -166,8 +166,7 @@ pub struct Range {
 impl Range {
     /// `(start, end)`: the earlier caret first.
     pub fn ordered(self) -> (Caret, Caret) {
-        let key = |c: Caret| (c.block, c.offset);
-        if key(self.anchor) <= key(self.focus) { (self.anchor, self.focus) } else { (self.focus, self.anchor) }
+        if self.anchor <= self.focus { (self.anchor, self.focus) } else { (self.focus, self.anchor) }
     }
 }
 
@@ -564,6 +563,13 @@ impl Document {
         self.common_style_range(self.all())
     }
 
+    /// The range's carets, earlier first, with their blocks kept inside the document.
+    fn ordered_in(&self, range: Range) -> (Caret, Caret) {
+        let (s, e) = range.ordered();
+        let last = self.blocks.len() - 1;
+        (Caret { block: s.block.min(last), ..s }, Caret { block: e.block.min(last), ..e })
+    }
+
     /// The range from the start of the note to its end (a select-all).
     pub fn all(&self) -> Range {
         let last = self.blocks.len() - 1;
@@ -572,9 +578,7 @@ impl Document {
 
     /// The non-empty text stretches `(block, start, end)` of a range, one per text block in it.
     fn range_spans(&self, range: Range) -> Vec<(usize, usize, usize)> {
-        let (s, e) = range.ordered();
-        let last = self.blocks.len() - 1;
-        let (s, e) = (Caret { block: s.block.min(last), ..s }, Caret { block: e.block.min(last), ..e });
+        let (s, e) = self.ordered_in(range);
         (s.block..=e.block)
             .filter_map(|i| {
                 let b = &self.blocks[i];
@@ -645,10 +649,9 @@ impl Document {
     /// The list button over a range: if every body or list paragraph in it is a list item they
     /// all become body, else they all become list items. False when it holds neither.
     pub fn toggle_list_range(&mut self, range: Range) -> bool {
-        let (s, e) = range.ordered();
-        let last = self.blocks.len() - 1;
+        let (s, e) = self.ordered_in(range);
         let eligible: Vec<usize> =
-            (s.block.min(last)..=e.block.min(last)).filter(|&i| matches!(self.blocks[i].kind, Kind::Body | Kind::ListItem)).collect();
+            (s.block..=e.block).filter(|&i| matches!(self.blocks[i].kind, Kind::Body | Kind::ListItem)).collect();
         if eligible.is_empty() {
             return false;
         }
@@ -706,9 +709,8 @@ impl Document {
 
     /// The words of a range as plain lines (what copy takes); pictures are left out.
     pub fn plain_range(&self, range: Range) -> String {
-        let (s, e) = range.ordered();
-        let last = self.blocks.len() - 1;
-        (s.block.min(last)..=e.block.min(last))
+        let (s, e) = self.ordered_in(range);
+        (s.block..=e.block)
             .filter(|&i| self.blocks[i].is_text())
             .map(|i| {
                 let t = &self.blocks[i].text;
@@ -736,9 +738,7 @@ impl Document {
     /// end goes too). Inside one block this is [`Document::insert_text`]. Returns the caret after
     /// the inserted text.
     pub fn replace_range(&mut self, range: Range, text: &str) -> Caret {
-        let (s, e) = range.ordered();
-        let last = self.blocks.len() - 1;
-        let (s, e) = (Caret { block: s.block.min(last), ..s }, Caret { block: e.block.min(last), ..e });
+        let (s, e) = self.ordered_in(range);
         if s.block == e.block {
             return self.insert_text(s.block, s.offset, e.offset, text);
         }
@@ -782,7 +782,7 @@ fn following(prev: &Block, text: String, marks: Vec<Style>) -> Block {
     Block { kind, text, marks, image_id: None }
 }
 
-fn floor_boundary(s: &str, mut i: usize) -> usize {
+pub(crate) fn floor_boundary(s: &str, mut i: usize) -> usize {
     i = i.min(s.len());
     while !s.is_char_boundary(i) {
         i -= 1;

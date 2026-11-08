@@ -439,9 +439,8 @@ pub fn caret_span_with_images(blocks: &[Block], block: usize, offset: usize, pap
 
 /// The caret under `point` (level paper frame, x from the paper's left edge): the block whose top is
 /// the last one above the point, the visual line within it, then the nearest character boundary.
-/// Above the first block is the start of the note, below the last its end. On an image the upper
-/// half is the image's start and the lower half the start of the block after it (an image caret
-/// has offset 0; the last image has no block after it).
+/// Above the first block is the start of the note, below the last its end. Anywhere on an image
+/// is that image's block (an image caret has offset 0), so a click selects the picture.
 pub fn hit(blocks: &[Block], point: (f64, f64), paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Caret {
     let (tops, bottom) = extent_with_images(blocks, paper_w, t, image_size);
     let Some(last) = blocks.len().checked_sub(1) else { return Caret { block: 0, offset: 0 } };
@@ -454,9 +453,7 @@ pub fn hit(blocks: &[Block], point: (f64, f64), paper_w: f64, t: &Tokens, image_
     let block = tops.iter().rposition(|&top| top <= point.1).unwrap_or(0);
     let b = &blocks[block];
     if b.kind == Kind::Image {
-        let end = tops.get(block + 1).copied().unwrap_or(bottom);
-        let lower = point.1 >= tops[block] + (end - tops[block]) / 2.0;
-        return Caret { block: if lower && block < last { block + 1 } else { block }, offset: 0 };
+        return Caret { block, offset: 0 };
     }
     let pitch = t.style(b.kind).pitch;
     let line = ((point.1 - tops[block]) / pitch).floor().max(0.0) as usize;
@@ -747,13 +744,13 @@ mod tests {
     }
 
     #[test]
-    fn hit_on_an_image_snaps_to_its_start_or_to_the_start_of_what_follows() {
+    fn hit_anywhere_on_an_image_is_that_image_block() {
         let d = Document::from_blocks(vec![Block::new(Kind::Title, "t"), Block::image(1), Block::new(Kind::Body, "after")]);
         let size = |b: &Block| b.image_id.map(|_| (200, 100));
         let (tops, _) = extent_with_images(d.blocks(), 363.0, &TOKENS, &size);
         let h = image_height(363.0 - TOKENS.inset_left - TOKENS.inset_right, (200, 100));
         assert_eq!(hit(d.blocks(), (100.0, tops[1] + h * 0.25), 363.0, &TOKENS, &size), Caret { block: 1, offset: 0 });
-        assert_eq!(hit(d.blocks(), (100.0, tops[1] + h * 0.75), 363.0, &TOKENS, &size), Caret { block: 2, offset: 0 });
+        assert_eq!(hit(d.blocks(), (100.0, tops[1] + h * 0.75), 363.0, &TOKENS, &size), Caret { block: 1, offset: 0 });
     }
 
     fn rects(d: &Document, range: Range) -> Vec<Rect> {
