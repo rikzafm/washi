@@ -98,6 +98,19 @@ export component DropdownMenuWindow inherits Window {
         }
     }
 
+    // The card's shadow. The software renderer cannot blur, so (like the paper and the color
+    // picker) it is stacked copies of the card shape: each one grown by `growth` on every side
+    // and see-through, widest first, the whole stack shifted down. The design's
+    // `0 14px 24px -8px` + `0 2px 5px` shadow, fitted inside the window's shadow margin.
+    for growth[i] in [11px, 9.5px, 8px, 6.5px, 5px, 3.5px, 2px, 0.5px]: Rectangle {
+        x: root.shadow-margin - growth;
+        y: root.shadow-margin - growth + 5px;
+        width: root.card-width + 2 * growth;
+        height: root.card-height + 2 * growth;
+        border-radius: 10.8px + growth;
+        background: #28324604;
+    }
+
     // The upright card
     card := Rectangle {
         x: root.shadow-margin;
@@ -106,9 +119,6 @@ export component DropdownMenuWindow inherits Window {
         height: root.card-height;
         background: #FFFFFD;
         border-radius: 10.8px;
-        drop-shadow-blur: 22px;
-        drop-shadow-color: #28324666;
-        drop-shadow-offset-y: 12px;
         clip: true;
 
         // Absorb clicks on the card itself so they don't fall through to background-touch
