@@ -275,8 +275,40 @@ impl Harness {
         self.app().with_note(id, |n| {
             let ui = n.ui();
             ui.set_focus_block(block as i32);
+            ui.set_focus_anchor(-1);
             ui.set_focus_offset(0);
             ui.set_focus_serial(ui.get_focus_serial() + 1);
+        });
+    }
+
+    /// The note's selection as `((block, offset), (block, offset))`: where it started and where it ends.
+    pub fn selection(&self, note: usize) -> ((usize, usize), (usize, usize)) {
+        let r = self.app().with_note(self.id(note), |n| n.selection()).unwrap();
+        ((r.anchor.block, r.anchor.offset), (r.focus.block, r.focus.offset))
+    }
+
+    /// Whether the fields draw their own selection (false while the note draws one across blocks).
+    pub fn wash(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.ui().get_wash()).unwrap()
+    }
+
+    /// The text field with the keyboard focus (-1 none).
+    pub fn text_focused_block(&self, note: usize) -> i32 {
+        self.app().with_note(self.id(note), |n| n.ui().get_text_focused_block()).unwrap()
+    }
+
+    /// Press the left button with Shift held (the release is the caller's).
+    pub fn press_shift_button(&mut self, note: usize, x: f32, y: f32) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let shift: slint::SharedString = Key::Shift.into();
+            w.dispatch_event(WindowEvent::KeyPressed { text: shift.clone() });
+            w.dispatch_event(WindowEvent::PointerPressed {
+                position: slint::LogicalPosition::new(x, y),
+                button: slint::platform::PointerEventButton::Left,
+            });
+            w.dispatch_event(WindowEvent::KeyReleased { text: shift });
         });
     }
 

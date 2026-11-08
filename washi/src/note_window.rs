@@ -135,6 +135,31 @@ pub enum NoteEvent {
     InsertImage,
 }
 
+const START: Caret = Caret { block: 0, offset: 0 };
+
+/// Two presses count as a double (triple) click when they come this soon after each other...
+const MULTI_CLICK: Duration = Duration::from_millis(500);
+/// ...and this close (logical px).
+const MULTI_CLICK_SLOP: f32 = 4.0;
+
+/// The pointer's press in progress: what a drag extends, by characters, words or paragraphs.
+#[derive(Clone, Copy)]
+struct Pointer {
+    /// The left button is down.
+    down: bool,
+    /// 1 click: by characters, 2: by words, 3: by paragraphs.
+    clicks: u8,
+    /// Where the press started: the anchor of a character drag, the first word or paragraph of the others.
+    origin: Range,
+    last_press: Option<(Duration, (f32, f32))>,
+}
+
+impl Default for Pointer {
+    fn default() -> Pointer {
+        Pointer { down: false, clicks: 0, origin: Range { anchor: START, focus: START }, last_press: None }
+    }
+}
+
 /// The note's document, shared between the window's model and the stored text.
 struct Doc {
     doc: RefCell<Document>,
@@ -143,12 +168,15 @@ struct Doc {
     rules: Rc<VecModel<RuleData>>,
     /// The wash of the note-level selection, one level box per line it touches.
     sel_rects: Rc<VecModel<SelRect>>,
-    /// The note-level selection shown by `sel_rects` (for now only a select-all), if any.
+    /// The note-level range that `sel_rects` washes (a select-all or a selection across blocks), if any.
     range: Cell<Option<Range>>,
-    /// The block that last held the caret: what the toolbar and the format shortcuts act on.
-    caret: Cell<usize>,
-    /// The caret's byte offset in that block and the selection's other end (equal: no selection).
-    selection: Cell<(usize, usize)>,
+    /// Whether the wash is a select-all (Ctrl+A), which the field ends with its own `select-cleared`.
+    all_wash: Cell<bool>,
+    /// The selection: where it started and where the caret is now (the same caret: nothing
+    /// selected). The focus block is what the toolbar and the format shortcuts act on.
+    selection: Cell<Range>,
+    /// The pointer press in progress (a drag grows the selection), and the clicks before it.
+    pointer: Cell<Pointer>,
     /// A format button pressed with nothing selected, outside a word: the style the next text
     /// typed at that caret takes. Gone once the caret moves elsewhere.
     typing: Cell<Option<(Caret, Flags)>>,
@@ -179,8 +207,9 @@ impl Doc {
             rules: Rc::new(VecModel::default()),
             sel_rects: Rc::new(VecModel::default()),
             range: Cell::new(None),
-            caret: Cell::new(0),
-            selection: Cell::new((0, 0)),
+            all_wash: Cell::new(false),
+            selection: Cell::new(Range { anchor: START, focus: START }),
+            pointer: Cell::new(Pointer::default()),
             typing: Cell::new(None),
             paper: Cell::new((363.0, 433.0)),
             history: RefCell::new(History::new(Document::new())),
@@ -323,14 +352,133 @@ impl Doc {
 
     /// Ctrl+A: the note-level selection becomes the whole note.
     fn select_all(&self, ui: &NoteWindow) {
+        self.all_wash.set(true);
         self.range.set(Some(self.doc.borrow().all()));
         self.fill_sel_rects(&self.doc.borrow(), &Self::tokens(ui));
     }
 
-    /// The select-all ended: no wash.
+    /// The select-all ended (a key or a click): no wash. (A selection across blocks keeps its own.)
     fn clear_selection(&self) {
+        if self.all_wash.replace(false) {
+            self.range.set(None);
+            self.sel_rects.set_vec(vec![]);
+        }
+    }
+
+    /// No wash at all (the text was replaced).
+    fn clear_wash(&self) {
+        self.all_wash.set(false);
         self.range.set(None);
         self.sel_rects.set_vec(vec![]);
+    }
+
+    /// Make `range` the selection. Inside one block (or collapsed) the block's own field holds and
+    /// draws it; across blocks the note draws the wash (`sel_rects`) and the field with the caret
+    /// shows none.
+    fn set_selection(&self, ui: &NoteWindow, range: Range) {
+        let range = self.clamp(range);
+        let (start, end) = range.ordered();
+        let across = start.block != end.block;
+        self.selection.set(range);
+        // a select-all ends here; its field-side `select-cleared` must not take this wash away
+        self.all_wash.set(false);
+        ui.set_text_all_selected(false);
+        ui.set_wash(!across);
+        if across {
+            self.range.set(Some(range));
+            self.fill_sel_rects(&self.doc.borrow(), &Self::tokens(ui));
+            // the caret is in the field of `focus`, with nothing selected there
+            self.focus_with(ui, range.focus, None);
+        } else {
+            self.range.set(None);
+            self.sel_rects.set_vec(vec![]);
+            self.focus_with(ui, range.focus, Some(range.anchor.offset));
+        }
+        self.typing.set(None);
+        self.show_formats(ui);
+    }
+
+    /// `range` with both ends inside the document, on character boundaries.
+    fn clamp(&self, range: Range) -> Range {
+        let doc = self.doc.borrow();
+        let fix = |c: Caret| {
+            let block = c.block.min(doc.len().saturating_sub(1));
+            let text = doc.blocks().get(block).map_or("", |b| b.text.as_str());
+            let mut offset = c.offset.min(text.len());
+            while !text.is_char_boundary(offset) {
+                offset -= 1;
+            }
+            Caret { block, offset }
+        };
+        Range { anchor: fix(range.anchor), focus: fix(range.focus) }
+    }
+
+    /// A press at `at` (logical px in the text layer, level): `shift` extends the selection, a second
+    /// and third press in a row select the word and the paragraph.
+    fn pointer_down(&self, ui: &NoteWindow, at: (f32, f32), shift: bool, now: Duration) {
+        let mut p = self.pointer.get();
+        let again = p.last_press.is_some_and(|(t, (x, y))| {
+            now.saturating_sub(t) <= MULTI_CLICK && (x - at.0).abs() <= MULTI_CLICK_SLOP && (y - at.1).abs() <= MULTI_CLICK_SLOP
+        });
+        p.clicks = if again { p.clicks % 3 + 1 } else { 1 };
+        p.last_press = Some((now, at));
+        p.down = true;
+        let hit = self.hit(ui, at);
+        let range = match p.clicks {
+            1 if shift => Range { anchor: self.selection.get().anchor, focus: hit },
+            1 => Range { anchor: hit, focus: hit },
+            _ => self.unit_at(hit, p.clicks),
+        };
+        p.origin = range;
+        self.pointer.set(p);
+        self.set_selection(ui, range);
+    }
+
+    /// The pointer moved to `at` with the left button down: grow the selection.
+    fn pointer_drag(&self, ui: &NoteWindow, at: (f32, f32)) {
+        let p = self.pointer.get();
+        if !p.down {
+            return;
+        }
+        let hit = self.hit(ui, at);
+        let range = if p.clicks == 1 {
+            Range { anchor: p.origin.anchor, focus: hit }
+        } else {
+            // by whole words or paragraphs: the unit under the pointer joins the one pressed first
+            let (first_start, first_end) = p.origin.ordered();
+            let (start, end) = self.unit_at(hit, p.clicks).ordered();
+            if (hit.block, hit.offset) < (first_start.block, first_start.offset) {
+                Range { anchor: first_end, focus: start }
+            } else {
+                Range { anchor: first_start, focus: if (end.block, end.offset) >= (first_end.block, first_end.offset) { end } else { first_end } }
+            }
+        };
+        if range != self.selection.get() {
+            self.set_selection(ui, range);
+        }
+    }
+
+    fn pointer_up(&self) {
+        let mut p = self.pointer.get();
+        p.down = false;
+        self.pointer.set(p);
+    }
+
+    fn hit(&self, ui: &NoteWindow, at: (f32, f32)) -> Caret {
+        let doc = self.doc.borrow();
+        textflow::hit(doc.blocks(), (at.0 as f64, at.1 as f64), self.paper.get().0, &Self::tokens(ui), &|b| self.images.size(b))
+    }
+
+    /// The word (`clicks` 2) or paragraph (3) holding `at`, as a range. Not on a word: just the caret.
+    fn unit_at(&self, at: Caret, clicks: u8) -> Range {
+        let doc = self.doc.borrow();
+        let Some(b) = doc.blocks().get(at.block) else { return Range { anchor: at, focus: at } };
+        let (start, end) = if clicks >= 3 {
+            (0, b.text.len())
+        } else {
+            doc.word_at(at.block, at.offset).unwrap_or((at.offset, at.offset))
+        };
+        Range { anchor: Caret { block: at.block, offset: start }, focus: Caret { block: at.block, offset: end } }
     }
 
     fn text(&self) -> String {
@@ -369,14 +517,19 @@ impl Doc {
 
     /// The caret's block, kept within the document.
     fn caret_block(&self) -> usize {
-        self.caret.get().min(self.doc.borrow().len().saturating_sub(1))
+        self.selection.get().focus.block.min(self.doc.borrow().len().saturating_sub(1))
+    }
+
+    /// Put the caret at `c` without asking any field to take it (the field is about to report it).
+    fn set_caret(&self, c: Caret) {
+        self.selection.set(Range { anchor: c, focus: c });
     }
 
     /// The style the next text typed at the caret takes: one a format button asked for there, or
     /// that of the text before it.
     fn typing_style(&self) -> Flags {
         let i = self.caret_block();
-        let (cursor, _) = self.selection.get();
+        let cursor = self.selection.get().focus.offset;
         match self.typing.get() {
             Some((c, style)) if c == (Caret { block: i, offset: cursor }) => style,
             _ => self.doc.borrow().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
@@ -404,14 +557,15 @@ impl Doc {
             }
             _ => return false,
         };
-        let (cursor, anchor) = self.selection.get();
+        let sel = self.selection.get();
+        let (cursor, collapsed) = (sel.focus.offset, sel.anchor == sel.focus);
         let before = self.doc.borrow().clone();
         let done = {
             let mut doc = self.doc.borrow_mut();
             if all_selected {
                 doc.toggle_style_all(flag)
-            } else if cursor != anchor {
-                doc.toggle_style(i, cursor, anchor, flag)
+            } else if !collapsed {
+                doc.toggle_style_range(sel, flag)
             } else if let Some((start, end)) = doc.word_at(i, cursor) {
                 doc.toggle_style(i, start, end, flag)
             } else {
@@ -421,7 +575,7 @@ impl Doc {
         if done {
             self.typing.set(None);
             self.structural(before);
-        } else if !all_selected && cursor == anchor {
+        } else if !all_selected && collapsed {
             let style = self.typing_style().toggled(flag);
             self.typing.set(Some((Caret { block: i, offset: cursor }, style)));
         }
@@ -432,10 +586,10 @@ impl Doc {
     fn show_formats(&self, ui: &NoteWindow) {
         let style = {
             let doc = self.doc.borrow();
-            let (cursor, anchor) = self.selection.get();
+            let sel = self.selection.get();
             match doc.blocks().get(self.caret_block()) {
                 _ if ui.get_text_all_selected() => doc.common_style_all(),
-                Some(b) if cursor != anchor => b.common_style(cursor, anchor),
+                Some(_) if sel.anchor != sel.focus => doc.common_style_range(sel),
                 Some(_) => {
                     drop(doc);
                     self.typing_style()
@@ -456,16 +610,32 @@ impl Doc {
     /// The caret moved to `offset` of block `block`, the selection's other end at `anchor`. A style
     /// asked for at another place is forgotten.
     fn caret_moved(&self, block: usize, offset: usize, anchor: usize) {
-        self.caret.set(block);
-        self.selection.set((offset, anchor));
+        let now = self.selection.get();
+        let (start, end) = now.ordered();
+        // the field reporting the caret that `set_selection` put in it, under a wash across blocks
+        if start.block != end.block && now.focus == (Caret { block, offset }) && anchor == offset {
+            return;
+        }
+        self.selection.set(Range { anchor: Caret { block, offset: anchor }, focus: Caret { block, offset } });
         if self.typing.get().is_some_and(|(c, _)| c != (Caret { block, offset }) || offset != anchor) {
             self.typing.set(None);
+        }
+        if self.range.get().is_some() && !self.all_wash.get() {
+            // the caret left a selection across blocks (a key): the wash is over
+            self.range.set(None);
+            self.sel_rects.set_vec(vec![]);
         }
     }
 
     /// Ask the block at `c` to take the keyboard focus with the caret there, and scroll it into view.
     fn focus_at(&self, ui: &NoteWindow, c: Caret) {
+        self.focus_with(ui, c, None);
+    }
+
+    /// As `focus_at`, with the field's selection running from `anchor` (a byte offset) to the caret.
+    fn focus_with(&self, ui: &NoteWindow, c: Caret, anchor: Option<usize>) {
         ui.set_focus_block(c.block as i32);
+        ui.set_focus_anchor(anchor.map_or(-1, |a| a as i32));
         ui.set_focus_offset(c.offset as i32);
         ui.set_focus_serial(ui.get_focus_serial() + 1);
         self.reveal(ui, c.block, c.offset);
@@ -667,7 +837,7 @@ impl Note {
                     ui.set_text(text.as_str().into());
                     ui.set_window_title(window_title(&text).into());
                     if let Some(c) = focus {
-                        doc.caret.set(c.block);
+                        doc.set_caret(c);
                     }
                     doc.show_formats(&ui);
                     if let Some(c) = focus {
@@ -707,7 +877,11 @@ impl Note {
         {
             let (doc, weak) = (doc.clone(), ui.as_weak());
             ui.on_focus_entered(move |i| {
-                doc.caret.set(i.max(0) as usize);
+                // the field reports its caret and selection right after this
+                let block = i.max(0) as usize;
+                if doc.selection.get().focus.block != block {
+                    doc.set_caret(Caret { block, offset: 0 });
+                }
                 if let Some(ui) = weak.upgrade() {
                     doc.show_formats(&ui);
                 }
@@ -805,6 +979,26 @@ impl Note {
                 on_event(id, NoteEvent::ContextMenu { at });
             });
         }
+        {
+            let (doc, weak, clock) = (doc.clone(), ui.as_weak(), autosave.clock.clone());
+            ui.on_pointer_down(move |x, y, shift| {
+                if let Some(ui) = weak.upgrade() {
+                    doc.pointer_down(&ui, (x, y), shift, clock.monotonic());
+                }
+            });
+        }
+        {
+            let (doc, weak) = (doc.clone(), ui.as_weak());
+            ui.on_pointer_drag(move |x, y| {
+                if let Some(ui) = weak.upgrade() {
+                    doc.pointer_drag(&ui, (x, y));
+                }
+            });
+        }
+        {
+            let doc = doc.clone();
+            ui.on_pointer_up(move || doc.pointer_up());
+        }
         // callbacks that only pass one event on to the app
         let forward = |ev: NoteEvent| {
             let on_event = on_event.clone();
@@ -898,6 +1092,11 @@ impl Note {
         self.id
     }
 
+    /// The note's selection: where it started and where the caret is (the same caret: none).
+    pub fn selection(&self) -> Range {
+        self.doc.selection.get()
+    }
+
     /// The native window handle, once the window exists (never in the test harness).
     pub fn hwnd(&self) -> Option<isize> {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -937,7 +1136,8 @@ impl Note {
         self.ui.set_text_focused_block(-1);
         self.ui.set_focus_block(-1);
         self.doc.load(text);
-        self.doc.caret.set(0);
+        self.doc.set_caret(START);
+        self.doc.clear_wash();
         self.doc.show_formats(&self.ui);
         self.doc.relayout(&self.ui);
         self.ui.set_text(self.doc.text().as_str().into());
