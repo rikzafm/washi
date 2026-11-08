@@ -420,6 +420,16 @@ impl App {
         self.all_notes().map(|v| v.closed_notes()).unwrap_or_default()
     }
 
+    /// Status line text in the open All Notes window, if any.
+    pub fn all_notes_status_text(&self) -> Option<String> {
+        self.all_notes().map(|v| v.status_text())
+    }
+
+    /// Preview text runs in the open All Notes window.
+    pub fn all_notes_preview_runs(&self) -> Vec<crate::note_window::PreviewRun> {
+        self.all_notes().map(|v| v.preview_runs()).unwrap_or_default()
+    }
+
     /// Whether the inline delete confirmation bar is active in All Notes.
     pub fn all_notes_confirming_delete(&self) -> Option<bool> {
         self.all_notes().map(|v| v.confirming_delete())
@@ -437,7 +447,8 @@ impl App {
         if let Some(v) = self.all_notes() {
             v.ui().set_confirming_delete(false);
             let rows = self.all_notes_rows();
-            v.refresh(&rows, Some(id));
+            let now_ms = self.0.env.clock.unix_millis();
+            v.refresh(&rows, Some(id), now_ms);
         }
     }
 
@@ -497,15 +508,17 @@ impl App {
     pub fn refresh_all_notes(&self, preferred_selected_id: Option<NoteId>) {
         if let Some(v) = self.all_notes() {
             let rows = self.all_notes_rows();
-            v.refresh(&rows, preferred_selected_id);
+            let now_ms = self.0.env.clock.unix_millis();
+            v.refresh(&rows, preferred_selected_id, now_ms);
         }
     }
 
     /// Open the All Notes window with `initial_selected_id` selected.
     pub fn open_all_notes(&self, initial_selected_id: NoteId) {
         let rows = self.all_notes_rows();
+        let now_ms = self.0.env.clock.unix_millis();
         if let Some(v) = self.all_notes() {
-            v.refresh(&rows, Some(initial_selected_id));
+            v.refresh(&rows, Some(initial_selected_id), now_ms);
             let _ = v.ui().show();
             self.0.env.window_control.bring_to_front(0, v.hwnd());
             return;
@@ -518,7 +531,7 @@ impl App {
             }
         });
 
-        match AllNotesView::open(initial_selected_id, &rows, on_close) {
+        match AllNotesView::open(initial_selected_id, &rows, now_ms, on_close) {
             Ok(view) => {
                 {
                     let weak = Rc::downgrade(&self.0);

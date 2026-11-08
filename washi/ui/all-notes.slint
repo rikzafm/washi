@@ -3,12 +3,27 @@
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
+import { PaperTheme } from "paper-theme.slint";
+import { PaperGeometry } from "paper.slint";
 import { Frame, TRect } from "toolbar.slint";
 
 export struct AllNoteItem {
     id: int,
     title: string,
     is-open: bool,
+}
+
+export struct PreviewRun {
+    text: string,
+    u: float,
+    v: float,
+    dx: float,
+    dy: float,
+    width: float,
+    size: float,
+    bold: bool,
+    italic: bool,
+    color: color,
 }
 
 component SidebarRow inherits Rectangle {
@@ -90,6 +105,9 @@ export component AllNotesWindow inherits Window {
     in-out property <[AllNoteItem]> closed-notes: [];
     in-out property <bool> selected-note-open: false;
     in-out property <bool> confirming-delete: false;
+    in-out property <string> status-text: "";
+    in-out property <[PreviewRun]> status-runs: [];
+    in-out property <[PreviewRun]> preview-runs: [];
 
     callback close-window();
     callback select-note(int);
@@ -227,5 +245,66 @@ export component AllNotesWindow inherits Window {
             root.confirming-delete = false;
             root.new-note();
         }
+    }
+
+    // --- Right Preview Card ---
+    for growth[i] in PaperTheme.shadow-growths: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: PaperGeometry.quad(
+            411.4px, 311.1px + PaperTheme.shadow-offset-y,
+            167px + growth, 209px + growth);
+        fill: PaperTheme.shadow-colors[i];
+    }
+
+    Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: root.width / 1px;
+        viewbox-height: root.height / 1px;
+        commands: PaperGeometry.quad(411.4px, 311.1px, 167px, 209px);
+        fill: #FFFFFD;
+    }
+
+    for r in root.status-runs: Text {
+        x: (244.4 + r.u + r.dx) * 1px;
+        y: (102.1 + r.v + r.dy) * 1px;
+        text: r.text;
+        wrap: no-wrap;
+        font-family: "Shadows Into Light";
+        font-size: r.size * 1px;
+        font-weight: r.bold ? 700 : 400;
+        font-italic: r.italic;
+        color: r.color;
+    }
+
+    for r in root.preview-runs: Text {
+        x: (244.4 + r.u + r.dx) * 1px;
+        y: (102.1 + r.v + r.dy) * 1px;
+        text: r.text;
+        wrap: no-wrap;
+        font-family: "Shadows Into Light";
+        font-size: r.size * 1px;
+        font-weight: r.bold ? 700 : 400;
+        font-italic: r.italic;
+        color: r.color;
+    }
+
+    Image {
+        source: @image-url("assets/tape-pink.png");
+        width: self.source.width / 3 * 1px;
+        height: self.source.height / 3 * 1px;
+        x: 281.2px - self.width / 2;
+        y: 111.1px - self.height / 2;
+    }
+
+    Image {
+        source: @image-url("assets/tape-blue.png");
+        width: self.source.width / 3 * 1px;
+        height: self.source.height / 3 * 1px;
+        x: 545.2px - self.width / 2;
+        y: 518.9px - self.height / 2;
     }
 }
