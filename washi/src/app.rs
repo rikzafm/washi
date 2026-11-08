@@ -151,11 +151,7 @@ impl App {
 
     /// A later launch asked for a note: open an empty one next to the newest open note.
     fn new_note_on_request(&self) {
-        let last = self.0.notes.borrow().last().map(|n| n.id());
-        match last {
-            Some(id) => self.new_note_from(id),
-            None => {} // Washi is quitting; nothing to attach to.
-        }
+        self.new_note();
     }
 
     pub fn start(env: Env) -> Result<App, StartError> {
@@ -331,6 +327,35 @@ impl App {
         self.0.dropdown.borrow().as_ref().map(|d| d.note_id())
     }
 
+    /// The pinned state of the currently open dropdown menu, if any.
+    pub fn dropdown_pinned(&self) -> Option<bool> {
+        self.0.dropdown.borrow().as_ref().map(|d| d.pinned())
+    }
+
+    /// Invoke the toggle pin callback on the active dropdown (for testing).
+    pub fn invoke_dropdown_toggle_pin(&self) {
+        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
+        if let Some(ui) = ui {
+            ui.invoke_toggle_pin();
+        }
+    }
+
+    /// Invoke the delete note callback on the active dropdown (for testing).
+    pub fn invoke_dropdown_delete_note(&self) {
+        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
+        if let Some(ui) = ui {
+            ui.invoke_delete_note();
+        }
+    }
+
+    /// Invoke the new note callback on the active dropdown (for testing).
+    pub fn invoke_dropdown_new_note(&self) {
+        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
+        if let Some(ui) = ui {
+            ui.invoke_new_note();
+        }
+    }
+
     /// Dismiss the open dropdown menu and reset the parent note's button state.
     pub fn dismiss_dropdown(&self) {
         let menu = self.0.dropdown.borrow_mut().take();
@@ -388,6 +413,36 @@ impl App {
 
         match DropdownMenu::open(id, pos, on_dismiss) {
             Ok(menu) => {
+                let pinned = note.always_on_top();
+                menu.set_pinned(pinned);
+
+                let weak = Rc::downgrade(&self.0);
+                menu.ui().on_toggle_pin(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App(inner);
+                        let current = app.with_note(id, |n| n.always_on_top()).unwrap_or(false);
+                        app.set_always_on_top(id, !current);
+                    }
+                });
+
+                let weak = Rc::downgrade(&self.0);
+                menu.ui().on_delete_note(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App(inner);
+                        app.dismiss_dropdown();
+                        app.delete_note(id);
+                    }
+                });
+
+                let weak = Rc::downgrade(&self.0);
+                menu.ui().on_new_note(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App(inner);
+                        app.dismiss_dropdown();
+                        app.new_note();
+                    }
+                });
+
                 note.set_dropdown_open(true);
                 *self.0.dropdown.borrow_mut() = Some(menu);
             }
@@ -582,6 +637,25 @@ impl App {
         self.remove_note(id);
     }
 
+    /// Open a fresh empty note. If an open note exists, offsets from it.
+    pub fn new_note(&self) {
+        let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
+        match from {
+            Some(id) => self.new_note_from(id),
+            None => {
+                let now = self.0.env.clock.unix_millis();
+                if let Ok(id) = self.0.db.create_note(now) {
+                    let _ = self.open_row(&NoteRow {
+                        id,
+                        content: String::new(),
+                        geometry: None,
+                        always_on_top: false,
+                    });
+                }
+            }
+        }
+    }
+
     /// Open an empty note, offset from `from`.
     pub fn new_note_from(&self, from: NoteId) {
         let geometry = self
@@ -616,6 +690,11 @@ impl App {
     /// Keep a note's window above the others (or not), and remember it.
     pub fn set_always_on_top(&self, id: NoteId, on: bool) {
         self.with_note(id, |n| n.set_always_on_top(on));
+        if let Some(ref d) = *self.0.dropdown.borrow() {
+            if d.note_id() == id {
+                d.set_pinned(on);
+            }
+        }
         if let Err(e) = self.0.db.set_always_on_top(id, on) {
             eprintln!("washi: could not save always-on-top for note {id}: {e}");
         }
