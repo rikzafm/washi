@@ -239,3 +239,109 @@ fn start_after_everything_was_closed_gives_one_empty_note() {
 fn contains(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len()).any(|w| w == needle)
 }
+
+#[test]
+fn consecutive_note_closes_within_30s_accumulate_in_exit_candidates() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "note 0");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "note 1");
+    h.right_click(1, Some(&["New note"]));
+    h.type_text(2, "note 2");
+    assert_eq!(h.open_note_count(), 3);
+
+    let id2 = h.note_id(2);
+    let id1 = h.note_id(1);
+
+    // Close note 2
+    h.close_note(2);
+    assert_eq!(h.open_note_count(), 2);
+    let candidates = h.exit_candidates();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].id, id2);
+    assert!(!candidates[0].was_empty);
+    assert!(candidates[0].geometry.is_some());
+
+    // Advance 5 seconds (< 30s) and close note 1
+    h.advance(Duration::from_secs(5));
+    h.close_note(1);
+    assert_eq!(h.open_note_count(), 1);
+    let candidates = h.exit_candidates();
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0].id, id2);
+    assert_eq!(candidates[1].id, id1);
+    assert!(!candidates[1].was_empty);
+}
+
+#[test]
+fn exit_candidates_cleared_after_30s_inactivity() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "note 0");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "note 1");
+    h.right_click(1, Some(&["New note"]));
+    h.type_text(2, "note 2");
+    assert_eq!(h.open_note_count(), 3);
+
+    let id2 = h.note_id(2);
+    let id1 = h.note_id(1);
+
+    // Close note 2
+    h.close_note(2);
+    assert_eq!(h.exit_candidates().len(), 1);
+    assert_eq!(h.exit_candidates()[0].id, id2);
+
+    // Advance 30 seconds: timer fires and clears candidates
+    h.advance(Duration::from_secs(30));
+    assert!(h.exit_candidates().is_empty());
+
+    // Closing another note after the window starts a fresh sequence
+    h.close_note(1);
+    let candidates = h.exit_candidates();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].id, id1);
+}
+
+#[test]
+fn reopening_note_removes_it_from_exit_candidates() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "note 0");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "note 1");
+    assert_eq!(h.open_note_count(), 2);
+
+    let id1 = h.note_id(1);
+
+    // Close note 1
+    h.close_note(1);
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.exit_candidates().len(), 1);
+    assert_eq!(h.exit_candidates()[0].id, id1);
+
+    // Reopen note 1 via "Open note" menu
+    h.right_click(0, Some(&["Open note", "note 1"]));
+    assert_eq!(h.open_note_count(), 2);
+    assert!(h.exit_candidates().is_empty());
+}
+
+#[test]
+fn closing_empty_note_records_it_as_empty_candidate() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "not empty");
+    h.right_click(0, Some(&["New note"]));
+    assert_eq!(h.open_note_count(), 2);
+
+    let id1 = h.note_id(1);
+
+    // Note 1 is empty, closing it discards it from DB but records in exit_candidates
+    h.close_note(1);
+    assert_eq!(h.open_note_count(), 1);
+    let candidates = h.exit_candidates();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].id, id1);
+    assert!(candidates[0].was_empty);
+}
