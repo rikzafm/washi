@@ -975,6 +975,60 @@ impl Harness {
         self.app.as_ref().map(|a| a.all_notes_closed_items()).unwrap_or_default()
     }
 
+    pub fn all_notes_confirming_delete(&self) -> Option<bool> {
+        self.app.as_ref().and_then(|a| a.all_notes_confirming_delete())
+    }
+
+    pub fn set_all_notes_confirming_delete(&mut self, confirming: bool) {
+        if let Some(app) = &self.app {
+            app.set_all_notes_confirming_delete(confirming);
+        }
+    }
+
+    pub fn invoke_all_notes_select_note(&mut self, id: NoteId) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_select_note(id);
+        }
+        self.settle();
+    }
+
+    pub fn invoke_all_notes_new_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_new_note();
+        }
+        self.settle();
+    }
+
+    pub fn click_all_notes(&mut self, x: f32, y: f32) {
+        if let Some(app) = &self.app {
+            let position = slint::LogicalPosition::new(x, y);
+            let button = slint::platform::PointerEventButton::Left;
+            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerMoved { position });
+            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerPressed { position, button });
+            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerReleased { position, button });
+        }
+        self.settle();
+    }
+
+    pub fn render_all_notes(&self) -> Option<(u32, u32, Vec<slint::Rgb8Pixel>)> {
+        if !self.is_all_notes_open() {
+            return None;
+        }
+        let wins = platform::windows();
+        let w = wins.into_iter().rev().find(|w| {
+            let s = w.window().size();
+            s.width == 603 && s.height == 625
+        })?;
+        w.window().request_redraw();
+        let s = w.window().size();
+        let (pw, ph) = (s.width, s.height);
+        let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
+        w.draw_if_needed(|r| {
+            r.render(&mut buf, pw as usize);
+        });
+        Some((pw, ph, buf))
+    }
+
     pub fn press_all_notes_escape(&mut self) {
         if let Some(app) = &self.app {
             app.dispatch_all_notes_event(slint::platform::WindowEvent::KeyPressed {
