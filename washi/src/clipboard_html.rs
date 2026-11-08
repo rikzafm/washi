@@ -107,64 +107,68 @@ pub fn to_html_and_text(
         html.push_str(tag);
         html.push('>');
 
-        // Render styled text inside block
-        let mut char_idx = from_offset;
-        while char_idx < to_offset {
-            let next_boundary = text[char_idx..].chars().next().map_or(to_offset, |c| char_idx + c.len_utf8());
-            let style = b.marks.get(char_idx).copied().unwrap_or(Flags::NONE);
-            let paint = b.paints.get(char_idx).copied().unwrap_or_default();
+        if from_offset >= to_offset {
+            html.push_str("<br>");
+        } else {
+            // Render styled text inside block
+            let mut char_idx = from_offset;
+            while char_idx < to_offset {
+                let next_boundary = text[char_idx..].chars().next().map_or(to_offset, |c| char_idx + c.len_utf8());
+                let style = b.marks.get(char_idx).copied().unwrap_or(Flags::NONE);
+                let paint = b.paints.get(char_idx).copied().unwrap_or_default();
 
-            // Group identical style & paint runs
-            let mut run_end = next_boundary;
-            while run_end < to_offset {
-                let st = b.marks.get(run_end).copied().unwrap_or(Flags::NONE);
-                let pt = b.paints.get(run_end).copied().unwrap_or_default();
-                if st != style || pt != paint {
-                    break;
+                // Group identical style & paint runs
+                let mut run_end = next_boundary;
+                while run_end < to_offset {
+                    let st = b.marks.get(run_end).copied().unwrap_or(Flags::NONE);
+                    let pt = b.paints.get(run_end).copied().unwrap_or_default();
+                    if st != style || pt != paint {
+                        break;
+                    }
+                    let len = text[run_end..].chars().next().map_or(1, |c| c.len_utf8());
+                    run_end += len;
                 }
-                let len = text[run_end..].chars().next().map_or(1, |c| c.len_utf8());
-                run_end += len;
-            }
 
-            let run_text = escape_html(&text[char_idx..run_end]);
+                let run_text = escape_html(&text[char_idx..run_end]);
 
-            // Open inline tags
-            let mut close_tags = Vec::new();
-            if paint.ink != 0 {
-                let hex = PALETTE[paint.ink.min(PALETTE.len() as u8 - 1) as usize].ink;
-                html.push_str(&format!(r#"<span style="color:#{:06X}">"#, hex));
-                close_tags.push("</span>");
-            }
-            if paint.marker != 0 {
-                if let Some(hex) = PALETTE[paint.marker.min(PALETTE.len() as u8 - 1) as usize].marker {
-                    html.push_str(&format!(r#"<span style="background-color:#{:06X}">"#, hex));
+                // Open inline tags
+                let mut close_tags = Vec::new();
+                if paint.ink != 0 {
+                    let hex = PALETTE[paint.ink.min(PALETTE.len() as u8 - 1) as usize].ink;
+                    html.push_str(&format!(r#"<span style="color:#{:06X}">"#, hex));
                     close_tags.push("</span>");
                 }
-            }
-            if style.contains(Flags::BOLD) {
-                html.push_str("<b>");
-                close_tags.push("</b>");
-            }
-            if style.contains(Flags::ITALIC) {
-                html.push_str("<i>");
-                close_tags.push("</i>");
-            }
-            if style.contains(Flags::UNDERLINE) {
-                html.push_str("<u>");
-                close_tags.push("</u>");
-            }
-            if style.contains(Flags::STRIKE) {
-                html.push_str("<s>");
-                close_tags.push("</s>");
-            }
+                if paint.marker != 0 {
+                    if let Some(hex) = PALETTE[paint.marker.min(PALETTE.len() as u8 - 1) as usize].marker {
+                        html.push_str(&format!(r#"<span style="background-color:#{:06X}">"#, hex));
+                        close_tags.push("</span>");
+                    }
+                }
+                if style.contains(Flags::BOLD) {
+                    html.push_str("<b>");
+                    close_tags.push("</b>");
+                }
+                if style.contains(Flags::ITALIC) {
+                    html.push_str("<i>");
+                    close_tags.push("</i>");
+                }
+                if style.contains(Flags::UNDERLINE) {
+                    html.push_str("<u>");
+                    close_tags.push("</u>");
+                }
+                if style.contains(Flags::STRIKE) {
+                    html.push_str("<s>");
+                    close_tags.push("</s>");
+                }
 
-            html.push_str(&run_text);
+                html.push_str(&run_text);
 
-            for c in close_tags.into_iter().rev() {
-                html.push_str(c);
+                for c in close_tags.into_iter().rev() {
+                    html.push_str(c);
+                }
+
+                char_idx = run_end;
             }
-
-            char_idx = run_end;
         }
 
         html.push_str("</");
@@ -250,7 +254,6 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
     let mut cur_text = String::new();
     let mut cur_marks = Vec::new();
     let mut cur_paints = Vec::new();
-    let mut cur_kind = Kind::Body;
 
     let mut bold = 0usize;
     let mut italic = 0usize;
@@ -258,17 +261,47 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
     let mut strike = 0usize;
     let mut style_stack: Vec<(Option<u8>, Option<u8>)> = Vec::new();
 
-    let flush_block = |blocks: &mut Vec<ParsedBlock>, cur_text: &mut String, cur_marks: &mut Vec<Flags>, cur_paints: &mut Vec<Paint>, cur_kind: Kind| {
+    #[derive(Clone, Copy)]
+    struct BlockFrame {
+        kind: Kind,
+        children_emitted: usize,
+    }
+    let mut block_stack: Vec<BlockFrame> = Vec::new();
+    let mut last_was_br = false;
+
+    let flush_text = |blocks: &mut Vec<ParsedBlock>,
+                      block_stack: &mut [BlockFrame],
+                      cur_text: &mut String,
+                      cur_marks: &mut Vec<Flags>,
+                      cur_paints: &mut Vec<Paint>,
+                      kind: Kind| {
         if !cur_text.is_empty() {
             let text = std::mem::take(cur_text);
             let marks = std::mem::take(cur_marks);
             let paints = std::mem::take(cur_paints);
-            match cur_kind {
+            match kind {
                 Kind::Title => blocks.push(ParsedBlock::Title { text, marks, paints }),
                 Kind::Heading => blocks.push(ParsedBlock::Heading { text, marks, paints }),
                 Kind::ListItem => blocks.push(ParsedBlock::ListItem { text, marks, paints }),
                 Kind::Body | Kind::Image => blocks.push(ParsedBlock::Body { text, marks, paints }),
             }
+            if let Some(f) = block_stack.last_mut() {
+                f.children_emitted += 1;
+            }
+        }
+    };
+
+    let push_empty_block = |blocks: &mut Vec<ParsedBlock>,
+                            block_stack: &mut [BlockFrame],
+                            kind: Kind| {
+        match kind {
+            Kind::Title => blocks.push(ParsedBlock::Title { text: String::new(), marks: vec![], paints: vec![] }),
+            Kind::Heading => blocks.push(ParsedBlock::Heading { text: String::new(), marks: vec![], paints: vec![] }),
+            Kind::ListItem => blocks.push(ParsedBlock::ListItem { text: String::new(), marks: vec![], paints: vec![] }),
+            Kind::Body | Kind::Image => blocks.push(ParsedBlock::Body { text: String::new(), marks: vec![], paints: vec![] }),
+        }
+        if let Some(f) = block_stack.last_mut() {
+            f.children_emitted += 1;
         }
     };
 
@@ -280,7 +313,19 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
             if let Some(tag_end) = bytes[tag_start..].iter().position(|&b| b == b'>').map(|p| tag_start + p) {
                 let tag_str = &html[tag_start + 1..tag_end].trim();
                 let is_close = tag_str.starts_with('/');
-                let tag_name = tag_str.trim_start_matches('/').split_whitespace().next().unwrap_or("").to_lowercase();
+                let clean_str = tag_str.trim_matches(|c: char| c == '/' || c.is_whitespace());
+                let tag_name = clean_str.split_whitespace().next().unwrap_or("").trim_end_matches('/').to_lowercase();
+
+                // Skip invisible content in <head>, <style>, <script>
+                if !is_close && (tag_name == "style" || tag_name == "script" || tag_name == "head") {
+                    let close_pattern = format!("</{}", tag_name);
+                    if let Some(pos) = html[tag_end + 1..].to_lowercase().find(&close_pattern) {
+                        if let Some(close_gt) = html[tag_end + 1 + pos..].find('>') {
+                            i = tag_end + 1 + pos + close_gt + 1;
+                            continue;
+                        }
+                    }
+                }
 
                 match tag_name.as_str() {
                     "b" | "strong" => {
@@ -331,24 +376,56 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                             style_stack.push((None, Some(4))); // default yellow marker
                         }
                     }
-                    "h1" => {
-                        flush_block(&mut blocks, &mut cur_text, &mut cur_marks, &mut cur_paints, cur_kind);
-                        cur_kind = if is_close { Kind::Body } else { Kind::Title };
-                    }
-                    "h2" | "h3" | "h4" | "h5" | "h6" => {
-                        flush_block(&mut blocks, &mut cur_text, &mut cur_marks, &mut cur_paints, cur_kind);
-                        cur_kind = if is_close { Kind::Body } else { Kind::Heading };
-                    }
-                    "li" => {
-                        flush_block(&mut blocks, &mut cur_text, &mut cur_marks, &mut cur_paints, cur_kind);
-                        cur_kind = if is_close { Kind::Body } else { Kind::ListItem };
-                    }
-                    "p" | "div" => {
-                        flush_block(&mut blocks, &mut cur_text, &mut cur_marks, &mut cur_paints, cur_kind);
-                        cur_kind = Kind::Body;
+                    "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li" | "p" | "div" => {
+                        let kind = match tag_name.as_str() {
+                            "h1" => Kind::Title,
+                            "h2" | "h3" | "h4" | "h5" | "h6" => Kind::Heading,
+                            "li" => Kind::ListItem,
+                            _ => Kind::Body,
+                        };
+
+                        if !is_close {
+                            if cur_text.trim().is_empty() {
+                                cur_text.clear();
+                                cur_marks.clear();
+                                cur_paints.clear();
+                            } else {
+                                let prev_kind = block_stack.last().map_or(Kind::Body, |f| f.kind);
+                                flush_text(&mut blocks, &mut block_stack, &mut cur_text, &mut cur_marks, &mut cur_paints, prev_kind);
+                            }
+                            block_stack.push(BlockFrame { kind, children_emitted: 0 });
+                        } else {
+                            if cur_text.trim().is_empty() {
+                                cur_text.clear();
+                                cur_marks.clear();
+                                cur_paints.clear();
+                            }
+                            if let Some(frame) = block_stack.pop() {
+                                if !cur_text.is_empty() {
+                                    flush_text(&mut blocks, &mut block_stack, &mut cur_text, &mut cur_marks, &mut cur_paints, frame.kind);
+                                    if let Some(parent) = block_stack.last_mut() {
+                                        parent.children_emitted += frame.children_emitted;
+                                    }
+                                } else if frame.children_emitted == 0 {
+                                    push_empty_block(&mut blocks, &mut block_stack, frame.kind);
+                                } else if let Some(parent) = block_stack.last_mut() {
+                                    parent.children_emitted += frame.children_emitted;
+                                }
+                            }
+                        }
+                        last_was_br = false;
                     }
                     "br" => {
-                        flush_block(&mut blocks, &mut cur_text, &mut cur_marks, &mut cur_paints, cur_kind);
+                        let kind = block_stack.last().map_or(Kind::Body, |f| f.kind);
+                        if !cur_text.is_empty() {
+                            flush_text(&mut blocks, &mut block_stack, &mut cur_text, &mut cur_marks, &mut cur_paints, kind);
+                            last_was_br = true;
+                        } else if last_was_br {
+                            push_empty_block(&mut blocks, &mut block_stack, kind);
+                            last_was_br = true;
+                        } else {
+                            last_was_br = true;
+                        }
                     }
                     "img" => {
                         // Extract src attribute
@@ -359,8 +436,13 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                             if let Some(b64) = src_val.strip_prefix("data:image/").and_then(|s| s.split(";base64,").nth(1)) {
                                 if let Ok(data) = BASE64_STANDARD.decode(b64.trim()) {
                                     if let Ok(rgba) = crate::images::decode(&data) {
-                                        flush_block(&mut blocks, &mut cur_text, &mut cur_marks, &mut cur_paints, cur_kind);
+                                        let kind = block_stack.last().map_or(Kind::Body, |f| f.kind);
+                                        flush_text(&mut blocks, &mut block_stack, &mut cur_text, &mut cur_marks, &mut cur_paints, kind);
                                         blocks.push(ParsedBlock::Image { rgba });
+                                        if let Some(f) = block_stack.last_mut() {
+                                            f.children_emitted += 1;
+                                        }
+                                        last_was_br = false;
                                     }
                                 }
                             }
@@ -405,6 +487,7 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                         cur_marks.push(flags);
                         cur_paints.push(paint);
                     }
+                    last_was_br = false;
                     i = semi + 1;
                     continue;
                 }
@@ -431,12 +514,21 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                 cur_marks.push(flags);
                 cur_paints.push(paint);
             }
+            last_was_br = false;
         }
 
         i += c.len_utf8();
     }
 
-    flush_block(&mut blocks, &mut cur_text, &mut cur_marks, &mut cur_paints, cur_kind);
+    if cur_text.trim().is_empty() {
+        cur_text.clear();
+        cur_marks.clear();
+        cur_paints.clear();
+    }
+    if !cur_text.is_empty() {
+        let kind = block_stack.last().map_or(Kind::Body, |f| f.kind);
+        flush_text(&mut blocks, &mut block_stack, &mut cur_text, &mut cur_marks, &mut cur_paints, kind);
+    }
     blocks
 }
 
@@ -523,5 +615,92 @@ mod tests {
             }
             _ => panic!("expected Image block"),
         }
+    }
+
+    #[test]
+    fn to_html_and_text_serializes_empty_paragraphs_as_br() {
+        let b1 = Block::new(Kind::Title, "Header");
+        let b2 = Block::new(Kind::Body, "");
+        let b3 = Block::new(Kind::Body, "Content");
+        let blocks = vec![b1, b2, b3];
+        let range = Range {
+            anchor: Caret { block: 0, offset: 0 },
+            focus: Caret { block: 2, offset: 7 },
+        };
+        let (plain, html) = to_html_and_text(&blocks, range, &|_| None);
+        assert_eq!(plain, "Header\n\nContent");
+        assert!(html.contains("<h1>Header</h1>"));
+        assert!(html.contains("<p><br></p>"));
+        assert!(html.contains("<p>Content</p>"));
+    }
+
+    fn body(text: &str) -> ParsedBlock {
+        ParsedBlock::Body {
+            text: text.to_string(),
+            marks: vec![Flags::NONE; text.len()],
+            paints: vec![Paint::default(); text.len()],
+        }
+    }
+
+    #[test]
+    fn from_html_parses_empty_paragraphs_and_line_breaks() {
+        // Standard <p><br></p>
+        let p1 = from_html("<p>Hello</p><p><br></p><p>World</p>");
+        assert_eq!(p1.len(), 3);
+        assert_eq!(p1[0], body("Hello"));
+        assert_eq!(p1[1], body(""));
+        assert_eq!(p1[2], body("World"));
+
+        // Empty <p></p>
+        let p2 = from_html("<p>Hello</p><p></p><p>World</p>");
+        assert_eq!(p2.len(), 3);
+        assert_eq!(p2[0], body("Hello"));
+        assert_eq!(p2[1], body(""));
+        assert_eq!(p2[2], body("World"));
+
+        // Double <br> inside paragraph: <p>Hello<br><br>World</p>
+        let p3 = from_html("<p>Hello<br><br>World</p>");
+        assert_eq!(p3.len(), 3);
+        assert_eq!(p3[0], body("Hello"));
+        assert_eq!(p3[1], body(""));
+        assert_eq!(p3[2], body("World"));
+
+        // Double <br> outside tags: Hello<br><br>World
+        let p4 = from_html("Hello<br><br>World");
+        assert_eq!(p4.len(), 3);
+        assert_eq!(p4[0], body("Hello"));
+        assert_eq!(p4[1], body(""));
+        assert_eq!(p4[2], body("World"));
+
+        // Single <br> does not emit extra empty block: Hello<br>World
+        let p5 = from_html("Hello<br>World");
+        assert_eq!(p5.len(), 2);
+        assert_eq!(p5[0], body("Hello"));
+        assert_eq!(p5[1], body("World"));
+
+        // Non-breaking space in empty paragraph: <p>&nbsp;</p>
+        let p6 = from_html("<p>Hello</p><p>&nbsp;</p><p>World</p>");
+        assert_eq!(p6.len(), 3);
+        assert_eq!(p6[0], body("Hello"));
+        assert_eq!(p6[1], body(""));
+        assert_eq!(p6[2], body("World"));
+
+        // Nested wrapper: <div><p>Hello</p></div>
+        let p7 = from_html("<div><p>Hello</p></div>");
+        assert_eq!(p7.len(), 1);
+        assert_eq!(p7[0], body("Hello"));
+
+        // Single empty paragraph: <p><br></p>
+        let p8 = from_html("<p><br></p>");
+        assert_eq!(p8.len(), 1);
+        assert_eq!(p8[0], body(""));
+    }
+
+    #[test]
+    fn from_html_skips_style_and_script_tags() {
+        let html = "<style>body { color: red; }</style><p>Visible</p><script>console.log(1);</script>";
+        let parsed = from_html(html);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0], body("Visible"));
     }
 }

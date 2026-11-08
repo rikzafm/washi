@@ -461,3 +461,62 @@ fn right_click_menu_offers_paste_and_paste_image() {
     h.right_click(0, Some(&["Paste"]));
     assert_eq!(h.note_text(0), "# Trip\n![](img:1)\nappended text");
 }
+
+#[test]
+fn a_scrolled_picture_does_not_bleed_above_the_paper_in_viewing_mode() {
+    let mut h = note_with_title();
+    let img = flat(300, 200, RED);
+    h.copy_picture(img);
+    h.press_ctrl(0, 'v');
+    h.wait_for_images();
+    for i in 1..=20 {
+        h.type_text(0, &format!("\nLine {i} of text to allow the note to scroll"));
+    }
+    h.advance(ms(400));
+
+    // Settle to viewing mode (at rest)
+    let _ = h.render(0);
+    h.advance(ms(5));
+    h.set_window_active(0, false);
+    h.advance(ms(1));
+    let _ = h.text_tilt_scale(0);
+    h.advance(ms(500));
+    let _ = h.render(0);
+    assert_eq!(h.text_tilt_scale(0), 1.0);
+
+    // Scroll up so the image passes into the top clip area
+    h.wheel(0, 220.0, 200.0, -120.0);
+    assert!(h.scroll_offset(0) > 0.0);
+
+    let (w, _, px) = h.render(0);
+    // At rest, the paper is rotated by 1.5 deg clockwise. At any column x,
+    // the paper's physical top edge is cy - (h - 84)/2 * cos(1.5 deg) + (x - w/2) * sin(1.5 deg).
+    // In window coordinates, the highest point of the paper top (at the far left corner) is around y = 38.
+    // Zero red pixels may ever appear above the paper's physical top edge (y < 38 across the whole window).
+    let red_above_paper = px
+        .iter()
+        .enumerate()
+        .filter(|(idx, p)| {
+            let y = idx / w as usize;
+            y < 38 && [p.r, p.g, p.b].iter().zip(RED).all(|(a, b)| (*a as i32 - b as i32).abs() <= 12)
+        })
+        .count();
+
+    assert_eq!(red_above_paper, 0, "picture must not bleed above the paper's top edge into the desktop");
+
+    // Also verify that the top cut of the picture is tilted (not horizontal):
+    // Find the topmost red pixel at the left of the image (x = 80) and at the right (x = 240).
+    // Because the top cut follows the 1.45 deg tilt, the top pixel at the right is lower (higher y).
+    let top_at_x = |target_x: usize| {
+        (0..px.len() / w as usize).find(|&y| {
+            let p = &px[y * w as usize + target_x];
+            [p.r, p.g, p.b].iter().zip(RED).all(|(a, b)| (*a as i32 - b as i32).abs() <= 12)
+        })
+    };
+    if let (Some(top_left), Some(top_right)) = (top_at_x(80), top_at_x(240)) {
+        assert!(
+            top_right > top_left,
+            "top cut must follow the tilt (top_right {top_right} should be lower down than top_left {top_left})"
+        );
+    }
+}

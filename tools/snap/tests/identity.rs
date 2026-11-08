@@ -113,7 +113,7 @@ fn a_launch_after_the_app_quit_starts_normally() {
 }
 
 #[test]
-fn icon_is_white_paper_with_a_pink_tape_strip_at_every_size() {
+fn icon_renders_app_logo_at_every_size() {
     for size in washi::icon::SIZES.into_iter().chain([20, 64, 128]) {
         let px = washi::icon::rgba(size);
         assert_eq!(px.len() as u32, size * size * 4);
@@ -121,11 +121,45 @@ fn icon_is_white_paper_with_a_pink_tape_strip_at_every_size() {
             let i = ((y * size + x) * 4) as usize;
             px[i..i + 4].try_into().unwrap()
         };
-        let (lo, _hi, tl, tr, tt, tb) = washi::icon::layout(size);
-        assert_eq!(at(0, 0)[3], 0, "{size}px: outside the sheet is transparent");
-        assert_eq!(at((tl + tr) / 2, (tt + tb) / 2), [0xF7, 0xBF, 0xCD, 0xFF], "{size}px: tape");
-        assert_eq!(at(size / 2, size * 7 / 10), [0xFF, 0xFF, 0xFF, 0xFF], "{size}px: paper");
-        assert!(lo > 0 && tt > lo, "{size}px: tape sits inside the sheet");
+        // The four sharp outer corners are transparent outside the rounded rectangle
+        assert_eq!(at(0, 0)[3], 0, "{size}px: outside corner is transparent");
+        assert_eq!(at(size - 1, 0)[3], 0, "{size}px: outside top-right is transparent");
+        assert_eq!(at(0, size - 1)[3], 0, "{size}px: outside bottom-left is transparent");
+        assert_eq!(at(size - 1, size - 1)[3], 0, "{size}px: outside bottom-right is transparent");
+
+        // The center contains the dark ink letter 'W'
+        let center = at(size / 2, size / 2);
+        assert!(
+            center[0] < 60 && center[1] < 60 && center[2] < 70 && center[3] == 255,
+            "{size}px: center is ink 'W', got {center:?}"
+        );
+
+        // Pink tape appears in the top-left area
+        let has_pink = (0..size / 2).any(|y| {
+            (0..size / 2).any(|x| {
+                let p = at(x, y);
+                p[0] > 200 && p[1] > 150 && p[1] < 220 && p[2] > 170 && p[2] < 230 && p[3] > 100
+            })
+        });
+        assert!(has_pink, "{size}px: contains pink tape in top-left");
+
+        // Light blue tape appears in the bottom-right area
+        let has_blue = (size / 2..size).any(|y| {
+            (size / 2..size).any(|x| {
+                let p = at(x, y);
+                p[0] < 200 && p[1] > 180 && p[2] > 200 && p[3] > 100
+            })
+        });
+        assert!(has_blue, "{size}px: contains blue tape in bottom-right");
+
+        // Paper is present inside the rounded frame
+        let has_paper = (0..size).any(|y| {
+            (0..size).any(|x| {
+                let p = at(x, y);
+                p[0] > 250 && p[1] > 250 && p[2] > 245 && p[3] == 255
+            })
+        });
+        assert!(has_paper, "{size}px: contains paper");
     }
 }
 

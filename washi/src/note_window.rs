@@ -1539,6 +1539,13 @@ impl Note {
                         }
                     }
                 }
+                if let Some(text) = clipboard.text() {
+                    if text.contains('\n') || text.contains('\r') {
+                        let caret = doc.replace_range(&text);
+                        changed(Some(caret));
+                        return true;
+                    }
+                }
                 false
             }
         };

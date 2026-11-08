@@ -228,10 +228,8 @@ export component NoteWindow inherits Window {
             text-view := Rectangle {
                 x: root.margin;
                 // The tilted paper's top edge dips by half the paper width times sin(tilt) at one end.
-                // At rest the words are cut along the tilted edge themselves (text.slint), so this clip
-                // only has to start above its highest point; the level editing text has no such cut, so
-                // its clip starts below the lowest point and scrolled text never shows over the backdrop.
-                y: root.paper-top + (text-layer.editing ? 1 : -1) * abs((root.width - 2 * root.margin) / 2 * root.tilt.sin());
+                // The clip starts below the lowest point of the tilted top edge so scrolled text never shows over the backdrop.
+                y: root.paper-top + abs((root.width - 2 * root.margin) / 2 * root.tilt.sin());
                 width: root.width - 2 * root.margin;
                 // The tilted band's top edge rises by the same amount at the left;
                 // text may not reach into it, and a level clip cannot follow the tilt.

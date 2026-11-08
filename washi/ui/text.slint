@@ -195,31 +195,18 @@ export component TextLayer inherits Rectangle {
         background: Theme.selection-over;
     }
 
-    // Each resting word is cut along that edge on its own (they are at most a few pixels wide per
-    // step, so the cut follows the tilt within a pixel).
-    for r in root.runs: Rectangle {
-        property <length> pad: 4px;
-        property <length> top: r.y + (r.dy + root.shift-y) * root.tilt-scale - self.pad;
-        property <length> cut: max(self.top, root.edge-y(r.x + (r.dx + root.shift-x) * root.tilt-scale + r.width / 2));
+    for r in root.runs: Text {
         visible: r.block != root.composing-block;
-        clip: true;
-        x: r.x + (r.dx + root.shift-x) * root.tilt-scale - self.pad;
-        y: self.cut;
-        width: r.width + 2 * self.pad;
-        height: max(0px, r.pitch + 2 * self.pad - (self.cut - self.top));
-
-        Text {
-            x: parent.pad;
-            y: parent.top - parent.cut + parent.pad;
-            text: r.text;
-            wrap: no-wrap;
-            font-family: Theme.handwriting;
-            font-size: r.size;
-            font-weight: r.bold ? 700 : 400;
-            font-italic: r.italic;
-            line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
-            color: r.hint ? Theme.ink-hint : r.ink;
-        }
+        x: r.x + (r.dx + root.shift-x) * root.tilt-scale;
+        y: r.y + (r.dy + root.shift-y) * root.tilt-scale;
+        text: r.text;
+        wrap: no-wrap;
+        font-family: Theme.handwriting;
+        font-size: r.size;
+        font-weight: r.bold ? 700 : 400;
+        font-italic: r.italic;
+        line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
+        color: r.hint ? Theme.ink-hint : r.ink;
     }
 
     // underlines, strike-throughs and list bullets: drawn by the app, level while editing
@@ -255,6 +242,8 @@ export component TextLayer inherits Rectangle {
             tilt-scale: root.tilt-scale;
             paper-w: root.paper-w;
             paper-h: root.paper-h;
+            tilt: root.tilt;
+            scroll-y: root.scroll-y;
             shift-x: root.shift-x;
             shift-y: root.shift-y;
             img-pct: b.img-pct;
