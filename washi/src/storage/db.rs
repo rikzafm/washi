@@ -164,6 +164,23 @@ impl Db {
         Ok(NoteRow { id: r.get(0)?, content: r.get(1)?, geometry, always_on_top: r.get::<_, i64>(6)? != 0 })
     }
 
+    /// Whether the text fades into the paper above the toolbar (default) or is cut cleanly.
+    pub fn fade_text_edge(&self) -> bool {
+        self.conn
+            .query_row("SELECT value FROM meta WHERE key='fade_text_edge'", [], |r| r.get::<_, String>(0))
+            .map(|v| v != "0")
+            .unwrap_or(true)
+    }
+
+    pub fn set_fade_text_edge(&self, on: bool) -> Result<(), DbError> {
+        self.conn.execute(
+            "INSERT INTO meta(key, value) VALUES ('fade_text_edge', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [if on { "1" } else { "0" }],
+        )?;
+        Ok(())
+    }
+
     pub fn set_always_on_top(&self, id: NoteId, on: bool) -> Result<(), DbError> {
         self.conn
             .execute("UPDATE notes SET always_on_top = ?1 WHERE id = ?2", rusqlite::params![on as i64, id])?;

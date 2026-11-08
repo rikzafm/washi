@@ -34,7 +34,7 @@ fn right_click_anywhere_opens_the_menu() {
     }
     assert_eq!(h.menu.shown.borrow().len(), 3);
     let items = h.last_menu();
-    assert_eq!(labels(&items), ["Paste", "Paste image", "New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows", "Export as Markdown\u{2026}"]);
+    assert_eq!(labels(&items), ["Paste", "Paste image", "New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows", "Fade text edge", "Export as Markdown\u{2026}"]);
     assert!(!menu_item(&items, "Paste").enabled, "no clipboard content yet");
     assert!(!menu_item(&items, "Paste image").enabled, "no image on clipboard");
     assert!(!menu_item(&items, "Open note").enabled, "no closed notes yet, so nothing to open");
@@ -144,12 +144,15 @@ fn choosing_a_closed_note_reopens_it_at_its_saved_size() {
 fn delete_asks_and_keeps_the_note_when_declined() {
     let mut h = two_notes();
     h.type_text(1, "keep me");
-    h.dialogs.confirm_answer.set(false);
     h.right_click(1, Some(&["Delete"]));
+    assert!(h.is_delete_dialog_open());
+    h.invoke_keep_note();
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.note_text(1), "# keep me");
     h.press_ctrl(1, 'd');
-    assert_eq!(h.open_note_count(), 2, "Ctrl+D asks too");
+    assert!(h.is_delete_dialog_open());
+    h.press_delete_dialog_escape();
+    assert_eq!(h.open_note_count(), 2, "Ctrl+D asks too; Escape keeps it");
 }
 
 #[test]
@@ -158,8 +161,9 @@ fn delete_removes_the_note_for_good_when_confirmed() {
     let id = h.note_id(1);
     h.type_text(1, "WASHI_CANARY_delete_me");
     h.advance(ms(500));
-    h.dialogs.confirm_answer.set(true);
     h.right_click(1, Some(&["Delete"]));
+    assert!(h.is_delete_dialog_open());
+    h.invoke_confirm_delete();
     assert_eq!(h.open_note_count(), 1);
     assert_eq!(h.window_count(), 1);
     assert!(h.is_deleted(id));
@@ -182,8 +186,9 @@ fn delete_removes_the_note_for_good_when_confirmed() {
 fn ctrl_d_deletes_after_confirmation() {
     let mut h = two_notes();
     let id = h.note_id(1);
-    h.dialogs.confirm_answer.set(true);
     h.press_ctrl(1, 'd');
+    assert!(h.is_delete_dialog_open());
+    h.invoke_confirm_delete();
     assert_eq!(h.open_note_count(), 1);
     assert!(h.is_deleted(id));
 }
@@ -202,8 +207,9 @@ fn closing_the_last_open_note_quits() {
 fn deleting_the_last_open_note_quits() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.dialogs.confirm_answer.set(true);
     h.press_ctrl(0, 'd');
+    assert!(h.is_delete_dialog_open());
+    h.invoke_confirm_delete();
     assert!(h.has_quit());
 }
 
@@ -311,8 +317,9 @@ fn closing_a_note_then_deleting_the_last_note_restores_the_closed_note() {
     h.close_note(0);
     h.advance(Duration::from_secs(5));
     // Note B is now at index 0. Delete it.
-    h.dialogs.confirm_answer.set(true);
     h.right_click(0, Some(&["Delete"]));
+    assert!(h.is_delete_dialog_open());
+    h.invoke_confirm_delete();
     assert!(h.has_quit());
 
     h.restart().unwrap();

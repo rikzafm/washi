@@ -22,6 +22,9 @@ pub const AUTOSAVE_DELAY: Duration = Duration::from_millis(500);
 /// timer: typing never delays it, and dragging never delays the text.
 pub const GEOMETRY_DELAY: Duration = Duration::from_millis(500);
 
+/// How long the scrollbar stays shown after scrolling stops.
+pub const SCROLLBAR_HOLD: Duration = Duration::from_millis(600);
+
 /// A minimized window reports a position around (-32000, -32000); that is not where the note lives.
 fn is_minimized_position(x: i32, y: i32) -> bool {
     x <= -30000 && y <= -30000
@@ -1172,6 +1175,7 @@ pub struct Note {
     history_timer: Rc<Timer>,
     geometry: Rc<GeometrySave>,
     geometry_timer: Rc<Timer>,
+    scroll_timer: Rc<Timer>,
     /// Everything that changes the text ends here (see `open`).
     changed: Rc<dyn Fn(Option<Caret>)>,
     clipboard: Rc<dyn ImageClipboard>,
@@ -1225,6 +1229,18 @@ impl Note {
         let timer = Rc::new(Timer::default());
         let history_timer = Rc::new(Timer::default());
         let autoscroll = Rc::new(Timer::default());
+        let scroll_timer = Rc::new(Timer::default());
+        {
+            let (weak, scroll_timer) = (ui.as_weak(), scroll_timer.clone());
+            ui.on_scroll_activity(move || {
+                let weak = weak.clone();
+                scroll_timer.start(TimerMode::SingleShot, SCROLLBAR_HOLD, move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_scrolling(false);
+                    }
+                });
+            });
+        }
         // everything that changes the text ends here: relayout, stored text, title, autosave
         let changed: Rc<dyn Fn(Option<Caret>)> = {
             let (autosave, timer, weak, doc) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone());
@@ -1598,7 +1614,7 @@ impl Note {
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), changed, clipboard, paste_image })
+        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, clipboard, paste_image })
     }
 
     /// Where an image added now goes: after the block that has the caret (or last had it).
@@ -1851,6 +1867,10 @@ impl Note {
         self.ui.set_pinned(on);
     }
 
+    pub fn set_fade_edge(&self, on: bool) {
+        self.ui.set_fade_edge(on);
+    }
+
     pub fn is_dropdown_open(&self) -> bool {
         self.ui.get_dropdown_open()
     }
@@ -1889,6 +1909,8 @@ impl Note {
         // the fields of the old blocks vanish without saying they lost the focus
         self.ui.set_text_focused_block(-1);
         self.ui.set_focus_block(-1);
+        self.scroll_timer.stop();
+        self.ui.set_scrolling(false);
         self.doc.load(text);
         self.doc.set_caret(START);
         self.doc.end_range(&self.ui);
@@ -1909,6 +1931,7 @@ impl Note {
         self.timer.stop();
         self.history_timer.stop();
         self.geometry_timer.stop();
+        self.scroll_timer.stop();
         // the text keeps its look (editing or resting) while nobody can see it: no redraw
         self.ui.set_suspended(true);
         self.ui.window().dispatch_event(slint::platform::WindowEvent::WindowActiveChanged(false));
@@ -1918,6 +1941,7 @@ impl Note {
     pub fn resume(&self, focused: bool) {
         self.doc.images.thaw(&self.doc.doc.borrow());
         self.doc.sync_model();
+        self.ui.set_scrolling(false);
         self.ui.set_suspended(false);
         // fields that lost the focus while suspended say so now
         self.ui.set_text_resync(self.ui.get_text_resync() + 1);

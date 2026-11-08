@@ -15,6 +15,10 @@ export global PaperGeometry {
     pure public function y(cx: length, cy: length, lx: length, ly: length) -> length {
         return cy + lx * sn + ly * cs;
     }
+    // Position along the paper's vertical axis for a window point (x, y).
+    pure public function v(cx: length, cy: length, x: length, y: length) -> length {
+        return -(x - cx) * sn + (y - cy) * cs;
+    }
     pure function pt(cx: length, cy: length, lx: length, ly: length) -> string {
         return (x(cx, cy, lx, ly) / 1px) + " " + (y(cx, cy, lx, ly) / 1px);
     }
@@ -60,7 +64,11 @@ component Tape {
     height: img.source.height / PaperTheme.tape-image-scale * 1px;
     x: root.center-x - root.width / 2;
     y: root.center-y - root.height / 2;
-    img := Image { width: parent.width; height: parent.height; source: root.source; }
+    img := Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.source;
+    }
 }
 
 // The two tapes, pinned at fixed offsets from the paper's top-left and bottom-right corners.
@@ -75,6 +83,7 @@ export component Tapes {
         center-x: PaperGeometry.x(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
         center-y: PaperGeometry.y(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
     }
+
     Tape {
         source: @image-url("assets/tape-blue.png");
         center-x: PaperGeometry.x(root.cx, root.cy, root.hw + PaperTheme.tape-blue-offset-u, root.hh + PaperTheme.tape-blue-offset-v);

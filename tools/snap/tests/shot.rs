@@ -94,10 +94,11 @@ fn the_scrollbar_is_drawn_only_when_hovered_and_the_text_overflows() {
     let long = std::fs::read_to_string("../../docs/design/fixtures/long.md").unwrap().replace("\r\n", "\n");
     let mockup = std::fs::read_to_string("../../docs/design/fixtures/mockup.md").unwrap().replace("\r\n", "\n");
     let paper = (545.0, 576.0);
-    let big = |text: &str, hover| Options { paper, canvas: (1000, 1040), hover, ..opts(text.trim_end()) };
-    assert!(scrollbar_pixels(&snapshot(&big(&long, true)).unwrap(), paper) > 20, "overflowing and hovered: shown");
-    assert_eq!(scrollbar_pixels(&snapshot(&big(&long, false)).unwrap(), paper), 0, "not hovered: hidden");
-    assert_eq!(scrollbar_pixels(&snapshot(&big(&mockup, true)).unwrap(), paper), 0, "hovered but fits: hidden");
+    let big = |text: &str, hover, hover_scrollbar| Options { paper, canvas: (1000, 1040), hover, hover_scrollbar, ..opts(text.trim_end()) };
+    assert!(scrollbar_pixels(&snapshot(&big(&long, false, true)).unwrap(), paper) > 20, "overflowing and scrollbar hovered: shown");
+    assert_eq!(scrollbar_pixels(&snapshot(&big(&long, true, false)).unwrap(), paper), 0, "hovering note body only: hidden");
+    assert_eq!(scrollbar_pixels(&snapshot(&big(&long, false, false)).unwrap(), paper), 0, "not hovered: hidden");
+    assert_eq!(scrollbar_pixels(&snapshot(&big(&mockup, false, true)).unwrap(), paper), 0, "scrollbar hovered but fits: hidden");
 }
 
 #[test]

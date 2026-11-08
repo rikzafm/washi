@@ -3,8 +3,8 @@ import { PaperTheme } from "paper-theme.slint";
 import { PaperGeometry } from "paper.slint";
 import { Theme } from "theme.slint";
 
-// Scrolling of a note's text. The wheel moves the text inside the text area; the bar only shows
-// the position (thin, ink-muted), and only while the pointer is over the note and the text overflows.
+// Scrolling of a note's text. The wheel or dragging the bar moves the text inside the text area;
+// the bar only shows while actively scrolling, hovered, or dragged, and only when the text overflows.
 export global ScrollMetrics {
     out property <length> bar-width: 4px;
     // From the paper's right edge to the bar's right side: inside the text's right inset.
@@ -14,7 +14,9 @@ export global ScrollMetrics {
     // Space kept between the thumb and the ends of the track.
     out property <length> bar-pad: 4px;
     out property <length> min-thumb: 24px;
+    out property <length> hit-width: 12px;
     out property <duration> fade: 120ms;
+    out property <duration> hold: 600ms;
 }
 
 /// The thin bar, drawn in the paper's own frame so it runs parallel to the paper's right edge from
@@ -26,10 +28,16 @@ export component ScrollBar inherits Rectangle {
     in property <length> paper-h;
     in property <length> view;
     in property <length> content;
-    in property <length> offset;
-    in property <bool> shown: false;
+    in-out property <length> offset;
+    in property <bool> scrolling: false;
+    out property <bool> has-hover: hit.has-hover;
+    out property <bool> dragging: false;
+    callback pressed();
+    callback right-click(length, length);
+    callback pointer-over();
 
     property <bool> overflowing: root.content > root.view + 0.5px;
+    changed overflowing => { if (!root.overflowing) { root.dragging = false; } }
     property <length> cx: root.width / 2;
     property <length> cy: root.height / 2;
     property <length> r: ScrollMetrics.bar-width / 2;
@@ -44,35 +52,99 @@ export component ScrollBar inherits Rectangle {
     property <length> ly: root.track-top + root.thumb / 2 + root.travel * clamp(root.offset / root.range, 0, 1);
     // The rounded ends sit half a thumb up and down along the paper's tilted vertical.
     property <length> half: max(0px, root.thumb / 2 - root.r);
+    out property <length> thumb-x: PaperGeometry.x(root.cx, root.cy, root.lx, root.ly);
+    out property <length> thumb-y: PaperGeometry.y(root.cx, root.cy, root.lx, root.ly);
 
+    property <bool> shown: root.scrolling || hit.has-hover || root.dragging;
     out property <float> bar-opacity: (root.shown && root.overflowing) ? 1 : 0;
-    opacity: root.bar-opacity;
-    visible: root.bar-opacity > 0;
-    animate opacity { duration: ScrollMetrics.fade; easing: ease-out; }
 
-    // The straight part of the pill: a rectangle turned by the paper's tilt.
-    Path {
-        width: root.width;
-        height: root.height;
-        viewbox-width: root.width / 1px;
-        viewbox-height: root.height / 1px;
-        commands: PaperGeometry.quad(
-            PaperGeometry.x(root.cx, root.cy, root.lx, root.ly),
-            PaperGeometry.y(root.cx, root.cy, root.lx, root.ly),
-            root.r, root.half);
-        fill: ToolbarMetrics.ink-muted;
+    property <length> hit-x0: max(
+        root.cx + root.paper-w / 2 - Theme.text-inset-right + 4px,
+        PaperGeometry.x(root.cx, root.cy, root.lx, root.track-bottom) - ScrollMetrics.hit-width / 2);
+    property <length> hit-x1: PaperGeometry.x(root.cx, root.cy, root.lx, root.track-top) + ScrollMetrics.hit-width / 2;
+    property <length> hit-y0: PaperGeometry.y(root.cx, root.cy, root.lx, root.track-top) - ScrollMetrics.bar-pad;
+    property <length> hit-y1: PaperGeometry.y(root.cx, root.cy, root.lx, root.track-bottom) + ScrollMetrics.bar-pad;
+    property <length> grab-dv: 0px;
+
+    function scroll-to-v(target-ly: length) {
+        root.offset = root.travel > 0px
+            ? root.range * clamp((target-ly - root.track-top - root.thumb / 2) / root.travel, 0, 1)
+            : 0px;
     }
-    // A round cap at each end.
-    for sign in [-1, 1]: Path {
+
+    bar := Rectangle {
+        x: 0px;
+        y: 0px;
         width: root.width;
         height: root.height;
-        viewbox-width: root.width / 1px;
-        viewbox-height: root.height / 1px;
-        property <length> ex: PaperGeometry.x(root.cx, root.cy, root.lx, root.ly + sign * root.half);
-        property <length> ey: PaperGeometry.y(root.cx, root.cy, root.lx, root.ly + sign * root.half);
-        commands: "M " + ((self.ex - root.r) / 1px) + " " + (self.ey / 1px)
-            + " a " + (root.r / 1px) + " " + (root.r / 1px) + " 0 1 0 " + (2 * root.r / 1px) + " 0"
-            + " a " + (root.r / 1px) + " " + (root.r / 1px) + " 0 1 0 " + (-2 * root.r / 1px) + " 0 Z";
-        fill: ToolbarMetrics.ink-muted;
+        opacity: root.bar-opacity;
+        visible: root.bar-opacity > 0 || self.opacity > 0;
+        animate opacity { duration: ScrollMetrics.fade; easing: ease-out; }
+
+        // The straight part of the pill: a rectangle turned by the paper's tilt.
+        Path {
+            width: root.width;
+            height: root.height;
+            viewbox-width: root.width / 1px;
+            viewbox-height: root.height / 1px;
+            commands: PaperGeometry.quad(
+                PaperGeometry.x(root.cx, root.cy, root.lx, root.ly),
+                PaperGeometry.y(root.cx, root.cy, root.lx, root.ly),
+                root.r, root.half);
+            fill: ToolbarMetrics.ink-muted;
+        }
+        // A round cap at each end.
+        for sign in [-1, 1]: Path {
+            width: root.width;
+            height: root.height;
+            viewbox-width: root.width / 1px;
+            viewbox-height: root.height / 1px;
+            property <length> ex: PaperGeometry.x(root.cx, root.cy, root.lx, root.ly + sign * root.half);
+            property <length> ey: PaperGeometry.y(root.cx, root.cy, root.lx, root.ly + sign * root.half);
+            commands: "M " + ((self.ex - root.r) / 1px) + " " + (self.ey / 1px)
+                + " a " + (root.r / 1px) + " " + (root.r / 1px) + " 0 1 0 " + (2 * root.r / 1px) + " 0"
+                + " a " + (root.r / 1px) + " " + (root.r / 1px) + " 0 1 0 " + (-2 * root.r / 1px) + " 0 Z";
+            fill: ToolbarMetrics.ink-muted;
+        }
+    }
+
+    hit := TouchArea {
+        x: root.hit-x0;
+        y: root.hit-y0;
+        width: max(0px, root.hit-x1 - root.hit-x0);
+        height: max(0px, root.hit-y1 - root.hit-y0);
+        visible: root.overflowing;
+        enabled: root.overflowing;
+        mouse-cursor: pointer;
+
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.move) { root.pointer-over(); }
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                let v = PaperGeometry.v(root.cx, root.cy, self.x + self.mouse-x, self.y + self.mouse-y);
+                root.pressed();
+                root.dragging = true;
+                if (abs(v - root.ly) <= root.thumb / 2 + ScrollMetrics.bar-pad) {
+                    root.grab-dv = v - root.ly;
+                } else {
+                    root.grab-dv = 0px;
+                    root.scroll-to-v(v);
+                }
+            }
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
+                root.dragging = false;
+            }
+            if (e.kind == PointerEventKind.cancel) {
+                root.dragging = false;
+            }
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+                root.right-click(self.x + self.mouse-x, self.y + self.mouse-y);
+            }
+        }
+        moved => {
+            if (root.dragging) {
+                let v = PaperGeometry.v(root.cx, root.cy, self.x + self.mouse-x, self.y + self.mouse-y);
+                root.scroll-to-v(v - root.grab-dv);
+            }
+        }
     }
 }

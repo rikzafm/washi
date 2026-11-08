@@ -1,0 +1,158 @@
+import { Theme } from "theme.slint";
+import { MoveArea } from "resize-zones.slint";
+
+// Plain handwritten text button, optionally underlined.
+component TextAction inherits Rectangle {
+    in property <string> label;
+    in property <color> ink: #2b2b2b;
+    in property <bool> underline: false;
+    in property <bool> right: false;
+    callback clicked();
+
+    min-height: 36px;
+    min-width: 64px;
+    opacity: ta.pressed ? 0.5 : (ta.has-hover ? 0.75 : 1.0);
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        alignment: root.right ? LayoutAlignment.end : LayoutAlignment.start;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.label;
+                color: root.ink;
+                font-family: Theme.handwriting;
+                font-size: 28px;
+                font-weight: 700;
+            }
+            Rectangle {
+                height: root.underline ? 2px : 0px;
+                background: root.ink;
+            }
+        }
+    }
+}
+
+export component DeleteNoteDialog inherits Window {
+    in property <string> title-text: "Delete this note?";
+    in property <string> message-text: "You can't get it back.";
+    callback keep();
+    callback confirm-delete();
+    callback start-move();
+
+    // The card sits inside a margin that holds its shadow and the overhanging tape.
+    in property <length> card-width: 320px;
+    in property <length> card-height: 180px;
+    in property <length> margin: 36px;
+
+    width: card-width + 2 * margin;
+    height: card-height + 2 * margin;
+    background: transparent;
+    no-frame: true;
+    always-on-top: true;
+
+    forward-focus: fs;
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.keep();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // Soft shadow as stacked see-through copies of the card (the software renderer cannot blur).
+    for growth[i] in [16px, 14px, 12px, 10px, 8px, 6px, 4px, 2px]: Rectangle {
+        x: root.margin - growth;
+        y: root.margin - growth + 6px;
+        width: root.card-width + 2 * growth;
+        height: root.card-height + 2 * growth;
+        border-radius: growth;
+        background: #00000009;
+    }
+
+    paper := Rectangle {
+        x: root.margin;
+        y: root.margin;
+        width: root.card-width;
+        height: root.card-height;
+        background: #fdfcf8;
+    }
+
+    // Drag anywhere on the paper or tape; the buttons sit above this.
+    MoveArea {
+        width: 100%;
+        height: 100%;
+        start => { root.start-move(); }
+    }
+
+    Text {
+        x: root.margin + 28px;
+        y: root.margin + 24px;
+        width: root.card-width - 56px;
+        text: root.title-text;
+        color: #2b2b2b;
+        font-family: Theme.handwriting;
+        font-size: 34px;
+        font-weight: 700;
+        overflow: elide;
+    }
+    Text {
+        x: root.margin + 28px;
+        y: root.margin + 76px;
+        width: root.card-width - 56px;
+        text: root.message-text;
+        color: #555555;
+        font-family: Theme.handwriting;
+        font-size: 21px;
+        wrap: word-wrap;
+    }
+
+    TextAction {
+        width: 80px;
+        height: 40px;
+        x: root.margin + 28px;
+        y: root.margin + root.card-height - 40px - 16px;
+        label: "Keep it";
+        clicked => { root.keep(); }
+    }
+    TextAction {
+        width: 80px;
+        height: 40px;
+        x: root.margin + root.card-width - 80px - 75px;
+        y: root.margin + root.card-height - 40px - 14px;
+        label: "Delete";
+        right: true;
+        ink: #c0392b;
+        underline: true;
+        clicked => { root.confirm-delete(); }
+    }
+
+    // Pink top-left, blue bottom-right, like the note.
+    Image {
+        source: @image-url("assets/tape-pink.png");
+        x: root.margin - 28px;
+        y: root.margin - 16px;
+        width: self.source.width / 4.0 * 1px;
+        height: self.source.height / 4.0 * 1px;
+        MoveArea { width: 100%; height: 100%; start => { root.start-move(); } }
+    }
+    Image {
+        source: @image-url("assets/tape-blue.png");
+        x: root.margin + root.card-width - self.width + 24px;
+        y: root.margin + root.card-height - self.height + 14px;
+        width: self.source.width / 4.0 * 1px;
+        height: self.source.height / 4.0 * 1px;
+        MoveArea { width: 100%; height: 100%; start => { root.start-move(); } }
+    }
+}

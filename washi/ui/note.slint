@@ -8,6 +8,7 @@ export { BlockData, BlockKind, MarkerData, RuleData, RunData } from "block.slint
 export { Theme } from "theme.slint";
 export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
+export { DeleteNoteDialog } from "delete-dialog.slint";
 export { PaletteEntry, PickerPalette } from "color-picker.slint";
 import { Toolbar, ToolbarMetrics, MenuButton } from "toolbar.slint";
 import { ColorPicker, ColorPickerNav, PickerPalette } from "color-picker.slint";
@@ -30,6 +31,8 @@ export component NoteWindow inherits Window {
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
     in property <string> window-title: "Washi";
     in property <bool> pinned: false;
+    /// Fade the text into the paper above the toolbar (false: cut it cleanly).
+    in property <bool> fade-edge: true;
     in property <image> app-icon;
     title: window-title;
     always-on-top: pinned;
@@ -122,8 +125,17 @@ export component NoteWindow inherits Window {
     /// The text's height (Rust lays it out) and how far it is scrolled up; the wheel changes it.
     in property <length> content-height;
     in-out property <length> scroll-y: 0px;
+    in-out property <bool> scrolling: false;
+    callback scroll-activity();
+    changed scroll-y => {
+        if (root.max-scroll > 0px && !scrollbar.dragging && !root.suspended) {
+            root.scrolling = true;
+            root.scroll-activity();
+        }
+    }
+    property <length> tilt-allowance: abs((root.width - 2 * root.margin) / 2 * root.tilt.sin());
     /// The height of the text area (it ends above the toolbar band).
-    out property <length> text-view-height: text-view.height;
+    out property <length> text-view-height: root.paper-bottom - root.paper-top - ToolbarMetrics.band-height - Theme.text-bottom-gap - 2 * root.tilt-allowance;
     /// Where the text layer's top is in the text area (minus the scroll): a pointer's place in the
     /// text area is its place in the layer plus this.
     out property <length> text-layer-y: text-layer.y;
@@ -132,10 +144,12 @@ export component NoteWindow inherits Window {
     callback caret-moved(int, int, int);
     // What the note scrolls through: the app's layout, or the edit fields if they run longer.
     property <length> content: max(root.content-height, text-layer.fields-bottom);
-    property <length> max-scroll: max(0px, root.content - text-view.height);
+    property <length> max-scroll: max(0px, root.content - root.text-view-height);
     changed max-scroll => { if (root.scroll-y > root.max-scroll) { root.scroll-y = root.max-scroll; } }
-    /// Opacity of the scrollbar (0 unless hovered and the text overflows).
+    /// Opacity of the scrollbar (0 unless actively scrolling, hovered, or dragged while overflowing).
     out property <float> scrollbar-opacity: scrollbar.bar-opacity;
+    out property <length> scrollbar-thumb-x: scrollbar.thumb-x;
+    out property <length> scrollbar-thumb-y: scrollbar.thumb-y;
     /// Right click on the paper, in window coordinates.
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
@@ -192,6 +206,8 @@ export component NoteWindow inherits Window {
         scroll-event(e) => {
             if (root.max-scroll <= 0px) { return reject; }
             root.scroll-y = max(0px, min(root.max-scroll, root.scroll-y - e.delta-y));
+            root.scrolling = true;
+            root.scroll-activity();
             accept
         }
         pointer-event(e) => {
@@ -240,13 +256,13 @@ export component NoteWindow inherits Window {
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             text-view := Rectangle {
                 x: root.margin;
-                // The tilted paper's top edge dips by half the paper width times sin(tilt) at one end.
-                // The clip starts below the lowest point of the tilted top edge so scrolled text never shows over the backdrop.
-                y: root.paper-top + abs((root.width - 2 * root.margin) / 2 * root.tilt.sin());
+                // The tilted paper's top edge rises by half the paper width times sin(tilt) at the left.
+                // The clip starts at the highest point of the tilted top edge so images and text can reach the tilted edge.
+                y: root.paper-top - root.tilt-allowance;
                 width: root.width - 2 * root.margin;
                 // The tilted band's top edge rises by the same amount at the left;
                 // text may not reach into it, and a level clip cannot follow the tilt.
-                height: root.paper-bottom - ToolbarMetrics.band-height - Theme.text-bottom-gap - self.y - (root.width - 2 * root.margin) / 2 * root.tilt.sin();
+                height: root.paper-bottom - ToolbarMetrics.band-height - Theme.text-bottom-gap - self.y - root.tilt-allowance;
                 clip: true;
 
                 text-layer := TextLayer {
@@ -299,26 +315,22 @@ export component NoteWindow inherits Window {
                 // Where more text lies below, the last line fades into the paper instead of being cut
                 // in half by the clip. (Touches pass through: it is not a TouchArea.)
                 Rectangle {
-                    y: parent.height - 22px;
-                    height: 22px;
-                    visible: root.scroll-y < root.max-scroll - 1px;
-                    background: @linear-gradient(180deg, PaperTheme.paper-color.transparentize(1) 0%, PaperTheme.paper-color 100%);
+                    y: parent.height - 56px;
+                    height: 56px;
+                    visible: root.fade-edge && root.scroll-y < root.max-scroll - 1px;
+                    // A smoothstep ramp (eased at both ends) so there is no visible start or edge.
+                    background: @linear-gradient(180deg,
+                        PaperTheme.paper-color.transparentize(1.0) 0%,
+                        PaperTheme.paper-color.transparentize(0.98) 12.5%,
+                        PaperTheme.paper-color.transparentize(0.9) 25%,
+                        PaperTheme.paper-color.transparentize(0.75) 37.5%,
+                        PaperTheme.paper-color.transparentize(0.5) 50%,
+                        PaperTheme.paper-color.transparentize(0.25) 62.5%,
+                        PaperTheme.paper-color.transparentize(0.1) 75%,
+                        PaperTheme.paper-color.transparentize(0.02) 87.5%,
+                        PaperTheme.paper-color 100%);
                 }
             }
-        }
-
-        // The scrollbar: drawn in the paper's frame (like the toolbar), hugging its right edge.
-        scrollbar := ScrollBar {
-            x: 0px;
-            y: 0px;
-            width: root.width;
-            height: root.height;
-            paper-w: root.width - 2 * root.margin;
-            paper-h: root.height - 2 * root.margin;
-            view: text-view.height;
-            content: root.content;
-            offset: root.scroll-y;
-            shown: paper-touch.has-hover;
         }
 
         // Invisible grips for moving and resizing (inside paper-touch, so hovering them keeps the
@@ -330,6 +342,23 @@ export component NoteWindow inherits Window {
             height: root.height;
             start-move => { root.picker-open = false; root.start-move(); }
             start-resize(d) => { root.picker-open = false; root.start-resize(d); }
+            right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
+            pointer-over => { root.pointer-moved(); }
+        }
+
+        // The scrollbar: drawn in the paper's frame (like the toolbar), hugging its right edge.
+        scrollbar := ScrollBar {
+            x: 0px;
+            y: 0px;
+            width: root.width;
+            height: root.height;
+            paper-w: root.width - 2 * root.margin;
+            paper-h: root.height - 2 * root.margin;
+            view: root.text-view-height;
+            content: root.content;
+            offset <=> root.scroll-y;
+            scrolling: root.scrolling;
+            pressed => { root.picker-open = false; }
             right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
             pointer-over => { root.pointer-moved(); }
         }

@@ -1,5 +1,6 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
+use crate::delete_dialog::{calculate_dialog_position, DeleteDialog};
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
 use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
 use crate::images::{self, ImageError, Source, Stored};
@@ -88,6 +89,8 @@ struct Inner {
     next_viewer: Cell<u64>,
     /// Currently open dropdown menu floating window, if any.
     dropdown: RefCell<Option<Rc<DropdownMenu>>>,
+    /// Currently open delete confirmation dialog window, if any.
+    delete_dialog: RefCell<Option<Rc<DeleteDialog>>>,
 }
 
 /// A picture on its way into a note.
@@ -117,6 +120,7 @@ const MENU_STARTUP: u32 = 6;
 const MENU_EXPORT: u32 = 7;
 const MENU_PASTE: u32 = 8;
 const MENU_PASTE_IMAGE: u32 = 9;
+const MENU_FADE: u32 = 10;
 /// The menu of a picture: cut it, copy it, delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
 /// or show it `n` percent wide (`MENU_IMAGE_SIZE + n`).
 const MENU_IMAGE_CUT: u32 = 18;
@@ -185,6 +189,7 @@ impl App {
             viewers: RefCell::new(Vec::new()),
             next_viewer: Cell::new(0),
             dropdown: RefCell::new(None),
+            delete_dialog: RefCell::new(None),
         });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
@@ -226,6 +231,7 @@ impl App {
             self.0.env.clipboard.clone(),
         )
         .map_err(StartError::Ui)?;
+        note.set_fade_edge(self.0.db.fade_text_edge());
         if row.geometry.is_some() {
             // a note saved on a monitor that is gone comes back on the main screen
             note.keep_on_screen(&self.0.env.window_control.work_areas());
@@ -699,6 +705,7 @@ impl App {
     /// Closing the last open note quits Washi.
     pub fn close_note(&self, id: NoteId) {
         self.dismiss_dropdown_if(id);
+        self.dismiss_delete_dialog_if(id);
         let Some((was_empty, geometry)) = self.with_note(id, |n| (n.text().trim().is_empty(), n.geometry())) else {
             return;
         };
@@ -724,12 +731,118 @@ impl App {
         self.remove_note(id);
     }
 
-    /// Delete a note for good, after asking.
+    /// Clone the handle to the open delete dialog, if any.
+    pub fn delete_dialog(&self) -> Option<Rc<DeleteDialog>> {
+        self.0.delete_dialog.borrow().clone()
+    }
+
+    /// Whether the delete dialog is open for any note.
+    pub fn is_delete_dialog_open(&self) -> bool {
+        self.0.delete_dialog.borrow().is_some()
+    }
+
+    /// The note whose delete dialog is currently open, if any.
+    pub fn delete_dialog_note_id(&self) -> Option<NoteId> {
+        self.0.delete_dialog.borrow().as_ref().map(|d| d.note_id())
+    }
+
+    /// Dismiss the open delete dialog if any.
+    pub fn dismiss_delete_dialog(&self) {
+        if let Some(dialog) = self.0.delete_dialog.borrow_mut().take() {
+            let _ = dialog.ui().hide();
+        }
+    }
+
+    /// Dismiss the open delete dialog if it belongs to note `id`.
+    pub fn dismiss_delete_dialog_if(&self, id: NoteId) {
+        if self.delete_dialog_note_id() == Some(id) {
+            self.dismiss_delete_dialog();
+        }
+    }
+
+    /// Invoke "Keep it" callback on the active delete dialog (for testing).
+    pub fn invoke_keep_note(&self) {
+        if let Some(d) = self.delete_dialog() {
+            d.invoke_keep();
+        }
+    }
+
+    /// Invoke "Delete" callback on the active delete dialog (for testing).
+    pub fn invoke_confirm_delete(&self) {
+        if let Some(d) = self.delete_dialog() {
+            d.invoke_confirm_delete();
+        }
+    }
+
+    /// Dispatch a window event to the active delete dialog (for testing).
+    pub fn dispatch_delete_dialog_event(&self, ev: slint::platform::WindowEvent) {
+        if let Some(d) = self.delete_dialog() {
+            d.ui().window().dispatch_event(ev);
+        }
+    }
+
+    /// Delete a note for good, after asking with the themed delete dialog.
     pub fn delete_note(&self, id: NoteId) {
         self.dismiss_dropdown_if(id);
-        if !self.0.env.dialogs.confirm("Delete this note permanently? This cannot be undone.") {
-            return;
+
+        if let Some(open_id) = self.delete_dialog_note_id() {
+            if open_id == id {
+                if let Some(d) = self.delete_dialog() {
+                    self.0.env.window_control.bring_to_front(0, d.hwnd());
+                }
+                return;
+            }
+            self.dismiss_delete_dialog();
         }
+
+        let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
+        let Some(note) = note else { return };
+
+        let geom = note.geometry();
+        let work_areas = self.0.env.window_control.work_areas();
+        let scale = note.ui().window().scale_factor();
+        let work_area = work_areas.first().map(|wa| (
+            wa.x as f32 / scale,
+            wa.y as f32 / scale,
+            wa.w as f32 / scale,
+            wa.h as f32 / scale,
+        ));
+
+        let pos = calculate_dialog_position((geom.x, geom.y, geom.w, geom.h), work_area);
+
+        let weak = Rc::downgrade(&self.0);
+        let on_keep = Rc::new(move |_note_id| {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).dismiss_delete_dialog();
+            }
+        });
+
+        let weak = Rc::downgrade(&self.0);
+        let on_confirm = Rc::new(move |note_id| {
+            if let Some(inner) = weak.upgrade() {
+                let app = App(inner);
+                app.dismiss_delete_dialog();
+                app.confirm_delete_note(note_id);
+            }
+        });
+
+        let weak = Rc::downgrade(&self.0);
+        let on_start_move = Rc::new(move |hwnd| {
+            if let Some(inner) = weak.upgrade() {
+                inner.env.window_control.begin_move(0, hwnd);
+            }
+        });
+
+        match DeleteDialog::open(id, pos, note.hwnd(), on_keep, on_confirm, on_start_move) {
+            Ok(dialog) => {
+                *self.0.delete_dialog.borrow_mut() = Some(Rc::new(dialog));
+            }
+            Err(e) => eprintln!("washi: could not open delete dialog: {e}"),
+        }
+    }
+
+    /// Delete a note for good from the database and remove its window.
+    pub fn confirm_delete_note(&self, id: NoteId) {
         if let Err(e) = self.0.db.delete_note(id) {
             self.0.env.dialogs.error(&format!("Washi could not delete the note: {e}"));
             return;
@@ -961,6 +1074,7 @@ impl App {
             item(MENU_DELETE, "Delete", true, vec![]),
             toggle(MENU_TOP, "Always on top", pinned),
             toggle(MENU_STARTUP, "Start with Windows", self.0.env.startup.is_enabled()),
+            toggle(MENU_FADE, "Fade text edge", self.0.db.fade_text_edge()),
             item(MENU_EXPORT, "Export as Markdown\u{2026}", true, vec![]),
         ]);
         let picture = image;
@@ -992,6 +1106,13 @@ impl App {
             Some(MENU_DELETE) => self.delete_note(id),
             Some(MENU_TOP) => self.set_always_on_top(id, !pinned),
             Some(MENU_EXPORT) => self.export_note(id),
+            Some(MENU_FADE) => {
+                let on = !self.0.db.fade_text_edge();
+                let _ = self.0.db.set_fade_text_edge(on);
+                for n in self.0.notes.borrow().iter() {
+                    n.set_fade_edge(on);
+                }
+            }
             Some(MENU_STARTUP) => {
                 let startup = &self.0.env.startup;
                 startup.set_enabled(!startup.is_enabled());
@@ -1009,6 +1130,7 @@ impl App {
     /// because this may run inside one of that window's own callbacks.
     fn remove_note(&self, id: NoteId) {
         self.dismiss_dropdown_if(id);
+        self.dismiss_delete_dialog_if(id);
         let (note, now_empty) = {
             let mut notes = self.0.notes.borrow_mut();
             let at = notes.iter().position(|n| n.id() == id);

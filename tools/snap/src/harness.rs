@@ -376,27 +376,27 @@ impl Harness {
     /// The center of toolbar button `k` (0 B, 1 I, 2 U, 3 ab, 4 A, 5 list, 6 image) in window
     /// coordinates: the button row sits in the paper's frame, turned about the paper's center.
     pub fn toolbar_button(&self, note: usize, k: usize) -> (f32, f32) {
-        let du = 23.2 + 20.0 + k as f32 * 42.667;
-        self.paper_point(note, du, -55.8 + 20.0 + self.paper_size(note).1)
+        let du = 23.2 + 16.0 + k as f32 * 42.667;
+        self.paper_point(note, du, -40.0 + 16.0 + self.paper_size(note).1)
     }
 
     /// A point inside the color popover's body, in window coordinates (the caption row, clear of
     /// the swatches and of Clear): 22 px from the paper's left edge plus and 30 px above the band.
     pub fn picker_point(&self, note: usize) -> (f32, f32) {
-        self.paper_point(note, 22.0 + 110.0, self.paper_size(note).1 - 56.0 - 10.0 - 20.0)
+        self.paper_point(note, 22.0 + 110.0, self.paper_size(note).1 - 38.0 - 10.0 - 20.0)
     }
 
     /// The center of an ink dot (`row` 0) or marker chip (`row` 1) `i` of the open popover, in
     /// window coordinates.
     pub fn swatch_point(&self, note: usize, row: usize, i: usize) -> (f32, f32) {
-        let top = self.paper_size(note).1 - 56.0 - 10.0 - 116.0;
+        let top = self.paper_size(note).1 - 38.0 - 10.0 - 116.0;
         let v = top + if row == 0 { 14.0 } else { 47.0 } + 10.5;
         self.paper_point(note, 22.0 + 67.0 + 10.5 + i as f32 * 26.0, v)
     }
 
     /// The center of the popover's Clear link, in window coordinates.
     pub fn clear_point(&self, note: usize) -> (f32, f32) {
-        let top = self.paper_size(note).1 - 56.0 - 10.0 - 116.0;
+        let top = self.paper_size(note).1 - 38.0 - 10.0 - 116.0;
         self.paper_point(note, 22.0 + 330.0 - 14.0 - 20.0, top + 80.0 + 13.0)
     }
 
@@ -681,6 +681,13 @@ impl Harness {
         self.app().with_note(self.id(note), |n| n.ui().get_scrollbar_opacity()).unwrap()
     }
 
+    /// Center of the scrollbar thumb in window coordinates (logical px).
+    pub fn scrollbar_thumb(&self, note: usize) -> (f32, f32) {
+        self.app()
+            .with_note(self.id(note), |n| (n.ui().get_scrollbar_thumb_x(), n.ui().get_scrollbar_thumb_y()))
+            .unwrap()
+    }
+
     /// How much of the resting tilt the text still carries: 1 at rest, 0 while editing.
     pub fn text_tilt_scale(&self, note: usize) -> f32 {
         self.app().with_note(self.id(note), |n| n.ui().get_text_tilt_scale()).unwrap()
@@ -958,6 +965,40 @@ impl Harness {
                 text: slint::platform::Key::Escape.into(),
             });
         }
+    }
+
+    pub fn is_delete_dialog_open(&self) -> bool {
+        self.app.as_ref().map_or(false, |a| a.is_delete_dialog_open())
+    }
+
+    pub fn delete_dialog_note_id(&self) -> Option<NoteId> {
+        self.app.as_ref().and_then(|a| a.delete_dialog_note_id())
+    }
+
+    pub fn invoke_confirm_delete(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_confirm_delete();
+        }
+        self.settle();
+    }
+
+    pub fn invoke_keep_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_keep_note();
+        }
+        self.settle();
+    }
+
+    pub fn press_delete_dialog_escape(&mut self) {
+        if let Some(app) = &self.app {
+            app.dispatch_delete_dialog_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+            app.dispatch_delete_dialog_event(slint::platform::WindowEvent::KeyReleased {
+                text: slint::platform::Key::Escape.into(),
+            });
+        }
+        self.settle();
     }
 
     pub fn click_dropdown_outside(&mut self) {

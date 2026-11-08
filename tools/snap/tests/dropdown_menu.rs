@@ -45,14 +45,15 @@ fn dropdown_delete_note_dismisses_and_deletes_current_note() {
     assert!(h.is_dropdown_open());
     assert_eq!(h.dropdown_note_id(), Some(id1));
 
-    // Confirm deletion dialog
-    h.dialogs.confirm_answer.set(true);
-
     // Delete note from dropdown
     h.invoke_dropdown_delete_note();
 
-    // Dropdown should be dismissed and note 1 deleted
+    // Dropdown should be dismissed and delete confirmation dialog open
     assert!(!h.is_dropdown_open());
+    assert!(h.is_delete_dialog_open());
+
+    // Confirm deletion
+    h.invoke_confirm_delete();
     assert_eq!(h.open_note_count(), 1);
 
     // Verify deleted note is gone from recent notes list in DB

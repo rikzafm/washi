@@ -189,8 +189,9 @@ fn deleting_a_note_deletes_its_pictures() {
     h.advance(std::time::Duration::from_millis(600));
     h.press_ctrl(0, 'n');
     assert_eq!(h.stored_picture_count(), 1);
-    h.dialogs.confirm_answer.set(true);
     h.press_ctrl(0, 'd');
+    assert!(h.is_delete_dialog_open());
+    h.invoke_confirm_delete();
     assert_eq!(h.stored_picture_count(), 0);
 }
 
@@ -517,6 +518,10 @@ fn a_scrolled_picture_does_not_bleed_above_the_paper_in_viewing_mode() {
         assert!(
             top_right > top_left,
             "top cut must follow the tilt (top_right {top_right} should be lower down than top_left {top_left})"
+        );
+        assert!(
+            top_left <= 41,
+            "top edge of scrolled picture must reach the paper edge with no white gap (got top_left {top_left})"
         );
     }
 }

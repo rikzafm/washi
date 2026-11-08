@@ -1,5 +1,13 @@
 import { Theme } from "theme.slint";
-import { BlockData, BlockKind, BlockView, MarkerData, RuleData, RunData, SelRect } from "block.slint";
+import {
+    BlockData,
+    BlockKind,
+    BlockView,
+    MarkerData,
+    RuleData,
+    RunData,
+    SelRect,
+} from "block.slint";
 
 // A marker: a rounded rectangle (radius 3) of one line's stretch. At rest the paper is tilted and
 // the renderer cannot rotate elements, so it is one Path whose corners are moved onto the tilted
@@ -40,15 +48,63 @@ component MarkerShape inherits Path {
     viewbox-width: self.width / 1px;
     viewbox-height: self.height / 1px;
     fill: root.m.color;
-    MoveTo { x: px(root.u0 + root.r, root.v0) - root.ox; y: py(root.u0 + root.r, root.v0) - root.oy; }
-    LineTo { x: px(root.u1 - root.r, root.v0) - root.ox; y: py(root.u1 - root.r, root.v0) - root.oy; }
-    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u1, root.v0 + root.r) - root.ox; y: py(root.u1, root.v0 + root.r) - root.oy; }
-    LineTo { x: px(root.u1, root.v1 - root.r) - root.ox; y: py(root.u1, root.v1 - root.r) - root.oy; }
-    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u1 - root.r, root.v1) - root.ox; y: py(root.u1 - root.r, root.v1) - root.oy; }
-    LineTo { x: px(root.u0 + root.r, root.v1) - root.ox; y: py(root.u0 + root.r, root.v1) - root.oy; }
-    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u0, root.v1 - root.r) - root.ox; y: py(root.u0, root.v1 - root.r) - root.oy; }
-    LineTo { x: px(root.u0, root.v0 + root.r) - root.ox; y: py(root.u0, root.v0 + root.r) - root.oy; }
-    ArcTo { radius-x: root.r; radius-y: root.r; sweep: true; x: px(root.u0 + root.r, root.v0) - root.ox; y: py(root.u0 + root.r, root.v0) - root.oy; }
+    MoveTo {
+        x: px(root.u0 + root.r, root.v0) - root.ox;
+        y: py(root.u0 + root.r, root.v0) - root.oy;
+    }
+
+    LineTo {
+        x: px(root.u1 - root.r, root.v0) - root.ox;
+        y: py(root.u1 - root.r, root.v0) - root.oy;
+    }
+
+    ArcTo {
+        radius-x: root.r;
+        radius-y: root.r;
+        sweep: true;
+        x: px(root.u1, root.v0 + root.r) - root.ox;
+        y: py(root.u1, root.v0 + root.r) - root.oy;
+    }
+
+    LineTo {
+        x: px(root.u1, root.v1 - root.r) - root.ox;
+        y: py(root.u1, root.v1 - root.r) - root.oy;
+    }
+
+    ArcTo {
+        radius-x: root.r;
+        radius-y: root.r;
+        sweep: true;
+        x: px(root.u1 - root.r, root.v1) - root.ox;
+        y: py(root.u1 - root.r, root.v1) - root.oy;
+    }
+
+    LineTo {
+        x: px(root.u0 + root.r, root.v1) - root.ox;
+        y: py(root.u0 + root.r, root.v1) - root.oy;
+    }
+
+    ArcTo {
+        radius-x: root.r;
+        radius-y: root.r;
+        sweep: true;
+        x: px(root.u0, root.v1 - root.r) - root.ox;
+        y: py(root.u0, root.v1 - root.r) - root.oy;
+    }
+
+    LineTo {
+        x: px(root.u0, root.v0 + root.r) - root.ox;
+        y: py(root.u0, root.v0 + root.r) - root.oy;
+    }
+
+    ArcTo {
+        radius-x: root.r;
+        radius-y: root.r;
+        sweep: true;
+        x: px(root.u0 + root.r, root.v0) - root.ox;
+        y: py(root.u0 + root.r, root.v0) - root.oy;
+    }
+
     Close { }
 }
 
@@ -145,7 +201,10 @@ export component TextLayer inherits Rectangle {
     in-out property <int> focused-block: -1;
     // 0 at rest, 1 while editing
     property <float> flat: focused-block >= 0 ? 1 : 0;
-    animate flat { duration: Theme.settle; easing: ease-in-out; }
+    animate flat {
+        duration: Theme.settle;
+        easing: ease-in-out;
+    }
     /// How much of the resting tilt the words still carry: 1 at rest, 0 while editing.
     out property <float> tilt-scale: 1 - flat;
     /// A field has the focus: the level inputs show instead of the tilted words.
@@ -196,7 +255,7 @@ export component TextLayer inherits Rectangle {
     }
 
     for r in root.runs: Text {
-        visible: r.block != root.composing-block;
+        visible: r.block != root.composing-block && self.y + r.pitch >= root.edge-y(self.x + self.width / 2);
         x: r.x + (r.dx + root.shift-x) * root.tilt-scale;
         y: r.y + (r.dy + root.shift-y) * root.tilt-scale;
         text: r.text;

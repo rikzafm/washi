@@ -82,21 +82,73 @@ fn a_note_that_fits_does_not_scroll() {
 }
 
 #[test]
-fn the_scrollbar_shows_only_when_hovered_and_overflowing() {
+fn the_scrollbar_shows_only_when_actively_scrolling_or_hovered_and_overflowing() {
     let mut h = note(&long_text());
     h.advance(ms(300));
-    assert_eq!(h.scrollbar_opacity(0), 0.0, "not hovered");
+    assert_eq!(h.scrollbar_opacity(0), 0.0, "not hovered or scrolling");
+
+    // Hovering over the note body alone does not show the scrollbar.
     h.pointer_move(0, CENTER.0, CENTER.1);
     h.advance(ms(300));
-    assert_eq!(h.scrollbar_opacity(0), 1.0, "hovered and overflowing");
-    h.pointer_exit(0);
+    assert_eq!(h.scrollbar_opacity(0), 0.0, "hovering note body only");
+
+    // Actively scrolling with the wheel shows the scrollbar, then hides it after scrolling stops.
+    h.wheel(0, CENTER.0, CENTER.1, -60.0);
     h.advance(ms(300));
-    assert_eq!(h.scrollbar_opacity(0), 0.0, "pointer left");
+    assert_eq!(h.scrollbar_opacity(0), 1.0, "actively scrolling");
+    h.advance(ms(500));
+    assert_eq!(h.scrollbar_opacity(0), 0.0, "hidden after scrolling stops");
+
+    // Hovering over the scrollbar shows it and keeps it visible while hovered.
+    let (tx, ty) = h.scrollbar_thumb(0);
+    h.pointer_move(0, tx, ty);
+    h.advance(ms(300));
+    assert_eq!(h.scrollbar_opacity(0), 1.0, "scrollbar hovered");
+    h.advance(ms(1000));
+    assert_eq!(h.scrollbar_opacity(0), 1.0, "still hovered over scrollbar");
+
+    // Moving off the scrollbar back to the note body hides it.
+    h.pointer_move(0, CENTER.0, CENTER.1);
+    h.advance(ms(300));
+    assert_eq!(h.scrollbar_opacity(0), 0.0, "left scrollbar");
 
     let mut short = note("# Short\nhello");
-    short.pointer_move(0, CENTER.0, CENTER.1);
+    let (sx, sy) = short.scrollbar_thumb(0);
+    short.pointer_move(0, sx, sy);
     short.advance(ms(300));
     assert_eq!(short.scrollbar_opacity(0), 0.0, "hovered but nothing to scroll");
+}
+
+#[test]
+fn dragging_the_scrollbar_scrolls_the_note() {
+    let mut h = note(&long_text());
+    assert_eq!(h.scroll_offset(0), 0.0);
+
+    let (tx, ty) = h.scrollbar_thumb(0);
+    h.pointer_move(0, tx, ty);
+    h.press_button(0, tx, ty, false);
+    assert_eq!(h.scroll_offset(0), 0.0, "pressing the thumb does not jump");
+    assert_eq!(h.scrollbar_opacity(0), 1.0);
+
+    // Drag down along the scrollbar (even with horizontal drift away from the bar).
+    h.pointer_move(0, CENTER.0, ty + 80.0);
+    let mid = h.scroll_offset(0);
+    assert!(mid > 100.0, "dragged down: offset={mid}");
+    assert_eq!(h.scrollbar_opacity(0), 1.0, "stays visible while dragging outside the bar");
+
+    // Drag past the bottom of the track: stops at the end.
+    h.pointer_move(0, CENTER.0, ty + 1000.0);
+    let end = h.scroll_offset(0);
+    assert!((last_line_bottom(&h) - end - h.text_view_height(0)).abs() < 1.0, "end {end}");
+
+    // Drag back past the top: stops at 0.
+    h.pointer_move(0, CENTER.0, 0.0);
+    assert_eq!(h.scroll_offset(0), 0.0);
+
+    // Release outside the scrollbar: the scrollbar hides.
+    h.release_button(0, CENTER.0, 0.0, false);
+    h.advance(ms(300));
+    assert_eq!(h.scrollbar_opacity(0), 0.0);
 }
 
 #[test]
@@ -135,8 +187,8 @@ fn moving_the_caret_back_up_scrolls_back_to_it() {
 #[test]
 fn text_never_reaches_the_toolbar_band() {
     let h = note(&long_text());
-    // the text area is shorter than the paper by the toolbar band (56), the gap (16) and the tilt allowance
+    // the text area is shorter than the paper by the toolbar band (38), the gap (4) and the tilt allowance
     let (_, window_h) = h.note_size(0);
     let paper_h = window_h as f32 - 84.0;
-    assert!(h.text_view_height(0) <= paper_h - 56.0 - 16.0 + 0.5, "view {}", h.text_view_height(0));
+    assert!(h.text_view_height(0) <= paper_h - 38.0 - 4.0 + 0.5, "view {}", h.text_view_height(0));
 }

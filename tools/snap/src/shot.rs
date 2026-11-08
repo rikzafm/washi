@@ -19,6 +19,8 @@ pub struct Options {
     pub paper: (f64, f64),
     /// Move a real pointer over the note before drawing.
     pub hover: bool,
+    /// Move the pointer over the scrollbar track before drawing.
+    pub hover_scrollbar: bool,
     /// The note has the keyboard focus (level text fields, caret shown) instead of resting
     /// (words on the tilted baseline).
     pub editing: bool,
@@ -31,7 +33,7 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { text: String::new(), scale: 1.5, paper: (363.0, 384.0), hover: false, editing: false, caret_block: None, canvas: (720, 840), desk: [0xD9, 0xDD, 0xE1] }
+        Options { text: String::new(), scale: 1.5, paper: (363.0, 384.0), hover: false, hover_scrollbar: false, editing: false, caret_block: None, canvas: (720, 840), desk: [0xD9, 0xDD, 0xE1] }
     }
 }
 
@@ -93,7 +95,10 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
     adapter.draw_if_needed(|r| {
         r.render(&mut vec![PremultipliedRgbaColor::default(); (pw * ph) as usize], pw as usize);
     });
-    if o.hover {
+    if o.hover_scrollbar {
+        let x = (WINDOW_MARGIN + o.paper.0 - 10.0) as f32;
+        win.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, (lh / 2.0) as f32) });
+    } else if o.hover {
         win.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new((lw / 2.0) as f32, (lh / 2.0) as f32) });
     }
     h.advance(Duration::from_millis(300)); // let any hover fade finish

@@ -6,7 +6,6 @@
 // bottom action bar of three 58px buttons under a dotted 2px rule.
 
 import "../../fonts/ShadowsIntoLight.ttf";
-import { ListView } from "std-widgets.slint";
 
 component HeaderIconButton inherits Rectangle {
     in property <color> hover-bg: #F0F0EE;
@@ -221,9 +220,12 @@ export component DropdownMenuWindow inherits Window {
                 vertical-alignment: center;
             }
 
-            if root.notes.length > 0 : ListView {
+            // A bare Flickable: the wheel still scrolls, but no scroll bar is drawn.
+            if root.notes.length > 0 : Flickable {
                 width: 100%;
                 height: 100%;
+                VerticalLayout {
+                    alignment: start;
                 for item in root.notes : Rectangle {
                     height: text-col.preferred-height + 12px;
 
@@ -283,6 +285,7 @@ export component DropdownMenuWindow inherits Window {
                             }
                         }
                     }
+                }
                 }
             }
         }
