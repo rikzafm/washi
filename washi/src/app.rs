@@ -376,6 +376,55 @@ impl App {
         }
     }
 
+    /// The bounding rectangle of the menu button of note `id` in window logical coordinates.
+    pub fn menu_button_rect(&self, id: NoteId) -> Option<(f32, f32, f32, f32)> {
+        self.with_note(id, |n| n.menu_button_rect())
+    }
+
+    /// Opacity of the menu button of note `id`.
+    pub fn menu_button_opacity(&self, id: NoteId) -> Option<f32> {
+        self.with_note(id, |n| n.menu_button_opacity())
+    }
+
+    /// Whether the menu button of note `id` is currently shown.
+    pub fn menu_button_shown(&self, id: NoteId) -> Option<bool> {
+        self.with_note(id, |n| n.menu_button_shown())
+    }
+
+    /// The screen position of the open dropdown menu window in logical pixels, if any.
+    pub fn dropdown_position(&self) -> Option<(f32, f32)> {
+        let menu = self.0.dropdown.borrow();
+        let ui = menu.as_ref().and_then(|d| d.ui().as_weak().upgrade())?;
+        let pos = ui.window().position();
+        let sf = ui.window().scale_factor();
+        Some((pos.x as f32 / sf, pos.y as f32 / sf))
+    }
+
+    /// The size of the open dropdown menu window in logical pixels, if any.
+    pub fn dropdown_size(&self) -> Option<(f32, f32)> {
+        let menu = self.0.dropdown.borrow();
+        let ui = menu.as_ref().and_then(|d| d.ui().as_weak().upgrade())?;
+        let size = ui.window().size();
+        let sf = ui.window().scale_factor();
+        Some((size.width as f32 / sf, size.height as f32 / sf))
+    }
+
+    /// Dispatch a window event to the active dropdown window (for testing).
+    pub fn dispatch_dropdown_event(&self, event: slint::platform::WindowEvent) {
+        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
+        if let Some(ui) = ui {
+            ui.window().dispatch_event(event);
+        }
+    }
+
+    /// Invoke dismiss on the active dropdown (for testing).
+    pub fn invoke_dropdown_dismiss(&self) {
+        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
+        if let Some(ui) = ui {
+            ui.invoke_dismiss();
+        }
+    }
+
     /// Dismiss the open dropdown menu and reset the parent note's button state.
     pub fn dismiss_dropdown(&self) {
         let menu = self.0.dropdown.borrow_mut().take();

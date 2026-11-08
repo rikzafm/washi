@@ -1866,6 +1866,16 @@ impl Note {
         )
     }
 
+    /// Opacity of the menu trigger button (0 hidden, 1 shown).
+    pub fn menu_button_opacity(&self) -> f32 {
+        self.ui.get_menu_button_opacity()
+    }
+
+    /// Whether the menu trigger button takes part in drawing and hit testing.
+    pub fn menu_button_shown(&self) -> bool {
+        self.ui.get_menu_button_shown()
+    }
+
     /// The title the window (and its taskbar button) currently shows.
     pub fn title(&self) -> String {
         self.ui.get_window_title().to_string()
