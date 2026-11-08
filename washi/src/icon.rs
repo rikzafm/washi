@@ -1,47 +1,83 @@
-//! The Washi app icon, drawn from spec values: a white sheet of paper with a pink tape strip
-//! across its top. No image files and no dependencies, so `build.rs` includes this very file
-//! to embed the icon in `washi.exe`, and the app uses it for its windows and taskbar buttons.
+//! The Washi app logo and icon: a rounded paper sheet with dark outline (#2B2F36),
+//! paper background (#FFFFFD), pink washi tape (#F7BFCD) across the top-left,
+//! light blue washi tape (#B1D9E5) across the bottom-right, and a hand-drawn 'W'
+//! in the center (#2B2F36).
+//!
+//! No image decoder dependencies so `build.rs` includes this very file to embed the icon
+//! in `washi.exe`, and the app uses it for its windows and taskbar buttons.
 
 /// Sizes embedded in the .exe (plan section 7).
 pub const SIZES: [u32; 5] = [16, 24, 32, 48, 256];
 
-pub const PAPER: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
-/// Thin outline so the white sheet stays visible on a light taskbar.
-pub const EDGE: [u8; 4] = [0xD0, 0xD0, 0xD0, 0xFF];
-/// `tape-pink` from the design tokens.
-pub const TAPE: [u8; 4] = [0xF7, 0xBF, 0xCD, 0xFF];
+pub const PAPER: [u8; 4] = [0xFF, 0xFF, 0xFD, 0xFF];
+pub const BORDER: [u8; 4] = [0x2B, 0x2F, 0x36, 0xFF];
+pub const TAPE_PINK: [u8; 4] = [0xF7, 0xBF, 0xCD, 0xFF];
+pub const TAPE_BLUE: [u8; 4] = [0xB1, 0xD9, 0xE5, 0xFF];
+pub const INK: [u8; 4] = [0x2B, 0x2F, 0x36, 0xFF];
 
-/// Where things sit in a `size` x `size` icon: (paper left/top, paper right/bottom exclusive,
-/// tape left, tape right exclusive, tape top, tape bottom exclusive).
-pub fn layout(size: u32) -> (u32, u32, u32, u32, u32, u32) {
-    let s = size as f32;
-    let m = (s * 0.125).round() as u32;
-    let tape_top = (s * 0.22).round() as u32;
-    let tape_h = ((s * 0.2).round() as u32).max(2);
-    (m, size - m, (s * 0.25).round() as u32, (s * 0.75).round() as u32, tape_top, tape_top + tape_h)
+const ICON_16: &[u8] = include_bytes!("assets/icon_16.rgba");
+const ICON_24: &[u8] = include_bytes!("assets/icon_24.rgba");
+const ICON_32: &[u8] = include_bytes!("assets/icon_32.rgba");
+const ICON_48: &[u8] = include_bytes!("assets/icon_48.rgba");
+const ICON_64: &[u8] = include_bytes!("assets/icon_64.rgba");
+const ICON_128: &[u8] = include_bytes!("assets/icon_128.rgba");
+const ICON_256: &[u8] = include_bytes!("assets/icon_256.rgba");
+const PNG_256: &[u8] = include_bytes!("assets/icon_256.png");
+
+/// Bilinear interpolation downsampler for arbitrary target sizes.
+fn resample(src: &[u8], src_w: u32, src_h: u32, dst_w: u32, dst_h: u32) -> Vec<u8> {
+    if dst_w == 0 || dst_h == 0 {
+        return Vec::new();
+    }
+    let mut out = vec![0u8; (dst_w * dst_h * 4) as usize];
+    let x_ratio = (src_w as f32) / (dst_w as f32);
+    let y_ratio = (src_h as f32) / (dst_h as f32);
+    for dy in 0..dst_h {
+        let sy = (dy as f32 + 0.5) * y_ratio - 0.5;
+        let y0 = (sy.floor() as i32).clamp(0, src_h as i32 - 1) as u32;
+        let y1 = (y0 + 1).min(src_h - 1);
+        let fy = (sy - sy.floor()).clamp(0.0, 1.0);
+        for dx in 0..dst_w {
+            let sx = (dx as f32 + 0.5) * x_ratio - 0.5;
+            let x0 = (sx.floor() as i32).clamp(0, src_w as i32 - 1) as u32;
+            let x1 = (x0 + 1).min(src_w - 1);
+            let fx = (sx - sx.floor()).clamp(0.0, 1.0);
+
+            let w00 = (1.0 - fx) * (1.0 - fy);
+            let w10 = fx * (1.0 - fy);
+            let w01 = (1.0 - fx) * fy;
+            let w11 = fx * fy;
+
+            let i00 = ((y0 * src_w + x0) * 4) as usize;
+            let i10 = ((y0 * src_w + x1) * 4) as usize;
+            let i01 = ((y1 * src_w + x0) * 4) as usize;
+            let i11 = ((y1 * src_w + x1) * 4) as usize;
+
+            let dst_i = ((dy * dst_w + dx) * 4) as usize;
+            for c in 0..4 {
+                let v = src[i00 + c] as f32 * w00
+                    + src[i10 + c] as f32 * w10
+                    + src[i01 + c] as f32 * w01
+                    + src[i11 + c] as f32 * w11;
+                out[dst_i + c] = v.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
 }
 
 /// RGBA pixels, top row first, straight (not premultiplied) alpha.
 pub fn rgba(size: u32) -> Vec<u8> {
-    let (lo, hi, tl, tr, tt, tb) = layout(size);
-    let edge = (size / 32).max(1);
-    let mut out = vec![0u8; (size * size * 4) as usize];
-    for y in 0..size {
-        for x in 0..size {
-            let px = if x < lo || x >= hi || y < lo || y >= hi {
-                [0, 0, 0, 0]
-            } else if x >= tl && x < tr && y >= tt && y < tb {
-                TAPE
-            } else if x < lo + edge || x >= hi - edge || y < lo + edge || y >= hi - edge {
-                EDGE
-            } else {
-                PAPER
-            };
-            let i = ((y * size + x) * 4) as usize;
-            out[i..i + 4].copy_from_slice(&px);
-        }
+    match size {
+        16 => ICON_16.to_vec(),
+        24 => ICON_24.to_vec(),
+        32 => ICON_32.to_vec(),
+        48 => ICON_48.to_vec(),
+        64 => ICON_64.to_vec(),
+        128 => ICON_128.to_vec(),
+        256 => ICON_256.to_vec(),
+        _ => resample(ICON_256, 256, 256, size, size),
     }
-    out
 }
 
 // ---- encoding for the .exe resource (build time) ----
@@ -100,8 +136,7 @@ impl Bits {
     }
 }
 
-/// zlib stream using one fixed-Huffman block. Matches only look back one pixel (4 bytes), which
-/// is all a flat-coloured icon needs to shrink to a few KB.
+/// zlib stream using one fixed-Huffman block.
 fn zlib(data: &[u8]) -> Vec<u8> {
     const BASE: [u32; 29] = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
     const EXTRA: [u32; 29] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
@@ -137,6 +172,9 @@ fn zlib(data: &[u8]) -> Vec<u8> {
 }
 
 pub fn png(size: u32) -> Vec<u8> {
+    if size == 256 {
+        return PNG_256.to_vec();
+    }
     let pixels = rgba(size);
     let mut raw = Vec::with_capacity(pixels.len() + size as usize);
     for row in pixels.chunks((size * 4) as usize) {

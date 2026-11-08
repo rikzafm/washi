@@ -194,8 +194,17 @@ export component BlockView inherits Rectangle {
     in property <float> tilt-scale: 0;
     in property <length> paper-w: 0px;
     in property <length> paper-h: 0px;
+    in property <angle> tilt: 0deg;
+    in property <length> scroll-y: 0px;
     in property <length> shift-x: 0px;
     in property <length> shift-y: 0px;
+
+    // The paper's tilted top edge in TextLayer coordinates, matching text.slint.
+    pure function edge-y(x: length) -> length {
+        return (x - root.paper-w / 2 - root.paper-h / 2 * root.tilt.sin()) * root.tilt.tan()
+            + root.paper-h / 2 * (1 - root.tilt.cos()) + root.scroll-y;
+    }
+
     property <length> image-x: root.img-align == 0 ? 0px : root.img-align == 1 ? (root.width - root.image-width) / 2 : root.width - root.image-width;
     // the picture's center in the text layer, and how far the paper's tilt moves it
     property <length> center-x: Theme.text-inset-left + root.image-x + root.image-width / 2 - root.paper-w / 2;
@@ -218,16 +227,56 @@ export component BlockView inherits Rectangle {
         // which a minimized window never gets.
         changed source => { }
     }
-    if root.kind == BlockKind.image && root.turned: Image {
-        // logical px per picture pixel, the same for the turned copy
-        property <float> k: root.img-w > 0 ? root.image-width / 1px / root.img-w : 0;
-        width: root.img-turned.width * self.k * 1px;
-        height: root.img-turned.height * self.k * 1px;
-        x: root.image-x + (root.image-width - self.width) / 2 + (root.tilt-dx + root.shift-x) * root.tilt-scale;
-        y: root.gap-before + (root.image-height - self.height) / 2 + (root.tilt-dy + root.shift-y) * root.tilt-scale;
+
+    // At rest, the turned picture is cut along the paper's tilted edge in narrow vertical strips
+    // (stepping along edge-y, like stepped text). This keeps the top cut parallel to the tilted picture
+    // so the border stays even as it scrolls off the top of the paper.
+    // When fully below the top edge, a single Image is drawn to keep rendering lightweight.
+    property <float> k: root.img-w > 0 ? root.image-width / 1px / root.img-w : 0;
+    property <length> turned-w: root.k > 0 ? root.img-turned.width * root.k * 1px : 0px;
+    property <length> turned-h: root.k > 0 ? root.img-turned.height * root.k * 1px : 0px;
+    property <length> turned-x: root.image-x + (root.image-width - self.turned-w) / 2 + (root.tilt-dx + root.shift-x) * root.tilt-scale;
+    property <length> turned-y: root.gap-before + (root.image-height - self.turned-h) / 2 + (root.tilt-dy + root.shift-y) * root.tilt-scale;
+    property <bool> top-clipped: root.turned-y < root.edge-y(Theme.text-inset-left + root.turned-x + root.turned-w) - Theme.text-inset-top - root.y;
+
+    if root.kind == BlockKind.image && root.turned && !root.top-clipped: Image {
+        x: root.turned-x;
+        y: root.turned-y;
+        width: root.turned-w;
+        height: root.turned-h;
         source: root.img-turned;
         image-fit: fill;
         changed source => { }
+    }
+
+    if root.kind == BlockKind.image && root.turned && root.top-clipped: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+
+        for col in 64: Rectangle {
+            property <length> strip-w: root.turned-w / 64;
+            property <length> strip-cx: root.turned-x + (col + 0.5) * self.strip-w;
+            property <length> local-edge: root.edge-y(Theme.text-inset-left + self.strip-cx) - Theme.text-inset-top - root.y;
+            property <length> cut: max(root.turned-y, self.local-edge);
+
+            x: root.turned-x + col * self.strip-w;
+            y: self.cut;
+            width: self.strip-w + 0.5px;
+            height: max(0px, root.turned-y + root.turned-h - self.cut);
+            clip: true;
+
+            Image {
+                x: -col * parent.strip-w;
+                y: root.turned-y - parent.cut;
+                width: root.turned-w;
+                height: root.turned-h;
+                source: root.img-turned;
+                image-fit: fill;
+                changed source => { }
+            }
+        }
     }
 
     input := TextInput {

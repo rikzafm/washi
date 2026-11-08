@@ -125,9 +125,18 @@ fn the_note_keeps_its_size_and_layout_when_the_toolbar_appears() {
     h.advance(ms(300));
     assert_eq!(h.note_size(0), size);
     let (w, _, hover) = h.render(0);
-    // only pixels inside the band (and the transparent margin below it is untouched) may change
+    // only pixels inside the band or the top-right menu button (and the transparent margin below it is untouched) may change
     let band_top = (468 - 42 - 56 - 10) as usize; // slack for the tilt (about 9 px across the paper)
+    let (mb_x, mb_y, mb_w, mb_h) = h.menu_button_rect(0);
+    let in_menu_button = |x: usize, y: usize| {
+        (x as f32) >= mb_x - 5.0 && (x as f32) <= mb_x + mb_w + 5.0
+            && (y as f32) >= mb_y - 5.0 && (y as f32) <= mb_y + mb_h + 5.0
+    };
     let changed: Vec<usize> = (0..idle.len()).filter(|&i| idle[i] != hover[i]).collect();
     assert!(!changed.is_empty(), "the toolbar drew nothing");
-    assert!(changed.iter().all(|&i| i / w as usize >= band_top), "something outside the band changed");
+    assert!(changed.iter().all(|&i| {
+        let x = i % w as usize;
+        let y = i / w as usize;
+        y >= band_top || in_menu_button(x, y)
+    }), "something outside the band and menu button changed");
 }

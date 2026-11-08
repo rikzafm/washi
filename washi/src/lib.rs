@@ -4,6 +4,7 @@
 pub mod app;
 pub mod clipboard_html;
 pub mod document;
+pub mod dropdown;
 pub mod history;
 pub mod icon;
 pub mod image_viewer;
@@ -20,4 +21,4 @@ pub mod suspend;
 pub mod trace;
 pub mod win;
 
-pub use app::{App, ClosedCandidate, Env, StartError, EXIT_WINDOW};
+pub use app::{App, ClosedCandidate, Env, StartError, EXIT_WINDOW, NEW_NOTE_OFFSET};

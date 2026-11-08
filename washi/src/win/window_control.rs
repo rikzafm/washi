@@ -91,6 +91,19 @@ impl WindowControl for Win32WindowControl {
         start_native_drag(hwnd, hit_test_code(edge));
     }
 
+    fn bring_to_front(&self, _note: NoteId, hwnd: Option<isize>) {
+        if let Some(h) = hwnd {
+            unsafe {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE};
+                let hwnd = h as HWND;
+                if IsIconic(hwnd) != 0 {
+                    ShowWindow(hwnd, SW_RESTORE);
+                }
+                SetForegroundWindow(hwnd);
+            }
+        }
+    }
+
     fn stacking_order(&self, notes: &[(NoteId, Option<isize>)]) -> Vec<NoteId> {
         // Walk the desktop's top-level windows front to back, noting where each note's window is.
         let mut front_to_back: Vec<NoteId> = Vec::new();

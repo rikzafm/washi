@@ -506,6 +506,7 @@ impl Harness {
                         bottom = (bottom + dy).max(top + min.height as i32);
                     }
                 }
+                WindowCommand::BringToFront(_) => return None,
             }
             w.os_place(
                 slint::PhysicalPosition::new(left, top),
@@ -522,6 +523,22 @@ impl Harness {
     pub fn note_size(&self, note: usize) -> (u32, u32) {
         let g = self.app().with_note(self.id(note), |n| n.geometry()).unwrap();
         (g.w, g.h)
+    }
+
+    /// Geometry of a note's window.
+    pub fn note_geometry(&self, note: usize) -> washi::storage::Geometry {
+        self.app().with_note(self.id(note), |n| n.geometry()).unwrap()
+    }
+
+    /// Whether the note window's dropdown-open property is set.
+    pub fn is_note_dropdown_open(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.is_dropdown_open()).unwrap()
+    }
+
+    /// Report geometry changed (e.g. after moving or resizing the note).
+    pub fn notify_geometry_changed(&mut self, note: usize) {
+        let id = self.note_id(note);
+        self.app().geometry_changed(id);
     }
 
     /// The items of the most recently shown menu.
@@ -853,6 +870,127 @@ impl Harness {
             *byte ^= 0xFF;
         }
         std::fs::write(p, b).unwrap();
+    }
+
+    pub fn is_dropdown_open(&self) -> bool {
+        self.app.as_ref().map(|a| a.is_dropdown_open()).unwrap_or(false)
+    }
+
+    pub fn dropdown_note_id(&self) -> Option<NoteId> {
+        self.app.as_ref().and_then(|a| a.dropdown_note_id())
+    }
+
+    pub fn dropdown_pinned(&self) -> Option<bool> {
+        self.app.as_ref().and_then(|a| a.dropdown_pinned())
+    }
+
+    pub fn dropdown_position(&self) -> Option<(f32, f32)> {
+        self.app.as_ref().and_then(|a| a.dropdown_position())
+    }
+
+    pub fn dropdown_size(&self) -> Option<(f32, f32)> {
+        self.app.as_ref().and_then(|a| a.dropdown_size())
+    }
+
+    pub fn menu_button_rect(&self, note: usize) -> (f32, f32, f32, f32) {
+        let id = self.note_id(note);
+        self.app().menu_button_rect(id).unwrap()
+    }
+
+    pub fn menu_button_opacity(&self, note: usize) -> f32 {
+        let id = self.note_id(note);
+        self.app().menu_button_opacity(id).unwrap()
+    }
+
+    pub fn menu_button_shown(&self, note: usize) -> bool {
+        let id = self.note_id(note);
+        self.app().menu_button_shown(id).unwrap()
+    }
+
+    pub fn click_menu_button(&mut self, note: usize) {
+        let (x, y, w, h) = self.menu_button_rect(note);
+        self.click(note, x + w / 2.0, y + h / 2.0);
+    }
+
+    pub fn toggle_dropdown(&mut self, note: usize) {
+        let id = self.note_id(note);
+        if let Some(app) = &self.app {
+            app.toggle_dropdown(id);
+        }
+    }
+
+    pub fn invoke_dropdown_toggle_pin(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_toggle_pin();
+        }
+    }
+
+    pub fn invoke_dropdown_delete_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_delete_note();
+        }
+    }
+
+    pub fn invoke_dropdown_new_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_new_note();
+        }
+    }
+
+    pub fn invoke_dropdown_select_note(&mut self, id: NoteId) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_select_note(id);
+        }
+    }
+
+    pub fn invoke_dropdown_dismiss(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_dismiss();
+        }
+    }
+
+    pub fn press_dropdown_escape(&mut self) {
+        if let Some(app) = &self.app {
+            app.dispatch_dropdown_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+            app.dispatch_dropdown_event(slint::platform::WindowEvent::KeyReleased {
+                text: slint::platform::Key::Escape.into(),
+            });
+        }
+    }
+
+    pub fn click_dropdown_outside(&mut self) {
+        if let Some(app) = &self.app {
+            let position = slint::LogicalPosition::new(5.0, 5.0);
+            let button = slint::platform::PointerEventButton::Left;
+            app.dispatch_dropdown_event(slint::platform::WindowEvent::PointerMoved { position });
+            app.dispatch_dropdown_event(slint::platform::WindowEvent::PointerPressed { position, button });
+            app.dispatch_dropdown_event(slint::platform::WindowEvent::PointerReleased { position, button });
+        }
+    }
+
+    pub fn render_dropdown(&self) -> Option<(u32, u32, Vec<slint::Rgb8Pixel>)> {
+        if !self.is_dropdown_open() {
+            return None;
+        }
+        let wins = platform::windows();
+        let w = wins.into_iter().rev().find(|w| {
+            let s = w.window().size();
+            s.width == 300 && s.height == 352
+        })?;
+        w.window().request_redraw();
+        let s = w.window().size();
+        let (pw, ph) = (s.width, s.height);
+        let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
+        w.draw_if_needed(|r| {
+            r.render(&mut buf, pw as usize);
+        });
+        Some((pw, ph, buf))
+    }
+
+    pub fn dropdown_notes(&self) -> Vec<washi::note_window::DropdownNoteItem> {
+        self.app.as_ref().map(|a| a.dropdown_notes()).unwrap_or_default()
     }
 
     pub(crate) fn path(&self, name: &str) -> PathBuf {

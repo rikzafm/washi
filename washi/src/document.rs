@@ -2152,4 +2152,34 @@ ta");
         assert_eq!(d.blocks()[3].text, "item 1 world");
         assert_eq!(caret, Caret { block: 3, offset: 6 });
     }
+
+    #[test]
+    fn replace_range_rich_preserves_empty_blocks() {
+        use crate::clipboard_html::ParsedBlock;
+        let mut d = doc(&[(Kind::Title, "Title"), (Kind::Body, "Start End")]);
+        let parsed = vec![
+            ParsedBlock::Body {
+                text: " Part 1".into(),
+                marks: vec![Style::NONE; 7],
+                paints: vec![Paint::default(); 7],
+            },
+            ParsedBlock::Body {
+                text: "".into(),
+                marks: vec![],
+                paints: vec![],
+            },
+            ParsedBlock::Body {
+                text: "Part 2".into(),
+                marks: vec![Style::NONE; 6],
+                paints: vec![Paint::default(); 6],
+            },
+        ];
+        let mut add_img = |_| None;
+        let caret = d.replace_range_rich(Range { anchor: Caret { block: 1, offset: 5 }, focus: Caret { block: 1, offset: 5 } }, parsed, &mut add_img);
+        assert_eq!(d.blocks().len(), 4);
+        assert_eq!(d.blocks()[1].text, "Start Part 1");
+        assert_eq!(d.blocks()[2].text, "");
+        assert_eq!(d.blocks()[3].text, "Part 2 End");
+        assert_eq!(caret, Caret { block: 3, offset: 6 });
+    }
 }

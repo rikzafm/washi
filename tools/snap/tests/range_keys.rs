@@ -81,6 +81,20 @@ fn ctrl_c_copies_the_selected_text_with_line_breaks_between_paragraphs() {
 }
 
 #[test]
+fn copy_and_paste_across_empty_paragraph_preserves_blank_line() {
+    let text = "# Title\nfirst line\n\nthird line";
+    let mut h = note(text);
+    h.press_ctrl(0, 'a');
+    h.press_ctrl(0, 'c');
+    assert_eq!(h.clipboard_text().as_deref(), Some("Title\nfirst line\n\nthird line"));
+    assert!(h.clipboard_html().unwrap().contains("<p><br></p>"));
+
+    h.press_ctrl(0, 'n');
+    h.press_ctrl(1, 'v');
+    assert_eq!(h.note_text(1), "# Title\nfirst line\n\nthird line");
+}
+
+#[test]
 fn ctrl_x_cuts_the_range() {
     let mut h = note(TEXT);
     across(&mut h);

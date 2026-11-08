@@ -7,13 +7,26 @@ import { TextLayer } from "text.slint";
 export { BlockData, BlockKind, MarkerData, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
+export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
 export { PaletteEntry, PickerPalette } from "color-picker.slint";
-import { Toolbar, ToolbarMetrics } from "toolbar.slint";
+import { Toolbar, ToolbarMetrics, MenuButton } from "toolbar.slint";
 import { ColorPicker, ColorPickerNav, PickerPalette } from "color-picker.slint";
 import { WindowHandles } from "resize-zones.slint";
 import { ScrollBar, ScrollMetrics } from "scroll.slint";
 
 export component NoteWindow inherits Window {
+    /// Dropdown menu active state and callback.
+    in-out property <bool> dropdown-open: false;
+    callback open-dropdown();
+    out property <bool> menu-button-active: menu-btn.active;
+    out property <bool> menu-button-highlighted: menu-btn.highlighted;
+    out property <bool> menu-button-shown: root.dropdown-open || paper-touch.has-hover || menu-btn.has-hover;
+    out property <float> menu-button-opacity: menu-btn.opacity;
+    out property <length> menu-button-x: menu-btn.center-x - ToolbarMetrics.menu-button-width / 2;
+    out property <length> menu-button-y: menu-btn.center-y - ToolbarMetrics.menu-button-height / 2;
+    out property <length> menu-button-width: ToolbarMetrics.menu-button-width;
+    out property <length> menu-button-height: ToolbarMetrics.menu-button-height;
+
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
     in property <string> window-title: "Washi";
     in property <bool> pinned: false;
@@ -228,10 +241,8 @@ export component NoteWindow inherits Window {
             text-view := Rectangle {
                 x: root.margin;
                 // The tilted paper's top edge dips by half the paper width times sin(tilt) at one end.
-                // At rest the words are cut along the tilted edge themselves (text.slint), so this clip
-                // only has to start above its highest point; the level editing text has no such cut, so
-                // its clip starts below the lowest point and scrolled text never shows over the backdrop.
-                y: root.paper-top + (text-layer.editing ? 1 : -1) * abs((root.width - 2 * root.margin) / 2 * root.tilt.sin());
+                // The clip starts below the lowest point of the tilted top edge so scrolled text never shows over the backdrop.
+                y: root.paper-top + abs((root.width - 2 * root.margin) / 2 * root.tilt.sin());
                 width: root.width - 2 * root.margin;
                 // The tilted band's top edge rises by the same amount at the left;
                 // text may not reach into it, and a level clip cannot follow the tilt.
@@ -349,7 +360,19 @@ export component NoteWindow inherits Window {
                 root.picker-open = false;
                 if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
             }
-            opacity: (paper-touch.has-hover || self.any-pressed) ? 1 : 0;
+            opacity: (paper-touch.has-hover || self.any-pressed || root.dropdown-open) ? 1 : 0;
+            visible: self.opacity > 0;
+            animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
+        }
+
+        // The top-right "..." trigger button for the dropdown menu
+        menu-btn := MenuButton {
+            f: toolbar.f;
+            du: (root.width - 2 * root.margin) / 2px - ToolbarMetrics.menu-button-right-inset / 1px;
+            dv: -(root.height - 2 * root.margin) / 2px + ToolbarMetrics.menu-button-top-inset / 1px;
+            active: root.dropdown-open;
+            clicked => { root.open-dropdown(); }
+            opacity: (paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open) ? 1 : 0;
             visible: self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }

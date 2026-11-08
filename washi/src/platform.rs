@@ -193,6 +193,8 @@ pub trait WindowControl {
     /// Start dragging a note's window by its caption (`hwnd` is its native handle, if any).
     fn begin_move(&self, note: NoteId, hwnd: Option<isize>);
     fn begin_resize(&self, note: NoteId, hwnd: Option<isize>, edge: ResizeEdge);
+    /// Raise a note's window to the top of the z-order and give it focus.
+    fn bring_to_front(&self, _note: NoteId, _hwnd: Option<isize>) {}
     /// Work areas (screens minus taskbars) of all connected monitors, primary first.
     fn work_areas(&self) -> Vec<ScreenRect>;
     /// The given notes (id and native handle, if any) ordered by their windows' stacking on the

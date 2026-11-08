@@ -227,6 +227,7 @@ impl ImageClipboard for FakeClipboard {
 pub enum WindowCommand {
     Move(NoteId),
     Resize(NoteId, ResizeEdge),
+    BringToFront(NoteId),
 }
 
 /// Records native drag requests and reports a screen layout the test can change.
@@ -254,6 +255,9 @@ impl WindowControl for FakeWindowControl {
     }
     fn begin_resize(&self, note: NoteId, _hwnd: Option<isize>, edge: ResizeEdge) {
         self.log.borrow_mut().push(WindowCommand::Resize(note, edge));
+    }
+    fn bring_to_front(&self, note: NoteId, _hwnd: Option<isize>) {
+        self.log.borrow_mut().push(WindowCommand::BringToFront(note));
     }
     fn work_areas(&self) -> Vec<ScreenRect> {
         self.areas.borrow().clone()

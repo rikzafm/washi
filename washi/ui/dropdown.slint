@@ -1,0 +1,418 @@
+// Dropdown menu window for note Quick Jump and actions.
+// Floats relative to the parent note's "..." trigger button.
+//
+// Metrics follow the Claude Design "Dropdown Menu" board (px = logical px):
+// card padding 6, header row 44, note rows padded 6/12 with a 24x10 tape marker,
+// bottom action bar of three 58px buttons under a dotted 2px rule.
+
+import "../../fonts/ShadowsIntoLight.ttf";
+import { ListView } from "std-widgets.slint";
+
+component HeaderIconButton inherits Rectangle {
+    in property <color> hover-bg: #F0F0EE;
+    in property <color> press-bg: #E4E4E2;
+    in property <bool> active: false;
+    in property <string> accessible-name;
+    callback clicked();
+
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    background: hit.pressed ? root.press-bg : ((hit.has-hover || root.active) ? root.hover-bg : transparent);
+
+    accessible-role: button;
+    accessible-label: root.accessible-name;
+
+    hit := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component BottomActionButton inherits Rectangle {
+    callback clicked();
+
+    height: 58px;
+    border-radius: 8px;
+    background: hit.pressed ? #E4E4E2 : (hit.has-hover ? #F0F0EE : transparent);
+
+    hit := TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export struct DropdownNoteItem {
+    id: int,
+    title: string,
+    preview: string,
+    timestamp: string,
+    has-tape: bool,
+}
+
+export component DropdownMenuWindow inherits Window {
+    title: "Washi Menu";
+    no-frame: true;
+    background: transparent;
+    always-on-top: true;
+
+    in property <length> card-width: 268px;
+    in property <length> card-height: 320px;
+    in property <length> shadow-margin: 16px;
+
+    width: card-width + 2 * shadow-margin;
+    height: card-height + 2 * shadow-margin;
+
+    callback dismiss();
+    callback toggle_pin();
+    callback delete_note();
+    callback new_note();
+    callback select_note(int);
+    in-out property <bool> pinned: false;
+    in property <[DropdownNoteItem]> notes: [];
+
+    // Detect clicks outside the card (in the shadow margin) to dismiss
+    background-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => {
+            root.dismiss();
+        }
+    }
+
+    // Dismiss on Escape key
+    focus-scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // The card's shadow. The software renderer cannot blur, so (like the paper and the color
+    // picker) it is stacked copies of the card shape: each one grown by `growth` on every side
+    // and see-through, widest first, the whole stack shifted down. The design's
+    // `0 14px 24px -8px` + `0 2px 5px` shadow, fitted inside the window's shadow margin.
+    for growth[i] in [11px, 9.5px, 8px, 6.5px, 5px, 3.5px, 2px, 0.5px]: Rectangle {
+        x: root.shadow-margin - growth;
+        y: root.shadow-margin - growth + 5px;
+        width: root.card-width + 2 * growth;
+        height: root.card-height + 2 * growth;
+        border-radius: 10.8px + growth;
+        background: #28324604;
+    }
+
+    // The upright card
+    card := Rectangle {
+        x: root.shadow-margin;
+        y: root.shadow-margin;
+        width: root.card-width;
+        height: root.card-height;
+        background: #FFFFFD;
+        border-radius: 10.8px;
+        clip: true;
+
+        // Absorb clicks on the card itself so they don't fall through to background-touch
+        card-touch := TouchArea {
+            width: 100%;
+            height: 100%;
+        }
+
+        // --- Header: "JUMP TO" label, pin and trash buttons ---
+        header := Rectangle {
+            x: 6px;
+            y: 6px;
+            width: root.card-width - 12px;
+            height: 44px;
+
+            Text {
+                x: 12px;
+                y: 0;
+                width: 120px;
+                height: 100%;
+                text: "JUMP TO";
+                font-family: "Shadows Into Light";
+                font-size: 16px;
+                font-weight: 400;
+                letter-spacing: 0.64px;
+                color: #5B616B;
+                vertical-alignment: center;
+            }
+
+            // Pin button (always on top)
+            pin-btn := HeaderIconButton {
+                x: parent.width - 44px - 2px - 44px;
+                y: 0;
+                active: root.pinned;
+                accessible-name: "Always on top";
+                clicked => {
+                    root.toggle_pin();
+                }
+
+                Path {
+                    x: 12px;
+                    y: 12px;
+                    width: 20px;
+                    height: 20px;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M12 17v5M8 3h8l-1 7 3 4H6l3-4z";
+                    fill: root.pinned ? #2B2F36 : transparent;
+                    stroke: #2B2F36;
+                    stroke-width: 1.5px;
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                }
+            }
+
+            // Trash button (delete note)
+            trash-btn := HeaderIconButton {
+                x: parent.width - 44px;
+                y: 0;
+                hover-bg: #F6E7E9;
+                press-bg: #EDD3D7;
+                accessible-name: "Delete note";
+                clicked => {
+                    root.delete_note();
+                }
+
+                Path {
+                    x: 12px;
+                    y: 12px;
+                    width: 20px;
+                    height: 20px;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13";
+                    fill: transparent;
+                    stroke: #8A1F2B;
+                    stroke-width: 1.5px;
+                    stroke-line-cap: round;
+                    stroke-line-join: round;
+                }
+            }
+        }
+
+        // --- Note list ---
+        list-area := Rectangle {
+            x: 0;
+            y: 50px;
+            width: root.card-width;
+            height: root.card-height - 50px - 72px;
+            clip: true;
+
+            if root.notes.length == 0 : Text {
+                width: 100%;
+                height: 100%;
+                text: "No other notes yet";
+                font-family: "Shadows Into Light";
+                font-size: 17px;
+                color: #5B616B;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            if root.notes.length > 0 : ListView {
+                width: 100%;
+                height: 100%;
+                for item in root.notes : Rectangle {
+                    height: text-col.preferred-height + 12px;
+
+                    item-btn := Rectangle {
+                        x: 6px;
+                        width: parent.width - 12px;
+                        height: parent.height;
+                        border-radius: 8px;
+                        background: item-touch.pressed ? #E4E4E2 : (item-touch.has-hover ? #F0F0EE : transparent);
+
+                        item-touch := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.select_note(item.id);
+                            }
+                        }
+
+                        // Tape marker (24x10, top-aligned with the title line)
+                        if item.has-tape : Image {
+                            x: 12px;
+                            y: 6px + 9px;
+                            width: 24px;
+                            height: 10px;
+                            source: @image-url("assets/tape-pink-flat.png");
+                            image-fit: fill;
+                        }
+
+                        // Title on top, snippet + time below (wraps to a second line)
+                        text-col := VerticalLayout {
+                            x: 12px + 24px + 10px;
+                            y: 6px;
+                            width: parent.width - 12px - 24px - 10px - 12px;
+                            spacing: 0px;
+                            alignment: start;
+
+                            Text {
+                                height: 24px;
+                                text: item.title;
+                                font-family: "Shadows Into Light";
+                                font-size: 21px;
+                                font-weight: 400;
+                                color: #2B2F36;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: item.preview != "" ? (item.timestamp != "" ? (item.preview + " " + item.timestamp) : item.preview) : item.timestamp;
+                                font-family: "Shadows Into Light";
+                                font-size: 17px;
+                                font-weight: 400;
+                                color: #5B616B;
+                                wrap: word-wrap;
+                                vertical-alignment: top;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Dotted rule above the action bar (2px dots, 2px gaps) ---
+        divider := Rectangle {
+            x: 6px;
+            y: root.card-height - 6px - 58px - 6px - 2px;
+            width: root.card-width - 12px;
+            height: 2px;
+
+            for i in 64: Rectangle {
+                x: i * 4px;
+                y: 0px;
+                width: 2px;
+                height: 2px;
+                border-radius: 1px;
+                background: #C9CCD2;
+            }
+        }
+
+        // --- Bottom action bar: New / All notes / Settings ---
+        action-bar := HorizontalLayout {
+            x: 6px;
+            y: root.card-height - 6px - 58px;
+            width: root.card-width - 12px;
+            height: 58px;
+            spacing: 4px;
+
+            // + New
+            BottomActionButton {
+                clicked => {
+                    root.new_note();
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+
+                    Rectangle {
+                        height: 20px;
+                        Path {
+                            x: (parent.width - 20px) / 2;
+                            width: 20px;
+                            height: 20px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            commands: "M12 5v14M5 12h14";
+                            fill: transparent;
+                            stroke: #2B2F36;
+                            stroke-width: 1.5px;
+                            stroke-line-cap: round;
+                        }
+                    }
+
+                    Text {
+                        text: "New";
+                        font-family: "Shadows Into Light";
+                        font-size: 17px;
+                        color: #2B2F36;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+
+            // All notes
+            BottomActionButton {
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+
+                    Rectangle {
+                        height: 20px;
+                        Path {
+                            x: (parent.width - 20px) / 2;
+                            width: 20px;
+                            height: 20px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            commands: "M9 6h11M9 12h11M9 18h11M3.6 6h.8M3.6 12h.8M3.6 18h.8";
+                            fill: transparent;
+                            stroke: #2B2F36;
+                            stroke-width: 1.5px;
+                            stroke-line-cap: round;
+                        }
+                    }
+
+                    Text {
+                        text: "All notes";
+                        font-family: "Shadows Into Light";
+                        font-size: 17px;
+                        color: #2B2F36;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+
+            // Settings (hand-drawn sliders)
+            BottomActionButton {
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+
+                    Rectangle {
+                        height: 20px;
+                        Path {
+                            x: (parent.width - 22px) / 2;
+                            y: -1px;
+                            width: 22px;
+                            height: 22px;
+                            viewbox-width: 24;
+                            viewbox-height: 24;
+                            commands: "M3.5 6.6c3-.5 5.4.2 8.1-.1M17.6 6.3c.9.3 1.9.2 3 .1M4 12.3c1.6.3 3 0 4.1.1M12.8 11.8c2.4.4 5 .2 7.5.4M3.8 17.8c3.3.3 6.2-.2 9.6.1M18.3 18.2c.6-.2 1.2 0 1.9-.1M15 4.2c1.4-.3 2.7.9 2.5 2.2-.2 1.3-1.5 2.1-2.7 1.8-1.2-.4-1.6-1.9-1.1-2.8.3-.6.8-1 1.3-1.2zM10.2 9.8c1.3-.3 2.6.7 2.4 2-.2 1.3-1.4 2-2.5 1.7-1.2-.3-1.6-1.8-1.1-2.7.3-.5.7-.9 1.2-1zM16.1 15.8c1.3-.3 2.7.8 2.4 2.1-.2 1.3-1.5 2-2.6 1.7-1.1-.4-1.6-1.8-1-2.7.3-.5.7-1 1.2-1.1z";
+                            fill: transparent;
+                            stroke: #2B2F36;
+                            stroke-width: 1.5px;
+                            stroke-line-cap: round;
+                            stroke-line-join: round;
+                        }
+                    }
+
+                    Text {
+                        text: "Settings";
+                        font-family: "Shadows Into Light";
+                        font-size: 17px;
+                        color: #2B2F36;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
