@@ -48,8 +48,10 @@ export global PickerMetrics {
     out property <length> width: 330px;
     out property <length> height: 116px;
     out property <length> radius: 16px;
-    /// The popover's left edge, from the paper's left edge.
-    out property <length> left: 22px;
+    /// How far the popover's left edge sits left of the text's (the paper's left padding).
+    out property <length> left-overhang: 10px;
+    /// The popover's left edge, from the paper's left edge: the paper's left padding, less the overhang.
+    out property <length> left: Theme.text-inset-left - self.left-overhang;
     /// Space between the popover's bottom and the toolbar band's top.
     out property <length> gap: 10px;
     out property <length> tail-width: 16px;
@@ -66,6 +68,10 @@ export global PickerMetrics {
     out property <color> border: #ECECE8;
     out property <color> label: #6B7079;
     out property <color> shadow: #2B2F360A;
+    /// The tight second shadow (0 2 6 #2B2F3614 in the spec), stacked in three layers like `shadow`.
+    out property <color> shadow-tight: #2B2F3605;
+    /// The selection ring on both rows: the default ink.
+    out property <color> ring: Theme.ink;
     out property <color> focus-ring: #6FA2F5;
 }
 
@@ -183,6 +189,16 @@ export component ColorPicker inherits Rectangle {
         r: root.r + k * 3;
         fill: PickerMetrics.shadow;
     }
+    // the tight shadow close under the body (0 2 6)
+    for k in 3: TRect {
+        f: root.f;
+        u0: root.pl - k * 2;
+        v0: root.top + 2 - k * 2;
+        w: root.pw + k * 4;
+        h: root.ph + k * 4;
+        r: root.r + k * 2;
+        fill: PickerMetrics.shadow-tight;
+    }
     // the tail: border triangle first, then the paper-colored one over the body's border
     TTri {
         f: root.f;
@@ -229,7 +245,7 @@ export component ColorPicker inherits Rectangle {
         f: root.f; du: root.first-u + i * root.step; dv: root.ink-v;
         d: PickerMetrics.dot + 7px;
         border-width: 1.5px;
-        border-color: PickerPalette.ink(i);
+        border-color: PickerMetrics.ring;
     }
 
     // marker: ten rounded chips, the first "none" (dashed outline)
@@ -242,7 +258,7 @@ export component ColorPicker inherits Rectangle {
     for i in 10: TRect {
         visible: root.marker == i;
         f: root.f; u0: root.first-u + i * root.step - root.d / 2 - 3.5; v0: root.marker-v - root.d / 2 - 3.5; w: root.d + 7; h: root.d + 7; r: 9;
-        stroke: i == 0 ? PickerMetrics.label : PickerPalette.ink(root.ink);
+        stroke: PickerMetrics.ring;
         stroke-width: 1.5px;
     }
 

@@ -12,7 +12,10 @@ component MarkerShape inherits Path {
     in property <length> shift-y;
     in property <length> paper-w;
     in property <length> paper-h;
+    /// The corner radius, and the room the Path keeps around the rectangle on every side (so the
+    /// tilted corners stay inside its box).
     property <float> r: 3;
+    property <float> pad: 6;
     property <float> sn: Theme.text-tilt.sin();
     property <float> cs: Theme.text-tilt.cos();
     property <float> u0: root.m.x / 1px;
@@ -28,12 +31,12 @@ component MarkerShape inherits Path {
     }
     // the shape's own box: around the tilted rectangle (it is as high as the rectangle plus the
     // drop along its width), so the Path is only as big as the marker
-    property <float> ox: px(root.u0, root.v0) - 6;
-    property <float> oy: py(root.u0, root.v0) - 6;
+    property <float> ox: px(root.u0, root.v0) - root.pad;
+    property <float> oy: py(root.u0, root.v0) - root.pad;
     x: root.ox * 1px;
     y: root.oy * 1px;
-    width: (root.u1 - root.u0 + 12) * 1px;
-    height: (root.v1 - root.v0 + (root.u1 - root.u0) * root.sn + 12) * 1px;
+    width: (root.u1 - root.u0 + 2 * root.pad) * 1px;
+    height: (root.v1 - root.v0 + (root.u1 - root.u0) * root.sn + 2 * root.pad) * 1px;
     viewbox-width: self.width / 1px;
     viewbox-height: self.height / 1px;
     fill: root.m.color;

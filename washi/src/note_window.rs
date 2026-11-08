@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{floor_boundary, Block, Caret, Document, Kind, Paint, Range, Style as Flags, PALETTE};
+use crate::document::{floor_boundary, Block, Caret, Document, Kind, Paint, Range, Style as Flags, clamp_palette, PALETTE, PALETTE_MAX};
 use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
@@ -215,7 +215,12 @@ pub fn ink_color(i: u8) -> slint::Color {
 
 /// The marker color of palette entry `i` (see-through for none).
 pub fn marker_color(i: u8) -> slint::Color {
-    PALETTE.get(i as usize).and_then(|s| s.marker).map_or(slint::Color::from_argb_u8(0, 0, 0, 0), rgb)
+    swatch_marker(PALETTE.get(i as usize).and_then(|s| s.marker))
+}
+
+/// A swatch's marker as a color: see-through when it has none.
+fn swatch_marker(marker: Option<u32>) -> slint::Color {
+    marker.map_or(slint::Color::from_argb_u8(0, 0, 0, 0), rgb)
 }
 
 /// The shown text of an empty note.
@@ -687,7 +692,7 @@ impl Doc {
 
     /// The paint the next text typed at the caret takes: one a picked color asked for there, or
     /// that of the text before it.
-    fn typing_paint(&self) -> Paint {
+    fn paint_at_caret(&self) -> Paint {
         let i = self.caret_block();
         let cursor = self.selection.get().focus.offset;
         match self.typing_paint.get() {
@@ -699,12 +704,12 @@ impl Doc {
     /// A swatch picked (or Clear, which picks 0 for both): set the ink and/or the marker of the
     /// selection as one undo step; with a collapsed caret, of the text typed next. True when the
     /// document changed.
-    fn pick(&self, ink: Option<u8>, marker: Option<u8>) -> bool {
+    fn apply_paint(&self, ink: Option<u8>, marker: Option<u8>) -> bool {
         let sel = self.clamp(self.selection.get());
         if sel.anchor == sel.focus {
-            let mut paint = self.typing_paint();
-            paint.ink = ink.unwrap_or(paint.ink).min(PALETTE.len() as u8 - 1);
-            paint.marker = marker.unwrap_or(paint.marker).min(PALETTE.len() as u8 - 1);
+            let mut paint = self.paint_at_caret();
+            paint.ink = clamp_palette(ink.unwrap_or(paint.ink));
+            paint.marker = clamp_palette(marker.unwrap_or(paint.marker));
             self.typing_paint.set(Some((sel.focus, paint)));
             return false;
         }
@@ -794,7 +799,7 @@ impl Doc {
             (doc.common_ink_range(sel), doc.common_marker_range(sel))
         } else {
             drop(doc);
-            let p = self.typing_paint();
+            let p = self.paint_at_caret();
             (Some(p.ink), Some(p.marker))
         };
         ui.set_fmt_ink(ink.map_or(-1, i32::from));
@@ -1035,7 +1040,7 @@ impl Note {
             .map(|s| PaletteEntry {
                 name: s.name.into(),
                 ink: rgb(s.ink),
-                marker: s.marker.map_or(slint::Color::from_argb_u8(0, 0, 0, 0), rgb),
+                marker: swatch_marker(s.marker),
             })
             .collect();
         ui.global::<PickerPalette>().set_entries(slint::ModelRc::from(Rc::new(VecModel::from(entries))));
@@ -1115,7 +1120,7 @@ impl Note {
             let (changed, doc, weak) = (changed.clone(), doc.clone(), ui.as_weak());
             Rc::new(move |ink, marker| {
                 let Some(ui) = weak.upgrade() else { return };
-                if doc.pick(ink, marker) {
+                if doc.apply_paint(ink, marker) {
                     changed(None);
                 } else {
                     // a color for what is typed next
@@ -1125,11 +1130,11 @@ impl Note {
         };
         {
             let apply = apply.clone();
-            ui.on_pick_ink(move |i| apply(Some(i.clamp(0, 9) as u8), None));
+            ui.on_pick_ink(move |i| apply(Some(i.clamp(0, PALETTE_MAX as i32) as u8), None));
         }
         {
             let apply = apply.clone();
-            ui.on_pick_marker(move |i| apply(None, Some(i.clamp(0, 9) as u8)));
+            ui.on_pick_marker(move |i| apply(None, Some(i.clamp(0, PALETTE_MAX as i32) as u8)));
         }
         ui.on_clear_color(move || apply(Some(0), Some(0)));
         {

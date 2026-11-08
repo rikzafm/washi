@@ -14,6 +14,9 @@
 use crate::document::{Block, Caret, Kind, Paint, Range, Style as Flags};
 use ttf_parser::Face;
 
+/// A marker is a line pitch tall less this much at its top and bottom, so marked lines do not touch.
+const MARKER_INSET: f64 = 1.0;
+
 const REGULAR: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight.ttf");
 const BOLD: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Bold.ttf");
 const ITALIC: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Italic.ttf");
@@ -417,7 +420,7 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
                     let color = b.paints[i].marker;
                     let j = (i..to).find(|&k| b.paints[k].marker != color).unwrap_or(to);
                     if color != 0 {
-                        markers.push(Marker { block: bi, marker: color, x: x_of(i), y: y + 1.0, width: x_of(j) - x_of(i), height: st.pitch - 2.0 });
+                        markers.push(Marker { block: bi, marker: color, x: x_of(i), y: y + MARKER_INSET, width: x_of(j) - x_of(i), height: st.pitch - 2.0 * MARKER_INSET });
                     }
                     i = j;
                 }

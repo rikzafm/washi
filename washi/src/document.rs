@@ -95,6 +95,14 @@ pub const PALETTE: [Swatch; 10] = [
     Swatch { name: "Red", ink: 0xB8453D, marker: Some(0xFFE2DD) },
 ];
 
+/// The last palette index: the one bound every picked or stored index is held to.
+pub const PALETTE_MAX: u8 = PALETTE.len() as u8 - 1;
+
+/// `i` held to the palette (an index past the table becomes the last entry).
+pub fn clamp_palette(i: u8) -> u8 {
+    i.min(PALETTE_MAX)
+}
+
 /// The palette index of a stored color name (case-insensitive); `None` for an unknown name and
 /// for the default entry, which is never written.
 fn palette_index(name: &str) -> Option<u8> {
@@ -222,7 +230,7 @@ impl Block {
     fn normalize_marks(&mut self) {
         self.marks.resize(self.text.len(), Style::NONE);
         self.paints.resize(self.text.len(), Paint::default());
-        let known = |i: u8| if (i as usize) < PALETTE.len() { i } else { 0 };
+        let known = |i: u8| if i <= PALETTE_MAX { i } else { 0 };
         for (i, c) in self.text.char_indices() {
             let (m, p) = (self.marks[i], self.paints[i]);
             let p = Paint { ink: known(p.ink), marker: known(p.marker) };
@@ -249,6 +257,11 @@ pub struct Range {
 }
 
 impl Range {
+    /// The range `start..end` of one block's text.
+    pub fn within(block: usize, start: usize, end: usize) -> Range {
+        Range { anchor: Caret { block, offset: start }, focus: Caret { block, offset: end } }
+    }
+
     /// `(start, end)`: the earlier caret first.
     pub fn ordered(self) -> (Caret, Caret) {
         if self.anchor <= self.focus { (self.anchor, self.focus) } else { (self.focus, self.anchor) }
@@ -781,7 +794,7 @@ impl Document {
     }
 
     fn set_paint_range(&mut self, range: Range, field: fn(&mut Paint) -> &mut u8, to: u8) -> bool {
-        let to = to.min(PALETTE.len() as u8 - 1);
+        let to = clamp_palette(to);
         let mut changed = false;
         for (i, s, e) in self.range_spans(range) {
             for p in &mut self.blocks[i].paints[s..e] {
@@ -795,12 +808,12 @@ impl Document {
 
     /// Set the ink of `start..end` of one block (see [`Document::set_ink_range`]).
     pub fn set_ink(&mut self, block: usize, start: usize, end: usize, ink: u8) -> bool {
-        self.set_ink_range(Range { anchor: Caret { block, offset: start }, focus: Caret { block, offset: end } }, ink)
+        self.set_ink_range(Range::within(block, start, end), ink)
     }
 
     /// Set the marker of `start..end` of one block.
     pub fn set_marker(&mut self, block: usize, start: usize, end: usize, marker: u8) -> bool {
-        self.set_marker_range(Range { anchor: Caret { block, offset: start }, focus: Caret { block, offset: end } }, marker)
+        self.set_marker_range(Range::within(block, start, end), marker)
     }
 
     /// The ink every character of a range has; `None` when they differ or the range has no text.

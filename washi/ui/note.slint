@@ -62,6 +62,9 @@ export component NoteWindow inherits Window {
     changed picker-open => { if (!root.picker-open) { root.picker-focus = -1; } }
     /// The popover's caption: the summary of the selection's colors, or the hovered swatch's name.
     out property <string> picker-caption: color-picker.caption;
+    /// The "A" button is filled while the popover is open or the selection has a color (-1, mixed,
+    /// counts: some of it is colored).
+    out property <bool> color-button-filled: root.picker-open || root.fmt-ink != 0 || root.fmt-marker != 0;
     /// A swatch was picked (0..9), or Clear: Rust applies it to the selection.
     callback pick-ink(int);
     callback pick-marker(int);
@@ -316,7 +319,7 @@ export component NoteWindow inherits Window {
             strike-active: root.fmt-strike;
             list-active: root.fmt-list;
             picker-open: root.picker-open;
-            color-active: root.fmt-ink > 0 || root.fmt-marker > 0;
+            color-active: root.fmt-ink != 0 || root.fmt-marker != 0;
             ink-color: PickerPalette.ink(root.fmt-ink);
             marker-color: PickerPalette.marker(root.fmt-marker);
             activated(k) => {
