@@ -141,6 +141,8 @@ const START: Caret = Caret { block: 0, offset: 0 };
 const MULTI_CLICK: Duration = Duration::from_millis(500);
 /// ...and this close (logical px).
 const MULTI_CLICK_SLOP: f32 = 4.0;
+/// While a drag is held outside the text area, the note scrolls this often.
+const AUTOSCROLL_STEP: Duration = Duration::from_millis(40);
 
 /// The pointer's press in progress: what a drag extends, by characters, words or paragraphs.
 #[derive(Clone, Copy)]
@@ -152,11 +154,13 @@ struct Pointer {
     /// Where the press started: the anchor of a character drag, the first word or paragraph of the others.
     origin: Range,
     last_press: Option<(Duration, (f32, f32))>,
+    /// The last place of a drag: x in the layer, y in the text area (outside it: scrolling).
+    drag: (f32, f32),
 }
 
 impl Default for Pointer {
     fn default() -> Pointer {
-        Pointer { down: false, clicks: 0, origin: Range { anchor: START, focus: START }, last_press: None }
+        Pointer { down: false, clicks: 0, origin: Range { anchor: START, focus: START }, last_press: None, drag: (0.0, 0.0) }
     }
 }
 
@@ -462,6 +466,110 @@ impl Doc {
         let mut p = self.pointer.get();
         p.down = false;
         self.pointer.set(p);
+    }
+
+    /// The pointer moved to `at` (layer frame) with the button down: grow the selection, and say
+    /// whether the pointer is outside the text area (the note is to scroll while it stays there).
+    fn drag_to(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
+        let view_y = at.1 + ui.get_text_layer_y();
+        let mut p = self.pointer.get();
+        p.drag = (at.0, view_y);
+        self.pointer.set(p);
+        self.pointer_drag(ui, at);
+        view_y < 0.0 || view_y > ui.get_text_view_height()
+    }
+
+    /// One step of the scroll that goes on while a drag is held outside the text area: the note
+    /// scrolls, and the range reaches the line at the area's edge. False when it is over.
+    fn autoscroll(&self, ui: &NoteWindow) -> bool {
+        let p = self.pointer.get();
+        let (x, view_y) = p.drag;
+        let view = ui.get_text_view_height();
+        let over = if view_y < 0.0 { view_y } else if view_y > view { view_y - view } else { 0.0 };
+        if !p.down || over == 0.0 {
+            return false;
+        }
+        let step = (over.abs() * 0.25).clamp(3.0, 40.0).copysign(over);
+        let max = (ui.get_content_height() - view).max(0.0);
+        ui.set_scroll_y((ui.get_scroll_y() + step).clamp(0.0, max));
+        self.pointer_drag(ui, (x, view_y.clamp(0.0, view) - ui.get_text_layer_y()));
+        true
+    }
+
+    /// Shift+`key` (`shift+<arrow>` or `ctrl+shift+<Home or End>`) with the caret at `offset` of
+    /// block `i`: the focus end of the selection moves, over a paragraph's edge if need be. False
+    /// when the field keeps the key (inside one paragraph, with nothing across paragraphs).
+    fn extend(&self, ui: &NoteWindow, key: &str) -> bool {
+        use slint::platform::Key;
+        let sel = self.selection.get();
+        let across = sel.anchor.block != sel.focus.block;
+        let focus = sel.focus;
+        let doc = self.doc.borrow();
+        let Some(block) = doc.blocks().get(focus.block) else { return false };
+        let offset = focus.offset;
+        let (key, ctrl) = match key.strip_prefix("ctrl+shift+") {
+            Some(k) => (k, true),
+            None => (key.strip_prefix("shift+").unwrap_or(key), false),
+        };
+        let is = |k: Key| key == char::from(k).to_string();
+        let to = if ctrl {
+            let all = doc.all();
+            if is(Key::Home) { all.anchor } else { all.focus }
+        } else if is(Key::LeftArrow) {
+            if offset > 0 {
+                if !across {
+                    return false;
+                }
+                let mut o = offset - 1;
+                while !block.text.is_char_boundary(o) {
+                    o -= 1;
+                }
+                Caret { block: focus.block, offset: o }
+            } else if focus.block > 0 {
+                let prev = focus.block - 1;
+                Caret { block: prev, offset: doc.blocks()[prev].text.len() }
+            } else {
+                focus
+            }
+        } else if is(Key::RightArrow) {
+            if offset < block.text.len() {
+                if !across {
+                    return false;
+                }
+                let mut o = offset + 1;
+                while !block.text.is_char_boundary(o) {
+                    o += 1;
+                }
+                Caret { block: focus.block, offset: o }
+            } else if focus.block + 1 < doc.len() {
+                Caret { block: focus.block + 1, offset: 0 }
+            } else {
+                focus
+            }
+        } else {
+            let up = is(Key::UpArrow);
+            let tokens = Self::tokens(ui);
+            let width = self.paper.get().0;
+            let at = textflow::caret_line(block, offset, width, &tokens);
+            let edge = if up { at.line == 0 } else { at.line + 1 >= at.lines };
+            if !edge {
+                if !across {
+                    return false;
+                }
+                let line = if up { at.line - 1 } else { at.line + 1 };
+                Caret { block: focus.block, offset: textflow::offset_at(block, line, at.x, width, &tokens) }
+            } else {
+                let target = if up { doc.prev_text_block(focus.block) } else { doc.next_text_block(focus.block) };
+                match target {
+                    Some(t) => Caret { block: t, offset: textflow::offset_at(&doc.blocks()[t], if up { usize::MAX } else { 0 }, at.x, width, &tokens) },
+                    // the first or last line of the note: the focus runs to its end
+                    None => Caret { block: focus.block, offset: if up { 0 } else { block.text.len() } },
+                }
+            }
+        };
+        drop(doc);
+        self.set_selection(ui, Range { anchor: sel.anchor, focus: to });
+        true
     }
 
     fn hit(&self, ui: &NoteWindow, at: (f32, f32)) -> Caret {
@@ -826,6 +934,7 @@ impl Note {
         let autosave = Rc::new(Autosave { id, db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
         let history_timer = Rc::new(Timer::default());
+        let autoscroll = Rc::new(Timer::default());
         // everything that changes the text ends here: relayout, stored text, title, autosave
         let changed: Rc<dyn Fn(Option<Caret>)> = {
             let (autosave, timer, weak, doc) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone());
@@ -897,6 +1006,9 @@ impl Note {
                         changed(Some(caret));
                     }
                     return true;
+                }
+                if key.contains("shift+") {
+                    return doc.extend(&ui, key.as_str());
                 }
                 let Some((caret, edited)) = doc.key(i.max(0) as usize, key.as_str(), offset.max(0) as usize, &ui) else { return false };
                 if edited {
@@ -988,16 +1100,32 @@ impl Note {
             });
         }
         {
-            let (doc, weak) = (doc.clone(), ui.as_weak());
+            let (doc, weak, scroll) = (doc.clone(), ui.as_weak(), autoscroll.clone());
             ui.on_pointer_drag(move |x, y| {
-                if let Some(ui) = weak.upgrade() {
-                    doc.pointer_drag(&ui, (x, y));
+                let Some(ui) = weak.upgrade() else { return };
+                if doc.drag_to(&ui, (x, y)) {
+                    if !scroll.running() {
+                        let (doc, weak, timer) = (doc.clone(), weak.clone(), Rc::downgrade(&scroll));
+                        scroll.start(TimerMode::Repeated, AUTOSCROLL_STEP, move || {
+                            let more = weak.upgrade().is_some_and(|ui| doc.autoscroll(&ui));
+                            if !more {
+                                if let Some(t) = timer.upgrade() {
+                                    t.stop();
+                                }
+                            }
+                        });
+                    }
+                } else {
+                    scroll.stop();
                 }
             });
         }
         {
-            let doc = doc.clone();
-            ui.on_pointer_up(move || doc.pointer_up());
+            let (doc, scroll) = (doc.clone(), autoscroll.clone());
+            ui.on_pointer_up(move || {
+                doc.pointer_up();
+                scroll.stop();
+            });
         }
         // callbacks that only pass one event on to the app
         let forward = |ev: NoteEvent| {

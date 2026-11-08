@@ -329,6 +329,22 @@ impl Harness {
         self.settle();
     }
 
+    /// Press `Ctrl+Shift+<special key>` (Home, End ...) in the note.
+    pub fn press_ctrl_shift_key(&mut self, note: usize, key: Key) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let (ctrl, shift): (slint::SharedString, slint::SharedString) = (Key::Control.into(), Key::Shift.into());
+            w.dispatch_event(WindowEvent::KeyPressed { text: ctrl.clone() });
+            w.dispatch_event(WindowEvent::KeyPressed { text: shift.clone() });
+            w.dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+            w.dispatch_event(WindowEvent::KeyReleased { text: shift });
+            w.dispatch_event(WindowEvent::KeyReleased { text: ctrl });
+        });
+        self.settle();
+    }
+
     /// Click (press and release, left button) at a window position, moving there first.
     pub fn click(&mut self, note: usize, x: f32, y: f32) {
         self.pointer_move(note, x, y);
