@@ -7,6 +7,7 @@ import { TextLayer } from "text.slint";
 export { BlockData, BlockKind, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
+import { ColorPicker, PickerPalette } from "color-picker.slint";
 import { WindowHandles } from "resize-zones.slint";
 import { ScrollBar, ScrollMetrics } from "scroll.slint";
 
@@ -46,18 +47,30 @@ export component NoteWindow inherits Window {
     /// Format the selected text (0 bold, 1 italic, 2 underline, 3 strike), or the paragraph holding
     /// the caret (4 list): a toolbar button or its shortcut.
     callback format(int);
+    /// The ink and marker index of the selection (marker -1 mixed); drive the "A" button and the rings.
+    in property <int> fmt-ink: 0;
+    in property <int> fmt-marker: 0;
+    /// The color popover is open. It closes on Escape, a click elsewhere, losing the focus,
+    /// minimising, resizing and typing; opening it never moves the focus.
+    in-out property <bool> picker-open: false;
+    /// A swatch was picked (0..9), or Clear: Rust applies it to the selection.
+    callback pick-ink(int);
+    callback pick-marker(int);
+    callback clear-color();
     /// A text field took the focus: the caret is in this block.
     callback focus-entered(int);
     /// The paper (window minus margins) changed size: Rust lays the words out again.
     callback paper-resized(length, length);
-    changed width => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
-    changed height => { root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
+    changed width => { root.picker-open = false; root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
+    changed height => { root.picker-open = false; root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
     /// 1 at rest (words on the tilted baseline), 0 while editing (level).
     out property <float> text-tilt-scale: text-layer.tilt-scale;
     /// The block whose field has the focus (-1 none). Rust clears it when it replaces the blocks.
     in-out property <int> text-focused-block <=> text-layer.focused-block;
+    changed text-focused-block => { if (root.text-focused-block < 0) { root.picker-open = false; } }
     /// Suspended (covered, minimized): the look must not change, so no redraw is asked for.
     in property <bool> suspended: false;
+    changed suspended => { if (root.suspended) { root.picker-open = false; } }
     in property <float> pitch-scale: 1;
     in-out property <int> text-resync: 0;
     /// Block `i` was edited to this text.
@@ -150,6 +163,7 @@ export component NoteWindow inherits Window {
 
         FocusScope {
             key-pressed(e) => {
+                if (e.text == Key.Escape && root.picker-open) { root.picker-open = false; return accept; }
                 if (e.modifiers.control && !e.modifiers.shift && !e.modifiers.alt) {
                     if (e.text == "n" || e.text == "\u{e}") { root.new-note(); return accept; }
                     if (e.text == "w" || e.text == "\u{17}") { root.close-note(); return accept; }
@@ -205,16 +219,16 @@ export component NoteWindow inherits Window {
                     focus-serial: root.focus-serial;
                     focus-anchor: root.focus-anchor;
                     wash: root.wash;
-                    pointer-down(x, y, shift) => { root.pointer-down(x, y, shift); }
+                    pointer-down(x, y, shift) => { root.picker-open = false; root.pointer-down(x, y, shift); }
                     pointer-drag(x, y) => { root.pointer-drag(x, y); }
                     pointer-up => { root.pointer-up(); }
                     right-click(x, y) => { root.context-menu(x, y); }
                     pointer-moved => { root.pointer-moved(); }
                     paste-image => { return root.paste-image(); }
                     range-text => { return root.range-text(); }
-                    range-replace(t) => { root.range-replace(t); }
+                    range-replace(t) => { root.picker-open = false; root.range-replace(t); }
                     range-key(k, s) => { return root.range-key(k, s); }
-                    block-edited(i, t, c) => { root.block-edited(i, t, c); }
+                    block-edited(i, t, c) => { root.picker-open = false; root.block-edited(i, t, c); }
                     block-key(i, k, o) => { return root.block-key(i, k, o); }
                     caret-moved(i, o, a) => { root.caret-moved(i, o, a); }
                 }
@@ -251,9 +265,9 @@ export component NoteWindow inherits Window {
             y: 0px;
             width: root.width;
             height: root.height;
-            start-move => { root.start-move(); }
-            start-resize(d) => { root.start-resize(d); }
-            right-click(x, y) => { root.context-menu(x, y); }
+            start-move => { root.picker-open = false; root.start-move(); }
+            start-resize(d) => { root.picker-open = false; root.start-resize(d); }
+            right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
             pointer-over => { root.pointer-moved(); }
         }
 
@@ -274,11 +288,39 @@ export component NoteWindow inherits Window {
             underline-active: root.fmt-underline;
             strike-active: root.fmt-strike;
             list-active: root.fmt-list;
-            activated(k) => { if (k < 5) { root.format(k); } else { root.insert-image(); } }
+            picker-open: root.picker-open;
+            color-active: root.fmt-ink > 0 || root.fmt-marker > 0;
+            ink-color: PickerPalette.ink(root.fmt-ink);
+            marker-color: PickerPalette.marker(root.fmt-marker);
+            activated(k) => {
+                if (k == 4) { root.picker-open = !root.picker-open; return; }
+                root.picker-open = false;
+                if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
+            }
             opacity: (paper-touch.has-hover || self.any-pressed) ? 1 : 0;
             visible: self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }
+    }
+
+    // The color popover: above the toolbar band, in the paper's frame, over the editor.
+    color-picker := ColorPicker {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        paper-x: root.margin;
+        paper-y: root.paper-top;
+        paper-w: root.width - 2 * root.margin;
+        paper-h: root.height - 2 * root.margin;
+        tilt: root.tilt;
+        open: root.picker-open;
+        ink: root.fmt-ink;
+        marker: root.fmt-marker;
+        pick-ink(i) => { root.pick-ink(i); }
+        pick-marker(i) => { root.pick-marker(i); }
+        clear => { root.clear-color(); }
+        dismiss => { root.picker-open = false; }
     }
 
     // The tapes lie over the paper.

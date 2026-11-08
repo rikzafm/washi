@@ -23,7 +23,7 @@ fn note(text: &str) -> Harness {
     h
 }
 
-/// The center of toolbar button `k` (0 B, 1 I, 2 U, 3 ab, 4 list) in window coordinates: the
+/// The center of toolbar button `k` (0 B, 1 I, 2 U, 3 ab, 4 A, 5 list, 6 image) in window coordinates: the
 /// button row sits in the paper's frame, which is turned 1.5 degrees about the paper's center.
 fn button(h: &Harness, k: usize) -> (f32, f32) {
     let (w, hh) = h.note_size(0);
@@ -88,7 +88,7 @@ fn a_heading_shows_b_active() {
 
 #[test]
 fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
-    let cases = [(1, "*body*"), (2, "<u>body</u>"), (3, "~~body~~"), (4, "- body")];
+    let cases = [(1, "*body*"), (2, "<u>body</u>"), (3, "~~body~~"), (5, "- body")];
     for (k, stored) in cases {
         let mut h = note("title\nbody");
         h.press(0, Key::DownArrow);
@@ -96,7 +96,7 @@ fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
         click_button(&mut h, k);
         assert_eq!(h.note_text(0), format!("# title\n{stored}"), "button {k}");
         let mut active = [false; 5];
-        active[k] = true;
+        active[if k == 5 { 4 } else { k }] = true;
         assert_eq!(h.toolbar_active(0), active, "button {k}");
         click_button(&mut h, k);
         assert_eq!(h.note_text(0), "# title\nbody", "button {k} again");
@@ -238,7 +238,7 @@ fn formats_are_saved_and_come_back_after_a_restart() {
     click_button(&mut h, 2);
     h.press(0, Key::End);
     h.press(0, Key::DownArrow);
-    click_button(&mut h, 4);
+    click_button(&mut h, 5);
     h.press(0, Key::End);
     h.press_shift(0, Key::Home, 1);
     h.press_ctrl(0, 'i');
