@@ -127,7 +127,7 @@ export component NoteWindow inherits Window {
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
     callback pointer-moved();
-    /// The user pressed the pink tape or the top margin: the platform drags the window.
+    /// The user pressed either tape: the platform drags the window.
     callback start-move();
     /// The user pressed a resize zone (0 north, then clockwise: see resize-zones.slint).
     callback start-resize(int);

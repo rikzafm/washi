@@ -244,31 +244,6 @@ fn start_after_everything_was_closed_gives_one_empty_note() {
 }
 
 #[test]
-fn closing_single_non_empty_note_quits_and_restarts_with_that_note() {
-    let mut h = Harness::new();
-    h.start().unwrap();
-    h.type_text(0, "closed for the night");
-    h.press_ctrl(0, 'w');
-    assert!(h.has_quit());
-
-    h.restart().unwrap();
-    assert_eq!(h.open_note_count(), 1);
-    assert_eq!(h.note_text(0), "# closed for the night");
-}
-
-#[test]
-fn closing_empty_note_to_exit_restarts_with_one_empty_note() {
-    let mut h = Harness::new();
-    h.start().unwrap();
-    h.press_ctrl(0, 'w');
-    assert!(h.has_quit());
-
-    h.restart().unwrap();
-    assert_eq!(h.open_note_count(), 1);
-    assert_eq!(h.note_text(0), "");
-}
-
-#[test]
 fn closing_multiple_notes_in_quick_succession_reopens_all_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();

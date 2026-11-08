@@ -418,7 +418,7 @@ impl App {
 
     /// Notes closed within the exit window (30s) that would reopen if the app exits.
     pub fn exit_candidates(&self) -> Vec<ClosedCandidate> {
-        self.0.exit_candidates.borrow().clone()
+        self.0.exit_candidates()
     }
 
     /// Close a note: save it, remember where it was, mark it closed and release its window.
@@ -427,29 +427,7 @@ impl App {
         let Some((was_empty, geometry)) = self.with_note(id, |n| (n.text().trim().is_empty(), n.geometry())) else {
             return;
         };
-        let now = self.0.env.clock.monotonic();
-        if let Some(last) = self.0.exit_candidates.borrow().last() {
-            if now.saturating_sub(last.closed_at) > EXIT_WINDOW {
-                self.0.exit_candidates.borrow_mut().clear();
-                self.0.exit_stacking.borrow_mut().clear();
-            }
-        }
-        if self.0.exit_candidates.borrow().is_empty() {
-            *self.0.exit_stacking.borrow_mut() = self.0.current_stacking();
-        }
-        self.0.exit_candidates.borrow_mut().push(ClosedCandidate {
-            id,
-            closed_at: now,
-            was_empty,
-            geometry: Some(geometry),
-        });
-        let weak = Rc::downgrade(&self.0);
-        self.0.exit_timer.start(slint::TimerMode::SingleShot, EXIT_WINDOW, move || {
-            if let Some(inner) = weak.upgrade() {
-                inner.exit_candidates.borrow_mut().clear();
-                inner.exit_stacking.borrow_mut().clear();
-            }
-        });
+        self.0.record_closed_candidate(id, was_empty, geometry);
 
         // an empty note is not worth keeping: closing it discards it instead of saving it
         if was_empty && self.0.db.delete_note(id).is_ok() {
@@ -505,11 +483,7 @@ impl App {
         if self.with_note(id, |_| ()).is_some() {
             return;
         }
-        self.0.exit_candidates.borrow_mut().retain(|c| c.id != id);
-        if self.0.exit_candidates.borrow().is_empty() {
-            self.0.exit_timer.stop();
-            self.0.exit_stacking.borrow_mut().clear();
-        }
+        self.0.remove_exit_candidate(id);
         let Ok(Some(row)) = self.0.db.note(id) else { return };
         if self.0.db.set_open(id, true).is_ok() {
             if let Err(e) = self.open_row(&row) {
@@ -720,6 +694,50 @@ impl App {
 }
 
 impl Inner {
+    fn exit_candidates(&self) -> Vec<ClosedCandidate> {
+        self.exit_candidates.borrow().clone()
+    }
+
+    /// Clears any pending exit sequence candidates, stacking order snapshot, and stops the exit timer.
+    fn clear_exit_sequence(&self) {
+        self.exit_candidates.borrow_mut().clear();
+        self.exit_stacking.borrow_mut().clear();
+        self.exit_timer.stop();
+    }
+
+    /// Records a closed note as an exit sequence candidate.
+    fn record_closed_candidate(self: &Rc<Self>, id: NoteId, was_empty: bool, geometry: Geometry) {
+        let now = self.env.clock.monotonic();
+        if let Some(last) = self.exit_candidates.borrow().last() {
+            if now.saturating_sub(last.closed_at) > EXIT_WINDOW {
+                self.clear_exit_sequence();
+            }
+        }
+        if self.exit_candidates.borrow().is_empty() {
+            *self.exit_stacking.borrow_mut() = self.current_stacking();
+        }
+        self.exit_candidates.borrow_mut().push(ClosedCandidate {
+            id,
+            closed_at: now,
+            was_empty,
+            geometry: Some(geometry),
+        });
+        let weak = Rc::downgrade(self);
+        self.exit_timer.start(slint::TimerMode::SingleShot, EXIT_WINDOW, move || {
+            if let Some(inner) = weak.upgrade() {
+                inner.clear_exit_sequence();
+            }
+        });
+    }
+
+    /// Removes an exit candidate if present; clears the exit sequence if none remain.
+    fn remove_exit_candidate(&self, id: NoteId) {
+        self.exit_candidates.borrow_mut().retain(|c| c.id != id);
+        if self.exit_candidates.borrow().is_empty() {
+            self.clear_exit_sequence();
+        }
+    }
+
     /// Stacking order (bottom to top) of the currently open notes.
     fn current_stacking(&self) -> Vec<NoteId> {
         let Ok(notes) = self.notes.try_borrow() else { return Vec::new() };
@@ -740,9 +758,7 @@ impl Inner {
     fn restore_exit_candidates(&self) {
         let non_empty: Vec<NoteId> = self.exit_candidates.borrow().iter().filter(|c| !c.was_empty).map(|c| c.id).collect();
         if non_empty.is_empty() {
-            self.exit_candidates.borrow_mut().clear();
-            self.exit_stacking.borrow_mut().clear();
-            self.exit_timer.stop();
+            self.clear_exit_sequence();
             return;
         }
 
@@ -773,9 +789,7 @@ impl Inner {
             eprintln!("washi: could not save stacking order on exit: {e}");
         }
 
-        self.exit_candidates.borrow_mut().clear();
-        self.exit_stacking.borrow_mut().clear();
-        self.exit_timer.stop();
+        self.clear_exit_sequence();
     }
 }
 
