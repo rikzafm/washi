@@ -70,13 +70,10 @@ export component BlockView inherits Rectangle {
     in property <int> img-h: 0;
     /// Ctrl+V: true when the note took it (the clipboard held a picture).
     callback paste-image() -> bool;
-    /// Ctrl+A: select the whole note (the note draws it and handles the keys that follow).
+    /// Ctrl+A: the note selects everything (a range from the start to the end).
     callback select-all();
-    /// A key while the whole note is selected: true when the note took it.
-    callback all-key(KeyEvent) -> bool;
-    /// The caret moved while everything was selected: the selection is over.
-    callback all-key-ended();
-    in property <bool> all-selected: false;
+    /// A key while the note's selection spans blocks (`wash` is off): true when the note took it.
+    callback range-key(KeyEvent) -> bool;
     in property <bool> italic: false;
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
@@ -119,15 +116,15 @@ export component BlockView inherits Rectangle {
         : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch) / 1px * root.pitch-scale) / root.pitch-scale * 1px - 0.001px;
     // (a hair under: the field rounds its height up, so an exact pitch would add a pixel per block)
 
-    property <bool> focused: input.has-focus;
+    property <bool> focused: input.has-focus || image-focus.has-focus;
     property <bool> reported: false;
     // Tell the layer about focus changes, once each (Slint raises no change for the initial state).
     function report() {
-        if (input.has-focus != root.reported) {
-            root.reported = input.has-focus;
+        if (root.focused != root.reported) {
+            root.reported = root.focused;
             root.focus-changed(root.reported);
             // the caret is in this field now: where it is and what is selected
-            if (root.reported) { root.caret-moved(input.cursor-position-byte-offset, input.anchor-position-byte-offset); }
+            if (root.reported) { root.caret-moved(root.kind == BlockKind.image ? 0 : input.cursor-position-byte-offset, root.kind == BlockKind.image ? 0 : input.anchor-position-byte-offset); }
         }
     }
     changed focused => { root.report(); root.drop-selection(); }
@@ -135,13 +132,27 @@ export component BlockView inherits Rectangle {
     // Slint keeps a field's selection when the focus moves to another field from code; the note's
     // selection is somewhere else now, so nothing may stay selected here (it would be washed twice).
     function drop-selection() {
-        if (!input.has-focus && !root.wanted) {
+        if (!root.focused && !root.wanted && root.kind != BlockKind.image) {
             input.set-selection-offsets(input.cursor-position-byte-offset, input.cursor-position-byte-offset);
         }
     }
 
     property <length> image-height: root.img-w > 0 ? root.width * root.img-h / root.img-w : 0px;
     preferred-height: root.gap-before + (root.kind == BlockKind.image ? root.image-height : input.preferred-height);
+
+    // A selected picture has no text field: this takes the keyboard focus instead, so Backspace and
+    // Delete remove the picture and the arrows leave it.
+    image-focus := FocusScope {
+        enabled: root.kind == BlockKind.image;
+        key-pressed(e) => {
+            if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta) { return reject; }
+            if (e.text == Key.Backspace || e.text == Key.Delete || e.text == Key.UpArrow || e.text == Key.DownArrow
+                || e.text == Key.LeftArrow || e.text == Key.RightArrow) {
+                return root.key(e.text, 0) ? accept : reject;
+            }
+            reject
+        }
+    }
 
     if root.kind == BlockKind.image: Image {
         x: 0;
@@ -181,8 +192,6 @@ export component BlockView inherits Rectangle {
         visible: root.kind != BlockKind.image;
         edited => { root.edited(self.text, self.cursor-position-byte-offset); }
         changed cursor-position-byte-offset => {
-            // a click or an arrow ends the select-all
-            if (root.all-selected && self.has-focus) { root.all-key-ended(); }
             if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset, self.anchor-position-byte-offset); }
         }
         changed anchor-position-byte-offset => {
@@ -192,7 +201,7 @@ export component BlockView inherits Rectangle {
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift && (e.text == "v" || e.text == "\u{16}") && root.paste-image()) {
                 return accept;
             }
-            if (root.all-selected && root.all-key(e)) {
+            if (!root.wash && root.range-key(e)) {
                 return accept;
             }
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift && !e.modifiers.meta && (e.text == "a" || e.text == "\u{1}")) {
@@ -227,6 +236,7 @@ export component BlockView inherits Rectangle {
     }
 
     function take-focus() {
+        if (root.kind == BlockKind.image) { image-focus.focus(); return; }
         input.focus();
         input.set-selection-offsets(root.focus-anchor >= 0 ? root.focus-anchor : root.focus-offset, root.focus-offset);
     }

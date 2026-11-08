@@ -168,10 +168,8 @@ struct Doc {
     rules: Rc<VecModel<RuleData>>,
     /// The wash of the note-level selection, one level box per line it touches.
     sel_rects: Rc<VecModel<SelRect>>,
-    /// The note-level range that `sel_rects` washes (a select-all or a selection across blocks), if any.
+    /// The note-level range that `sel_rects` washes (a selection across blocks), if any.
     range: Cell<Option<Range>>,
-    /// Whether the wash is a select-all (Ctrl+A), which the field ends with its own `select-cleared`.
-    all_wash: Cell<bool>,
     /// The selection: where it started and where the caret is now (the same caret: nothing
     /// selected). The focus block is what the toolbar and the format shortcuts act on.
     selection: Cell<Range>,
@@ -207,7 +205,6 @@ impl Doc {
             rules: Rc::new(VecModel::default()),
             sel_rects: Rc::new(VecModel::default()),
             range: Cell::new(None),
-            all_wash: Cell::new(false),
             selection: Cell::new(Range { anchor: START, focus: START }),
             pointer: Cell::new(Pointer::default()),
             typing: Cell::new(None),
@@ -350,26 +347,18 @@ impl Doc {
         );
     }
 
-    /// Ctrl+A: the note-level selection becomes the whole note.
+    /// Ctrl+A: the selection becomes the range from the start of the note to its end.
     fn select_all(&self, ui: &NoteWindow) {
-        self.all_wash.set(true);
-        self.range.set(Some(self.doc.borrow().all()));
-        self.fill_sel_rects(&self.doc.borrow(), &Self::tokens(ui));
+        let all = self.doc.borrow().all();
+        self.set_selection(ui, all);
     }
 
-    /// The select-all ended (a key or a click): no wash. (A selection across blocks keeps its own.)
-    fn clear_selection(&self) {
-        if self.all_wash.replace(false) {
-            self.range.set(None);
-            self.sel_rects.set_vec(vec![]);
-        }
-    }
-
-    /// No wash at all (the text was replaced).
-    fn clear_wash(&self) {
-        self.all_wash.set(false);
+    /// A key moved the caret out of a selection across blocks (or the text was replaced): the note's
+    /// wash is over and the fields draw selections again.
+    fn end_range(&self, ui: &NoteWindow) {
         self.range.set(None);
         self.sel_rects.set_vec(vec![]);
+        ui.set_wash(true);
     }
 
     /// Make `range` the selection. Inside one block (or collapsed) the block's own field holds and
@@ -380,9 +369,6 @@ impl Doc {
         let (start, end) = range.ordered();
         let across = start.block != end.block;
         self.selection.set(range);
-        // a select-all ends here; its field-side `select-cleared` must not take this wash away
-        self.all_wash.set(false);
-        ui.set_text_all_selected(false);
         ui.set_wash(!across);
         if across {
             self.range.set(Some(range));
@@ -485,10 +471,11 @@ impl Doc {
         self.doc.borrow().to_text()
     }
 
-    /// What a key does over a select-all (its text): 1 a modifier key alone, so the selection stays;
-    /// 2 Backspace, Delete, Enter or a character replaced the whole note (the caret to place is
-    /// returned too); 0 any other key.
-    fn all_key(&self, key: &str) -> (i32, Option<Caret>) {
+    /// What a key does over a selection across blocks (its text): 1 taken without a change (a
+    /// modifier key alone, or an arrow without Shift, which collapses the selection to its start or
+    /// end); 2 Backspace, Delete, Enter or a character replaced the selection (the caret to place is
+    /// returned too); 0 any other key (Shift+arrows are ticket 06's).
+    fn range_key(&self, ui: &NoteWindow, key: &str, shift: bool) -> (i32, Option<Caret>) {
         use slint::platform::Key;
         let mut chars = key.chars();
         let (Some(c), None) = (chars.next(), chars.next()) else { return (0, None) };
@@ -497,22 +484,40 @@ impl Doc {
             return (1, None);
         }
         let is = |k: Key| c == char::from(k);
-        let text = if is(Key::Backspace) || is(Key::Delete) || is(Key::Return) {
+        let (start, end) = self.selection.get().ordered();
+        if is(Key::LeftArrow) || is(Key::UpArrow) || is(Key::RightArrow) || is(Key::DownArrow) {
+            if shift {
+                return (0, None);
+            }
+            let to = if is(Key::LeftArrow) || is(Key::UpArrow) { start } else { end };
+            self.set_selection(ui, Range { anchor: to, focus: to });
+            return (1, None);
+        }
+        let text = if is(Key::Backspace) || is(Key::Delete) {
             String::new()
+        } else if is(Key::Return) {
+            "\n".to_string()
         } else if !c.is_control() && !('\u{f700}'..='\u{f8ff}').contains(&c) {
             c.to_string()
         } else {
             return (0, None);
         };
-        (2, Some(self.replace_all(&text)))
+        (2, Some(self.replace_range(&text)))
     }
 
-    /// The whole note becomes `text`; the caret after it.
-    fn replace_all(&self, text: &str) -> Caret {
+    /// The selection becomes `text`; the caret after it.
+    fn replace_range(&self, text: &str) -> Caret {
+        let range = self.clamp(self.selection.get());
         let before = self.doc.borrow().clone();
-        let caret = self.doc.borrow_mut().replace_all(text);
+        let caret = self.doc.borrow_mut().replace_range(range, text);
+        self.typing.set(None);
         self.structural(before);
         caret
+    }
+
+    /// The selected text as plain lines.
+    fn range_text(&self) -> String {
+        self.doc.borrow().plain_range(self.clamp(self.selection.get()))
     }
 
     /// The caret's block, kept within the document.
@@ -537,10 +542,10 @@ impl Doc {
     }
 
     /// Toolbar button or shortcut `what` (0 bold, 1 italic, 2 underline, 3 strike) on the selected
-    /// text: the whole note after a select-all, else the selection in the caret's paragraph, else
-    /// the word holding the caret; outside a word, on what is typed next. 4 (list) toggles the
-    /// caret's paragraph. True when the document changed.
-    fn format(&self, what: i32, all_selected: bool) -> bool {
+    /// text: the selection (across paragraphs too), else the word holding the caret; outside a
+    /// word, on what is typed next. 4 (list) toggles every paragraph the selection touches. True
+    /// when the document changed.
+    fn format(&self, what: i32) -> bool {
         let i = self.caret_block();
         let flag = match what {
             0 => Flags::BOLD,
@@ -549,7 +554,7 @@ impl Doc {
             3 => Flags::STRIKE,
             4 => {
                 let before = self.doc.borrow().clone();
-                let done = self.doc.borrow_mut().toggle_list(i);
+                let done = self.doc.borrow_mut().toggle_list_range(self.selection.get());
                 if done {
                     self.structural(before);
                 }
@@ -562,9 +567,7 @@ impl Doc {
         let before = self.doc.borrow().clone();
         let done = {
             let mut doc = self.doc.borrow_mut();
-            if all_selected {
-                doc.toggle_style_all(flag)
-            } else if !collapsed {
+            if !collapsed {
                 doc.toggle_style_range(sel, flag)
             } else if let Some((start, end)) = doc.word_at(i, cursor) {
                 doc.toggle_style(i, start, end, flag)
@@ -575,7 +578,7 @@ impl Doc {
         if done {
             self.typing.set(None);
             self.structural(before);
-        } else if !all_selected && collapsed {
+        } else if collapsed {
             let style = self.typing_style().toggled(flag);
             self.typing.set(Some((Caret { block: i, offset: cursor }, style)));
         }
@@ -588,7 +591,6 @@ impl Doc {
             let doc = self.doc.borrow();
             let sel = self.selection.get();
             match doc.blocks().get(self.caret_block()) {
-                _ if ui.get_text_all_selected() => doc.common_style_all(),
                 Some(_) if sel.anchor != sel.focus => doc.common_style_range(sel),
                 Some(_) => {
                     drop(doc);
@@ -609,7 +611,7 @@ impl Doc {
 
     /// The caret moved to `offset` of block `block`, the selection's other end at `anchor`. A style
     /// asked for at another place is forgotten.
-    fn caret_moved(&self, block: usize, offset: usize, anchor: usize) {
+    fn caret_moved(&self, ui: &NoteWindow, block: usize, offset: usize, anchor: usize) {
         let now = self.selection.get();
         let (start, end) = now.ordered();
         // the field reporting the caret that `set_selection` put in it, under a wash across blocks
@@ -620,10 +622,9 @@ impl Doc {
         if self.typing.get().is_some_and(|(c, _)| c != (Caret { block, offset }) || offset != anchor) {
             self.typing.set(None);
         }
-        if self.range.get().is_some() && !self.all_wash.get() {
+        if self.range.get().is_some() {
             // the caret left a selection across blocks (a key): the wash is over
-            self.range.set(None);
-            self.sel_rects.set_vec(vec![]);
+            self.end_range(ui);
         }
     }
 
@@ -700,12 +701,37 @@ impl Doc {
         Some(caret)
     }
 
+    /// A key while picture block `i` is selected (it holds the keyboard focus): Backspace or Delete
+    /// removes it, the arrows move the caret to the text around it.
+    fn image_key(&self, i: usize, key: &str, before: Document) -> Option<(Caret, bool)> {
+        use slint::platform::Key;
+        let is = |k: Key| key == char::from(k).to_string();
+        if is(Key::Backspace) || is(Key::Delete) {
+            let range = Range { anchor: Caret { block: i, offset: 0 }, focus: Caret { block: i + 1, offset: 0 } };
+            let caret = self.doc.borrow_mut().replace_range(range, "");
+            self.structural(before);
+            return Some((caret, true));
+        }
+        let doc = self.doc.borrow();
+        if is(Key::UpArrow) || is(Key::LeftArrow) {
+            let p = doc.prev_text_block(i)?;
+            Some((Caret { block: p, offset: doc.blocks()[p].text.len() }, false))
+        } else if is(Key::DownArrow) || is(Key::RightArrow) {
+            Some((Caret { block: doc.next_text_block(i)?, offset: 0 }, false))
+        } else {
+            None
+        }
+    }
+
     /// Enter, Backspace, Delete, Up or Down in block `i` at `offset`. `Some((caret, changed))` when
     /// the note takes the key (the document changed, or only the caret moves to another block);
     /// `None` when the field keeps it.
     fn key(&self, i: usize, key: &str, offset: usize, ui: &NoteWindow) -> Option<(Caret, bool)> {
         use slint::platform::Key;
         let before = self.doc.borrow().clone();
+        if before.blocks().get(i).is_some_and(|b| b.kind == Kind::Image) {
+            return self.image_key(i, key, before);
+        }
         // what is typed after Enter goes on in the style of the text before the caret
         let carried = if self.typing.get().is_some_and(|(c, _)| c == (Caret { block: i, offset })) {
             self.typing.get().map(|(_, s)| s)
@@ -838,6 +864,7 @@ impl Note {
                     ui.set_window_title(window_title(&text).into());
                     if let Some(c) = focus {
                         doc.set_caret(c);
+                        doc.end_range(&ui);
                     }
                     doc.show_formats(&ui);
                     if let Some(c) = focus {
@@ -866,7 +893,7 @@ impl Note {
             let weak = ui.as_weak();
             ui.on_format(move |what| {
                 let Some(ui) = weak.upgrade() else { return };
-                if doc.format(what, ui.get_text_all_selected()) {
+                if doc.format(what) {
                     changed(None);
                 } else {
                     // a style for what is typed next
@@ -918,23 +945,20 @@ impl Note {
         }
         {
             let doc = doc.clone();
-            ui.on_select_cleared(move || doc.clear_selection());
-        }
-        {
-            let doc = doc.clone();
-            ui.on_all_text(move || doc.doc.borrow().plain_text().into());
+            ui.on_range_text(move || doc.range_text().into());
         }
         {
             let (changed, doc) = (changed.clone(), doc.clone());
-            ui.on_replace_all(move |text| {
-                let caret = doc.replace_all(text.as_str());
+            ui.on_range_replace(move |text| {
+                let caret = doc.replace_range(text.as_str());
                 changed(Some(caret));
             });
         }
         {
-            let (changed, doc) = (changed.clone(), doc.clone());
-            ui.on_all_key(move |key| {
-                let (taken, caret) = doc.all_key(key.as_str());
+            let (changed, doc, weak) = (changed.clone(), doc.clone(), ui.as_weak());
+            ui.on_range_key(move |key, shift| {
+                let Some(ui) = weak.upgrade() else { return 0 };
+                let (taken, caret) = doc.range_key(&ui, key.as_str(), shift);
                 if let Some(c) = caret {
                     changed(Some(c));
                 }
@@ -945,8 +969,8 @@ impl Note {
             let (doc, weak) = (doc.clone(), ui.as_weak());
             ui.on_caret_moved(move |block, offset, anchor| {
                 let (block, offset) = (block.max(0) as usize, offset.max(0) as usize);
-                doc.caret_moved(block, offset, anchor.max(0) as usize);
                 if let Some(ui) = weak.upgrade() {
+                    doc.caret_moved(&ui, block, offset, anchor.max(0) as usize);
                     doc.show_formats(&ui);
                     doc.reveal(&ui, block, offset);
                 }
@@ -1137,7 +1161,7 @@ impl Note {
         self.ui.set_focus_block(-1);
         self.doc.load(text);
         self.doc.set_caret(START);
-        self.doc.clear_wash();
+        self.doc.end_range(&self.ui);
         self.doc.show_formats(&self.ui);
         self.doc.relayout(&self.ui);
         self.ui.set_text(self.doc.text().as_str().into());

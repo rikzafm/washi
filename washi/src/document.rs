@@ -642,6 +642,23 @@ impl Document {
         }
     }
 
+    /// The list button over a range: if every body or list paragraph in it is a list item they
+    /// all become body, else they all become list items. False when it holds neither.
+    pub fn toggle_list_range(&mut self, range: Range) -> bool {
+        let (s, e) = range.ordered();
+        let last = self.blocks.len() - 1;
+        let eligible: Vec<usize> =
+            (s.block.min(last)..=e.block.min(last)).filter(|&i| matches!(self.blocks[i].kind, Kind::Body | Kind::ListItem)).collect();
+        if eligible.is_empty() {
+            return false;
+        }
+        let to = if eligible.iter().all(|&i| self.blocks[i].kind == Kind::ListItem) { Kind::Body } else { Kind::ListItem };
+        for i in eligible {
+            self.blocks[i].kind = to;
+        }
+        true
+    }
+
     /// Insert an image block after `block`; an image never ends the note, a body line follows.
     /// Returns the image's index.
     pub fn insert_image(&mut self, block: usize, id: i64) -> usize {
@@ -1092,6 +1109,18 @@ mod tests {
         assert!(!d.toggle_style(5, 0, 1, Style::BOLD));
         d.insert_image(1, 1);
         assert!(!d.toggle_style(2, 0, 1, Style::BOLD), "an image has no text to style");
+    }
+
+    #[test]
+    fn the_list_button_over_a_range_makes_every_paragraph_a_list_item_or_none() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "a"), (Kind::ListItem, "b"), (Kind::Body, "c")]);
+        let r = Range { anchor: Caret { block: 3, offset: 0 }, focus: Caret { block: 0, offset: 1 } };
+        assert!(d.toggle_list_range(r));
+        assert_eq!(d.blocks().iter().map(|b| b.kind).collect::<Vec<_>>(), [Kind::Title, Kind::ListItem, Kind::ListItem, Kind::ListItem]);
+        assert!(d.toggle_list_range(r));
+        assert_eq!(d.blocks().iter().map(|b| b.kind).collect::<Vec<_>>(), [Kind::Title, Kind::Body, Kind::Body, Kind::Body]);
+        let only_title = Range { anchor: Caret { block: 0, offset: 0 }, focus: Caret { block: 0, offset: 1 } };
+        assert!(!d.toggle_list_range(only_title));
     }
 
     #[test]

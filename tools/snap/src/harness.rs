@@ -190,6 +190,11 @@ impl Harness {
         self.press_ctrl(note, 'v');
     }
 
+    /// The text on the clipboard (what Ctrl+C or Ctrl+X put there).
+    pub fn clipboard_text(&self) -> Option<String> {
+        platform::clipboard()
+    }
+
     /// The pieces of the empty-note hint currently shown, joined (empty when not shown).
     pub fn hint_shown(&self, note: usize) -> String {
         use slint::Model;

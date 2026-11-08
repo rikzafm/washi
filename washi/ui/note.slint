@@ -35,10 +35,8 @@ export component NoteWindow inherits Window {
     in property <[RuleData]> rules;
     /// The wash of the selection (Rust): a level box for each line it touches.
     in property <[SelRect]> sel-rects;
-    /// Ctrl+A: Rust sets the selection to the whole note and fills `sel-rects`; `select-cleared`
-    /// when that selection ended.
+    /// Ctrl+A: Rust sets the selection to the whole note.
     callback select-all();
-    callback select-cleared();
     /// The formats of the selection, or of what is typed at the caret (the toolbar buttons' active state).
     in property <bool> fmt-bold: false;
     in property <bool> fmt-italic: false;
@@ -48,8 +46,6 @@ export component NoteWindow inherits Window {
     /// Format the selected text (0 bold, 1 italic, 2 underline, 3 strike), or the paragraph holding
     /// the caret (4 list): a toolbar button or its shortcut.
     callback format(int);
-    /// Ctrl+A selected the whole note: formats apply to all of it.
-    in-out property <bool> text-all-selected <=> text-layer.all-selected;
     /// A text field took the focus: the caret is in this block.
     callback focus-entered(int);
     /// The paper (window minus margins) changed size: Rust lays the words out again.
@@ -109,12 +105,13 @@ export component NoteWindow inherits Window {
     callback insert-image();
     /// Ctrl+V: true when the note took it because the clipboard held a picture.
     callback paste-image() -> bool;
-    /// The note as plain lines, to copy a select-all.
-    callback all-text() -> string;
-    /// Replace the whole note by this text.
-    callback replace-all(string);
-    /// A key over a select-all (its text): 0 not taken, 1 a modifier alone, 2 replaced the note.
-    callback all-key(string) -> int;
+    /// The selection across blocks as plain lines, to copy it.
+    callback range-text() -> string;
+    /// Replace the selection across blocks by this text.
+    callback range-replace(string);
+    /// A key over a selection across blocks (its text, Shift held): 0 not taken, 1 taken without a
+    /// change, 2 replaced the selection.
+    callback range-key(string, bool) -> int;
     out property <int> last-focused-block <=> text-layer.last-focused;
 
     // The toolbar shows while the pointer is over the note (anywhere, text included) or holds one
@@ -197,7 +194,6 @@ export component NoteWindow inherits Window {
                     rules: root.rules;
                     sel-rects: root.sel-rects;
                     select-all => { root.select-all(); }
-                    select-cleared => { root.select-cleared(); }
                     focus-entered(i) => { root.focus-entered(i); }
                     suspended: root.suspended;
                     resync: root.text-resync;
@@ -212,9 +208,9 @@ export component NoteWindow inherits Window {
                     right-click(x, y) => { root.context-menu(x, y); }
                     pointer-moved => { root.pointer-moved(); }
                     paste-image => { return root.paste-image(); }
-                    all-text => { return root.all-text(); }
-                    replace-all(t) => { root.replace-all(t); }
-                    all-key(k) => { return root.all-key(k); }
+                    range-text => { return root.range-text(); }
+                    range-replace(t) => { root.range-replace(t); }
+                    range-key(k, s) => { return root.range-key(k, s); }
                     block-edited(i, t, c) => { root.block-edited(i, t, c); }
                     block-key(i, k, o) => { return root.block-key(i, k, o); }
                     caret-moved(i, o, a) => { root.caret-moved(i, o, a); }

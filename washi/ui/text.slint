@@ -52,21 +52,16 @@ export component TextLayer inherits Rectangle {
     callback paste-image() -> bool;
     /// The wash of the note's selection (Rust): one level box per line the selection touches.
     in property <[SelRect]> sel-rects;
-    /// Ctrl+A selected the whole note: Rust fills `sel-rects` until the next key or click.
-    in-out property <bool> all-selected: false;
+    /// Ctrl+A: the note selects everything.
     callback select-all();
-    /// The select-all ended (a key or a click): Rust takes the wash away.
-    callback select-cleared();
-    changed all-selected => {
-        if (root.all-selected) { root.select-all(); } else { root.select-cleared(); }
-    }
-    /// The note's text as plain lines (Rust), for copying.
-    callback all-text() -> string;
-    /// Replace the whole note by this text (typing, pasting or Delete over a select-all).
-    callback replace-all(string);
-    /// A key over a select-all, as its text (Rust): 1 a modifier key alone (the wash stays), 2 the key
-    /// replaced the whole note, 0 any other key.
-    callback all-key(string) -> int;
+    /// The selection across blocks as plain lines (Rust), for copying.
+    callback range-text() -> string;
+    /// Replace the selection across blocks by this text (typing, pasting, cutting).
+    callback range-replace(string);
+    /// A key over a selection across blocks, as its text and whether Shift is held (Rust): 1 taken
+    /// without a change (a modifier key alone, an arrow that collapses the selection), 2 the key
+    /// replaced the selection, 0 any other key.
+    callback range-key(string, bool) -> int;
     // The clipboard goes through a field of Slint's, so no platform code is needed.
     clipboard := TextInput {
         visible: false;
@@ -169,39 +164,29 @@ export component TextLayer inherits Rectangle {
             img-h: b.img-h;
             paste-image => { return root.paste-image(); }
             pitch-scale: root.pitch-scale;
-            all-selected: root.all-selected;
-            select-all => { root.all-selected = true; }
-            all-key-ended => { root.all-selected = false; }
-            all-key(e) => {
+            select-all => { root.select-all(); }
+            range-key(e) => {
                 if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta && !e.modifiers.shift) {
-                    if (e.text == "a" || e.text == "\u{1}") { return true; }
+                    if (e.text == "a" || e.text == "\u{1}") { root.select-all(); return true; }
                     if (e.text == "c" || e.text == "\u{3}" || e.text == "x" || e.text == "\u{18}") {
-                        clipboard.text = root.all-text();
+                        clipboard.text = root.range-text();
                         clipboard.select-all();
                         clipboard.copy();
-                        if (e.text == "x" || e.text == "\u{18}") { root.replace-all(""); root.all-selected = false; }
+                        if (e.text == "x" || e.text == "\u{18}") { root.range-replace(""); }
                         return true;
                     }
                     if (e.text == "v" || e.text == "\u{16}") {
                         clipboard.text = "";
                         clipboard.paste();
-                        root.replace-all(clipboard.text);
-                        root.all-selected = false;
+                        root.range-replace(clipboard.text);
                         return true;
-                    }
-                    if (e.text == "z" || e.text == "y" || e.text == "\u{1a}" || e.text == "\u{19}") {
-                        root.all-selected = false;
-                        return false;
                     }
                 }
                 if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta) {
-                    // another shortcut (new note, or a format: that styles the whole note), the wash stays
+                    // undo or redo, a format, a new note: not ours; the selection stays
                     return false;
                 }
-                let r = root.all-key(e.text);
-                if (r == 1) { return true; }
-                root.all-selected = false;
-                return r == 2;
+                return root.range-key(e.text, e.modifiers.shift) != 0;
             }
             italic: b.italic;
             autofocus: i == 0;

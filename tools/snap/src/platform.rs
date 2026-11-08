@@ -176,3 +176,8 @@ pub fn windows() -> Vec<Rc<StandInWindow>> {
 pub fn set_clipboard(text: &str) {
     CLIPBOARD.with(|c| *c.borrow_mut() = Some(text.to_string()));
 }
+
+/// The text on the stand-in clipboard.
+pub fn clipboard() -> Option<String> {
+    CLIPBOARD.with(|c| c.borrow().clone())
+}
