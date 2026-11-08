@@ -1,6 +1,7 @@
 //! Washi core library. The `washi` binary is a thin shell over this; the `snap` harness
 //! drives the same `App` on a stand-in platform.
 
+pub mod all_notes;
 pub mod app;
 pub mod clipboard_html;
 pub mod delete_dialog;
