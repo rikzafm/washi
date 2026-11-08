@@ -277,6 +277,36 @@ impl AllNotesView {
         self.ui.invoke_new_note();
     }
 
+    pub fn invoke_open_or_focus_note(&self) {
+        self.ui.set_confirming_delete(false);
+        self.ui.invoke_open_or_focus_note();
+    }
+
+    pub fn invoke_close_note(&self) {
+        self.ui.set_confirming_delete(false);
+        self.ui.invoke_close_note();
+    }
+
+    pub fn invoke_export_note(&self) {
+        self.ui.invoke_export_note();
+    }
+
+    pub fn invoke_request_delete(&self) {
+        if self.selected_note_id().is_some() {
+            self.ui.set_confirming_delete(true);
+            self.ui.invoke_request_delete();
+        }
+    }
+
+    pub fn invoke_cancel_delete(&self) {
+        self.ui.set_confirming_delete(false);
+        self.ui.invoke_cancel_delete();
+    }
+
+    pub fn invoke_confirm_delete(&self) {
+        self.ui.invoke_confirm_delete();
+    }
+
     pub fn refresh(&self, rows: &[AllNoteRow], preferred_selected_id: Option<NoteId>, now_ms: i64) {
         *self.state.rows.borrow_mut() = rows.to_vec();
         self.state.now_ms.set(now_ms);
@@ -718,6 +748,146 @@ mod tests {
             }));
             assert!(has_line_ink, "body line {line_idx} should render dark ink in y=[{y0}..{y1}]");
         }
+    }
+
+    #[test]
+    fn bottom_bar_renders_normal_actions_and_delete_confirmation_and_handles_clicks() {
+        let win = slint::platform::software_renderer::MinimalSoftwareWindow::new(
+            slint::platform::software_renderer::RepaintBufferType::NewBuffer,
+        );
+        struct RenderPlatform(Rc<slint::platform::software_renderer::MinimalSoftwareWindow>);
+        impl slint::platform::Platform for RenderPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let _ = slint::platform::set_platform(Box::new(RenderPlatform(win.clone())));
+
+        let rows = sample_rows();
+        let view = AllNotesView::open(1, &rows, 1_000, Rc::new(|| {})).expect("AllNotesView::open");
+        win.set_size(slint::PhysicalSize::new(603, 625));
+
+        let render_pixels = || {
+            win.request_redraw();
+            let mut buf = vec![slint::Rgb8Pixel::default(); 603 * 625];
+            win.draw_if_needed(|r| {
+                r.render(&mut buf, 603);
+            });
+            buf
+        };
+        let px = |buf: &[slint::Rgb8Pixel], x: usize, y: usize| buf[y * 603 + x];
+        let click = |x: f32, y: f32| {
+            let position = slint::LogicalPosition::new(x, y);
+            let button = slint::platform::PointerEventButton::Left;
+            view.dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+            view.dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+            view.dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+            // Move pointer away so hover state doesn't linger
+            view.dispatch_event(slint::platform::WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(10.0, 10.0),
+            });
+        };
+
+        let buf = render_pixels();
+
+        // 1. Open/Focus button center is around (279, 489) in window coordinates:
+        //    Since note 1 is open, its pill background is #F0F0EE (240, 240, 238) at corner (269, 479)
+        let active_pill_px = px(&buf, 269, 479);
+        assert!(
+            (active_pill_px.r as i32 - 240).abs() <= 4
+                && (active_pill_px.g as i32 - 240).abs() <= 4
+                && (active_pill_px.b as i32 - 238).abs() <= 4,
+            "Open note should have #F0F0EE active pill on button 1 at (269, 479), got {active_pill_px:?}"
+        );
+
+        // 2. Delete trash icon around (389, 492) renders crimson ink (#8A1F2B: r > g + 40)
+        let has_trash_ink = (483..=501).any(|y| (380..=398).any(|x| {
+            let p = px(&buf, x, y);
+            p.r as i32 > p.g as i32 + 40 && p.g < 150
+        }));
+        assert!(has_trash_ink, "Delete trash icon should render crimson #8A1F2B stroke");
+
+        // 3. Selecting a closed note (id = 3) removes the #F0F0EE active pill from button 1
+        view.invoke_select_note(3);
+        let buf_closed = render_pixels();
+        let inactive_pill_px = px(&buf_closed, 269, 479);
+        assert!(
+            inactive_pill_px.r >= 252 && inactive_pill_px.g >= 252 && inactive_pill_px.b >= 250,
+            "Closed note should have #FFFFFD paper background at (269, 479), got {inactive_pill_px:?}"
+        );
+        view.invoke_select_note(1);
+
+        // 4. Clicking each of the 4 normal buttons fires its callback
+        let open_called = Rc::new(Cell::new(0));
+        let close_called = Rc::new(Cell::new(0));
+        let export_called = Rc::new(Cell::new(0));
+        let req_del_called = Rc::new(Cell::new(0));
+        let cancel_del_called = Rc::new(Cell::new(0));
+        let confirm_del_called = Rc::new(Cell::new(0));
+
+        {
+            let c = open_called.clone();
+            view.ui().on_open_or_focus_note(move || c.set(c.get() + 1));
+        }
+        {
+            let c = close_called.clone();
+            view.ui().on_close_note(move || c.set(c.get() + 1));
+        }
+        {
+            let c = export_called.clone();
+            view.ui().on_export_note(move || c.set(c.get() + 1));
+        }
+        {
+            let c = req_del_called.clone();
+            view.ui().on_request_delete(move || c.set(c.get() + 1));
+        }
+        {
+            let c = cancel_del_called.clone();
+            view.ui().on_cancel_delete(move || c.set(c.get() + 1));
+        }
+        {
+            let c = confirm_del_called.clone();
+            view.ui().on_confirm_delete(move || c.set(c.get() + 1));
+        }
+
+        click(279.0, 489.0);
+        assert_eq!(open_called.get(), 1, "clicking button 1 fires open-or-focus-note");
+
+        click(316.0, 490.0);
+        assert_eq!(close_called.get(), 1, "clicking button 2 fires close-note");
+
+        click(352.0, 491.0);
+        assert_eq!(export_called.get(), 1, "clicking button 3 fires export-note");
+
+        assert!(!view.confirming_delete());
+        click(389.0, 492.0);
+        assert_eq!(req_del_called.get(), 1, "clicking button 4 fires request-delete");
+        assert!(view.confirming_delete(), "clicking button 4 enters confirming-delete state");
+
+        // 5. In confirming-delete state, "Delete for good?", "Keep" pill (#F0F0EE), and "Delete" pill (#8A1F2B) render
+        let buf_del = render_pixels();
+        let has_prompt_ink = (480..=505).any(|y| (265..=370).any(|x| {
+            let p = px(&buf_del, x, y);
+            p.r < 100 && p.g < 100 && p.b < 110
+        }));
+        assert!(has_prompt_ink, "Delete confirmation prompt 'Delete for good?' should render dark ink");
+
+        let has_crimson_pill = (485..=505).any(|y| (500..=540).any(|x| {
+            let p = px(&buf_del, x, y);
+            (p.r as i32 - 138).abs() <= 10 && (p.g as i32 - 31).abs() <= 10 && (p.b as i32 - 43).abs() <= 10
+        }));
+        assert!(has_crimson_pill, "Delete confirmation pill should render #8A1F2B fill");
+
+        // 6. Clicking "Keep" at (457, 495) exits confirming-delete and fires cancel-delete
+        click(457.0, 495.0);
+        assert!(!view.confirming_delete(), "clicking Keep resets confirming-delete");
+        assert_eq!(cancel_del_called.get(), 1, "clicking Keep fires cancel-delete");
+
+        // 7. Re-enter confirming-delete and click "Delete" at (520, 496)
+        view.invoke_request_delete();
+        assert!(view.confirming_delete());
+        click(520.0, 496.0);
+        assert_eq!(confirm_del_called.get(), 1, "clicking Delete pill fires confirm-delete");
     }
 }
 

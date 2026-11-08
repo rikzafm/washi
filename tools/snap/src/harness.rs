@@ -1007,6 +1007,48 @@ impl Harness {
         self.settle();
     }
 
+    pub fn invoke_all_notes_open_or_focus(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_open_or_focus();
+        }
+        self.settle();
+    }
+
+    pub fn invoke_all_notes_close_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_close_note();
+        }
+        self.settle();
+    }
+
+    pub fn invoke_all_notes_export_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_export_note();
+        }
+        self.settle();
+    }
+
+    pub fn invoke_all_notes_request_delete(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_request_delete();
+        }
+        self.settle();
+    }
+
+    pub fn invoke_all_notes_cancel_delete(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_cancel_delete();
+        }
+        self.settle();
+    }
+
+    pub fn invoke_all_notes_confirm_delete(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_confirm_delete();
+        }
+        self.settle();
+    }
+
     pub fn click_all_notes(&mut self, x: f32, y: f32) {
         if let Some(app) = &self.app {
             let position = slint::LogicalPosition::new(x, y);
