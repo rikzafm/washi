@@ -4,6 +4,7 @@
 pub mod app;
 pub mod clipboard_html;
 pub mod document;
+pub mod dropdown;
 pub mod history;
 pub mod icon;
 pub mod image_viewer;

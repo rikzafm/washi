@@ -1940,6 +1940,7 @@ mod tests {
 
     #[test]
     fn note_trigger_button_interface_and_dropdown_state() {
+        crate::dropdown::init_test_platform();
         let ui = NoteWindow::new().expect("NoteWindow::new");
         ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));
 

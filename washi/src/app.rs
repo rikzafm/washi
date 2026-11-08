@@ -1,12 +1,14 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
+use crate::dropdown::{calculate_dropdown_position, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
 use crate::images::{self, ImageError, Source, Stored};
 use crate::image_viewer::{ImageViewer, ViewerEvent};
 use crate::note_window::{app_icon, note_title, Note, NoteEvent};
 use crate::platform::*;
 use crate::suspend::{SuspendController, SuspendHost};
 use crate::storage::{keystore, Db, DbError, Geometry, KeyStoreError, NoteRow};
+use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::path::PathBuf;
@@ -84,6 +86,8 @@ struct Inner {
     /// Open picture viewers (double click on a picture), by the number each got when it opened.
     viewers: RefCell<Vec<(u64, Rc<ImageViewer>)>>,
     next_viewer: Cell<u64>,
+    /// Currently open dropdown menu floating window, if any.
+    dropdown: RefCell<Option<DropdownMenu>>,
 }
 
 /// A picture on its way into a note.
@@ -184,6 +188,7 @@ impl App {
             trim_enabled: Cell::new(false),
             viewers: RefCell::new(Vec::new()),
             next_viewer: Cell::new(0),
+            dropdown: RefCell::new(None),
         });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
@@ -256,15 +261,17 @@ impl App {
             NoteEvent::ContextMenu { at, image } => self.show_menu(id, at, image),
             NoteEvent::PointerMoved => self.0.suspend.poke(),
             NoteEvent::StartMove => {
+                self.dismiss_dropdown();
                 let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
                 self.0.env.window_control.begin_move(id, hwnd);
             }
             NoteEvent::StartResize(edge) => {
+                self.dismiss_dropdown();
                 let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
                 self.0.env.window_control.begin_resize(id, hwnd, edge);
             }
             NoteEvent::OpenDropdown => {
-                // Dropdown window lifecycle controller will handle this in Ticket 02.
+                self.toggle_dropdown(id);
             }
         }
     }
@@ -308,7 +315,84 @@ impl App {
 
     /// The platform saw a note move or resize: remember where it is once the user stops.
     pub fn geometry_changed(&self, id: NoteId) {
+        if self.dropdown_note_id() == Some(id) {
+            self.dismiss_dropdown();
+        }
         self.with_note(id, |n| n.geometry_changed());
+    }
+
+    /// Whether the dropdown menu is open for any note.
+    pub fn is_dropdown_open(&self) -> bool {
+        self.0.dropdown.borrow().is_some()
+    }
+
+    /// The note whose dropdown menu is currently open, if any.
+    pub fn dropdown_note_id(&self) -> Option<NoteId> {
+        self.0.dropdown.borrow().as_ref().map(|d| d.note_id())
+    }
+
+    /// Dismiss the open dropdown menu and reset the parent note's button state.
+    pub fn dismiss_dropdown(&self) {
+        let menu = self.0.dropdown.borrow_mut().take();
+        if let Some(m) = menu {
+            let note_id = m.note_id();
+            self.with_note(note_id, |n| n.set_dropdown_open(false));
+        }
+    }
+
+    /// Toggle the dropdown menu for note `id`.
+    pub fn toggle_dropdown(&self, id: NoteId) {
+        if let Some(open_id) = self.dropdown_note_id() {
+            if open_id == id {
+                self.dismiss_dropdown();
+                return;
+            }
+            self.dismiss_dropdown();
+        }
+        self.open_dropdown(id);
+    }
+
+    /// Open the dropdown menu for note `id`.
+    pub fn open_dropdown(&self, id: NoteId) {
+        let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
+        let Some(note) = note else { return };
+
+        let geom = note.geometry();
+        let (btn_x, btn_y, btn_w, btn_h) = note.menu_button_rect();
+        let button_screen = DropdownRect::new(
+            geom.x as f32 + btn_x,
+            geom.y as f32 + btn_y,
+            btn_w,
+            btn_h,
+        );
+
+        let metrics = DropdownMetrics::default();
+
+        let work_areas = self.0.env.window_control.work_areas();
+        let scale = note.ui().window().scale_factor();
+        let work_area = work_areas.first().map(|wa| DropdownRect::new(
+            wa.x as f32 / scale,
+            wa.y as f32 / scale,
+            wa.w as f32 / scale,
+            wa.h as f32 / scale,
+        ));
+
+        let pos = calculate_dropdown_position(button_screen, &metrics, work_area);
+
+        let weak = Rc::downgrade(&self.0);
+        let on_dismiss = Rc::new(move |_id| {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).dismiss_dropdown();
+            }
+        });
+
+        match DropdownMenu::open(id, pos, on_dismiss) {
+            Ok(menu) => {
+                note.set_dropdown_open(true);
+                *self.0.dropdown.borrow_mut() = Some(menu);
+            }
+            Err(e) => eprintln!("washi: could not open dropdown menu: {e}"),
+        }
     }
 
     pub fn env(&self) -> &Env {
@@ -350,6 +434,12 @@ impl App {
         for n in notes {
             if !self.0.env.signals.window_state(n.id()).focused {
                 n.flush_text();
+            }
+        }
+        if let Some(open_id) = self.dropdown_note_id() {
+            let state = self.0.env.signals.window_state(open_id);
+            if state.minimized || (!state.focused && self.0.env.signals.app_in_background()) {
+                self.dismiss_dropdown();
             }
         }
         self.0.suspend.evaluate();
@@ -449,6 +539,9 @@ impl App {
     /// Close a note: save it, remember where it was, mark it closed and release its window.
     /// Closing the last open note quits Washi.
     pub fn close_note(&self, id: NoteId) {
+        if self.dropdown_note_id() == Some(id) {
+            self.dismiss_dropdown();
+        }
         let Some((was_empty, geometry)) = self.with_note(id, |n| (n.text().trim().is_empty(), n.geometry())) else {
             return;
         };
@@ -476,6 +569,9 @@ impl App {
 
     /// Delete a note for good, after asking.
     pub fn delete_note(&self, id: NoteId) {
+        if self.dropdown_note_id() == Some(id) {
+            self.dismiss_dropdown();
+        }
         if !self.0.env.dialogs.confirm("Delete this note permanently? This cannot be undone.") {
             return;
         }
@@ -712,6 +808,9 @@ impl App {
     /// Take a note out of the app. Its window is released on the next turn of the event loop,
     /// because this may run inside one of that window's own callbacks.
     fn remove_note(&self, id: NoteId) {
+        if self.dropdown_note_id() == Some(id) {
+            self.dismiss_dropdown();
+        }
         let (note, now_empty) = {
             let mut notes = self.0.notes.borrow_mut();
             let at = notes.iter().position(|n| n.id() == id);
