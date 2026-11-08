@@ -136,6 +136,8 @@ pub enum NoteEvent {
     InsertImage,
     /// A double click on the picture of this block: the app shows it in a window of its own.
     OpenImage(usize),
+    /// The top-right `...` button was clicked: open or toggle the dropdown menu.
+    OpenDropdown,
 }
 
 /// Side of a picture's resize grip, logical px.
@@ -1493,6 +1495,7 @@ impl Note {
         ui.on_close_note(forward(NoteEvent::Close));
         ui.on_insert_image(forward(NoteEvent::InsertImage));
         ui.on_delete_note(forward(NoteEvent::Delete));
+        ui.on_open_dropdown(forward(NoteEvent::OpenDropdown));
         let paste_clipboard_fn = {
             let (doc, autosave, changed, clipboard) = (doc.clone(), autosave.clone(), changed.clone(), clipboard.clone());
             move || -> bool {
@@ -1845,6 +1848,24 @@ impl Note {
         self.ui.set_pinned(on);
     }
 
+    pub fn is_dropdown_open(&self) -> bool {
+        self.ui.get_dropdown_open()
+    }
+
+    pub fn set_dropdown_open(&self, open: bool) {
+        self.ui.set_dropdown_open(open);
+    }
+
+    /// The bounding rectangle of the menu trigger button in window logical coordinates (x, y, width, height).
+    pub fn menu_button_rect(&self) -> (f32, f32, f32, f32) {
+        (
+            self.ui.get_menu_button_x(),
+            self.ui.get_menu_button_y(),
+            self.ui.get_menu_button_width(),
+            self.ui.get_menu_button_height(),
+        )
+    }
+
     /// The title the window (and its taskbar button) currently shows.
     pub fn title(&self) -> String {
         self.ui.get_window_title().to_string()
@@ -1910,5 +1931,63 @@ impl Drop for Note {
     /// Release the window (and with it the native window and its buffers).
     fn drop(&mut self) {
         let _ = self.ui.hide();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn note_trigger_button_interface_and_dropdown_state() {
+        let ui = NoteWindow::new().expect("NoteWindow::new");
+        ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));
+
+        // Initially without dropdown open or hover, button is not shown or active
+        assert!(!ui.get_dropdown_open());
+        assert!(!ui.get_menu_button_shown());
+        assert!(!ui.get_menu_button_active());
+        assert!(!ui.get_menu_button_highlighted());
+
+        // Setting dropdown_open to true activates visual state and keeps button shown
+        ui.set_dropdown_open(true);
+        assert!(ui.get_dropdown_open());
+        assert!(ui.get_menu_button_shown());
+        assert!(ui.get_menu_button_active());
+        assert!(ui.get_menu_button_highlighted());
+
+        // Setting dropdown_open back to false deactivates it
+        ui.set_dropdown_open(false);
+        assert!(!ui.get_dropdown_open());
+        assert!(!ui.get_menu_button_shown());
+        assert!(!ui.get_menu_button_active());
+        assert!(!ui.get_menu_button_highlighted());
+
+        // Position: top-right corner of paper
+        let (x, y, w, h) = (
+            ui.get_menu_button_x(),
+            ui.get_menu_button_y(),
+            ui.get_menu_button_width(),
+            ui.get_menu_button_height(),
+        );
+        assert!(w >= 20.0);
+        assert!(h >= 20.0);
+        assert!(x > 300.0 && x + w <= 447.0, "x={x}, w={w} should be in top-right");
+        assert!(y >= 30.0 && y < 100.0, "y={y} should be in top strip");
+
+        let clicked = Rc::new(Cell::new(false));
+        let clicked_clone = clicked.clone();
+        ui.on_open_dropdown(move || {
+            clicked_clone.set(true);
+        });
+
+        ui.invoke_open_dropdown();
+        assert!(clicked.get());
+    }
+
+    #[test]
+    fn note_event_open_dropdown_and_helpers() {
+        let ev = NoteEvent::OpenDropdown;
+        assert_eq!(ev, NoteEvent::OpenDropdown);
     }
 }

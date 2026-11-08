@@ -26,6 +26,12 @@ export global ToolbarMetrics {
     out property <color> ink-active: #2B2F36;
     out property <color> ink-muted: #8B919A;
     out property <color> button-fill: #F0F0EE;
+    /// Top-right menu button metrics.
+    out property <length> menu-button-width: 28px;
+    out property <length> menu-button-height: 24px;
+    out property <length> menu-button-radius: 7px;
+    out property <length> menu-button-top-inset: 22px;
+    out property <length> menu-button-right-inset: 26px;
 }
 
 /// The paper's frame: its center in window px and the sine and cosine of its tilt.
@@ -169,7 +175,7 @@ export component Toolbar inherits Rectangle {
     /// True while the pointer holds one of the buttons down.
     out property <bool> any-pressed: h0.pressed || h1.pressed || h2.pressed || h3.pressed || h4.pressed || h5.pressed || h6.pressed;
 
-    property <Frame> f: {
+    out property <Frame> f: {
         w: root.width / 1px,
         h: root.height / 1px,
         cx: (root.paper-x + root.paper-w / 2) / 1px,
@@ -242,4 +248,52 @@ export component Toolbar inherits Rectangle {
     h4 := Hit { f: root.f; du: root.c4; dv: root.cv; clicked => { root.activated(4); } }
     h5 := Hit { f: root.f; du: root.c5; dv: root.cv; clicked => { root.activated(5); } }
     h6 := Hit { f: root.f; du: root.c6; dv: root.cv; clicked => { root.activated(6); } }
+}
+
+/// The menu button ("...") at the top-right of the note.
+export component MenuButton inherits Rectangle {
+    in property <Frame> f;
+    in property <float> du;
+    in property <float> dv;
+    in property <bool> active: false;
+    callback clicked();
+    out property <bool> has-hover: hit.has-hover;
+    out property <bool> pressed: hit.pressed;
+    out property <bool> highlighted: hit.has-hover || root.active;
+    out property <length> center-x: Tilt.x(root.f, root.du, root.dv) * 1px;
+    out property <length> center-y: Tilt.y(root.f, root.du, root.dv) * 1px;
+
+    property <float> hw: (ToolbarMetrics.menu-button-width / 2) / 1px;
+    property <float> hh: (ToolbarMetrics.menu-button-height / 2) / 1px;
+    property <color> muted: ToolbarMetrics.ink-muted;
+    property <color> ink: ToolbarMetrics.ink-active;
+
+    // Background pill: visible on hover, pressed, or when active (dropdown open)
+    TRect {
+        f: root.f;
+        u0: root.du - root.hw;
+        v0: root.dv - root.hh;
+        w: 2 * root.hw;
+        h: 2 * root.hh;
+        r: ToolbarMetrics.menu-button-radius / 1px;
+        fill: hit.pressed ? #E0E0DE : (root.highlighted ? ToolbarMetrics.button-fill : transparent);
+    }
+
+    // Three horizontal dots:
+    for offset in [-5.5, 0.0, 5.5]: Dot {
+        f: root.f;
+        du: root.du + offset;
+        dv: root.dv;
+        d: 3.5px;
+        background: root.highlighted ? root.ink : root.muted;
+    }
+
+    hit := TouchArea {
+        x: Tilt.x(root.f, root.du, root.dv) * 1px - ToolbarMetrics.menu-button-width / 2;
+        y: Tilt.y(root.f, root.du, root.dv) * 1px - ToolbarMetrics.menu-button-height / 2;
+        width: ToolbarMetrics.menu-button-width;
+        height: ToolbarMetrics.menu-button-height;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
 }
