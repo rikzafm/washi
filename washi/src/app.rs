@@ -59,7 +59,7 @@ struct Inner {
     /// only while there are any).
     imports: RefCell<Vec<Import>>,
     import_timer: slint::Timer,
-    /// Retries `attach_windows` until every note window exists (startup only).
+    /// Retries `attach_windows` until every note window exists (at startup and after a note opens).
     attach_timer: slint::Timer,
     /// Hands idle memory back a moment after the notes settle (see `schedule_trim`).
     trim_timer: slint::Timer,
@@ -174,7 +174,13 @@ impl App {
         match note.hwnd() {
             Some(hwnd) => self.0.env.signals.attach(row.id, hwnd),
             // Slint creates the native window once its event loop runs: `attach_windows` retries then
-            None => crate::trace::mark("hwnd-pending"),
+            None => {
+                crate::trace::mark("hwnd-pending");
+                // at startup `watch_window_state` starts the retries; a note opened later starts them here
+                if self.0.trim_enabled.get() {
+                    self.start_attaching();
+                }
+            }
         }
         self.0.notes.borrow_mut().push(Rc::new(note));
         self.0.suspend.evaluate();
@@ -259,17 +265,7 @@ impl App {
     /// paint requests as they happen (no polling, so a suspended app sleeps until a message).
     pub fn watch_window_state(&self) {
         self.0.trim_enabled.set(true);
-        // Slint creates the native windows only once its event loop runs, a few milliseconds after
-        // this call: poll until every note has its handle, then stop (no timer is left behind).
-        let weak = Rc::downgrade(&self.0);
-        let mut tries = 0;
-        self.0.attach_timer.start(slint::TimerMode::Repeated, Duration::from_millis(5), move || {
-            let Some(inner) = weak.upgrade() else { return };
-            tries += 1;
-            if App(inner.clone()).attach_windows() || tries >= 400 {
-                inner.attach_timer.stop();
-            }
-        });
+        self.start_attaching();
         let weak = Rc::downgrade(&self.0);
         self.0.env.signals.set_notifier(Rc::new(move |ev| {
             if let Some(inner) = weak.upgrade() {
@@ -280,6 +276,22 @@ impl App {
                 }
             }
         }));
+    }
+
+    /// Slint creates a native window only once its event loop runs, a few milliseconds after the
+    /// note opens: poll until every note has its handle, then stop (no timer is left behind).
+    /// Without the handle a note gets no window signals and no fix for the swallowed button-up
+    /// after a move or resize (win/signals.rs), so this runs for notes opened later too.
+    fn start_attaching(&self) {
+        let weak = Rc::downgrade(&self.0);
+        let mut tries = 0;
+        self.0.attach_timer.start(slint::TimerMode::Repeated, Duration::from_millis(5), move || {
+            let Some(inner) = weak.upgrade() else { return };
+            tries += 1;
+            if App(inner.clone()).attach_windows() || tries >= 400 {
+                inner.attach_timer.stop();
+            }
+        });
     }
 
     /// Tell the platform signals about every note window that exists now (idempotent), then
@@ -333,6 +345,12 @@ impl App {
     /// Close a note: save it, remember where it was, mark it closed and release its window.
     /// Closing the last open note quits Washi.
     pub fn close_note(&self, id: NoteId) {
+        // an empty note is not worth keeping: closing it discards it instead of saving it
+        if self.with_note(id, |n| n.text().trim().is_empty()) == Some(true) && self.0.db.delete_note(id).is_ok() {
+            self.0.save_stacking();
+            self.remove_note(id);
+            return;
+        }
         self.with_note(id, |n| {
             n.flush();
             n.prune_images();

@@ -4735,6 +4735,7 @@ dependencies = [
  "slint-build",
  "tempfile",
  "ttf-parser",
+ "unicode-linebreak",
  "windows-sys 0.59.0",
  "zeroize",
  "zune-core",

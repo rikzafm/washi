@@ -10,9 +10,16 @@ export global Theme {
     out property <length> step-width: 16px;
 
     out property <color> ink: #2B2F36;
+    // Select all: the wash over every word of the note.
+    out property <color> selection: #BAD3FC;
+    // A selection in a field: the same blue, see-through, over the words (drawn under the field).
+    out property <color> selection-over: #6FA2F566;
     // The "Note Something...." hint of an empty note: light, subtle gray.
     out property <color> ink-hint: #B4B9C0;
     out property <string> handwriting: "Shadows Into Light";
+    // The edit fields' face: the handwriting's advances and metrics, no outlines (made with
+    // `tools/fonts.py blank`). The fields only place the caret and the selection.
+    out property <string> caret-font: "Washi Caret";
 
     // Text block: inset from the paper edges (paper's own frame).
     out property <length> text-inset-left: 32px;

@@ -6,15 +6,18 @@
 //! ```text
 //! # Endfield Note                    Title (always the first line)
 //! ## **Thermite Cutter : POG**       Heading (+ bold)
-//! Currently POG no Weapon            Body
+//! Currently **POG** no *Weapon*      Body, with bold and italic words
 //! - list item                        ListItem
 //! ![](img:42)                        Image
 //! ```
 //!
-//! Style flags wrap the whole block's text: `**` bold, `*` italic, `~~` strike, `<u>..</u>` underline
-//! (outermost). Plain text from older versions (no markers) parses as a title followed by body
-//! lines. A first character that could be read as a marker is escaped with a backslash, so every
-//! document survives `to_text` then `parse` exactly, and no input is malformed.
+//! Every character has its own style (bold, italic, underline, strike). In the stored line a marker
+//! switches a style on or off where it changes: `**` bold, `*` italic, `~~` strike, `<u>` and `</u>`
+//! underline. Every `\`, `*`, `~` and `<` of the text is escaped with a backslash, and so is a first
+//! character that could be read as a block marker (`#`, `-`, `!`), so every document survives
+//! `to_text` then `parse` exactly. A line that is not exactly what `to_text` writes (notes from
+//! older versions, where the markers could only wrap a whole line and text was not escaped) is
+//! read the old way, so no input is malformed and no old note changes its meaning.
 //!
 //! Editing operations are pure methods on [`Document`]. Offsets are byte offsets into a block's
 //! text (what the text field reports), on char boundaries (clamped if not). Block text never
@@ -29,7 +32,7 @@ pub enum Kind {
     Image,
 }
 
-/// Bold / italic / underline / strike of a whole block.
+/// Bold / italic / underline / strike of a character (or, as a set, of a stretch of text).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Style(u8);
 
@@ -48,6 +51,11 @@ impl Style {
         Style(self.0 ^ flag.0)
     }
 
+    /// This style with `flag` switched on or off.
+    pub fn with(self, flag: Style, on: bool) -> Style {
+        if on { Style(self.0 | flag.0) } else { Style(self.0 & !flag.0) }
+    }
+
     pub fn bits(self) -> u8 {
         self.0
     }
@@ -62,33 +70,80 @@ pub struct Block {
     pub kind: Kind,
     /// One line; empty for an image.
     pub text: String,
-    pub style: Style,
+    /// The style of every byte of `text` (all bytes of a character have the character's style).
+    pub marks: Vec<Style>,
     /// The stored image of an `Image` block.
     pub image_id: Option<i64>,
 }
 
 impl Block {
     pub fn new(kind: Kind, text: &str) -> Block {
-        Block { kind, text: one_line(text), style: Style::NONE, image_id: None }
+        let text = one_line(text);
+        Block { kind, marks: vec![Style::NONE; text.len()], text, image_id: None }
     }
 
     pub fn image(id: i64) -> Block {
-        Block { kind: Kind::Image, text: String::new(), style: Style::NONE, image_id: Some(id) }
+        Block { kind: Kind::Image, text: String::new(), marks: vec![], image_id: Some(id) }
     }
 
+    /// The whole text in one style.
     pub fn with_style(mut self, style: Style) -> Block {
-        self.style = style;
+        self.marks = vec![style; self.text.len()];
         self
     }
 
-    /// Drawn in the bold face: headings always, any block with the bold flag.
-    pub fn is_bold(&self) -> bool {
-        self.kind == Kind::Heading || self.style.contains(Style::BOLD)
+    /// The style the character at byte `at` is drawn in: its own, and bold in a heading.
+    pub fn shown_at(&self, at: usize) -> Style {
+        let s = self.marks.get(at).copied().unwrap_or_default();
+        if self.kind == Kind::Heading { s.with(Style::BOLD, true) } else { s }
+    }
+
+    /// The style of text typed at byte `at`: that of the character before it, or at the start of
+    /// the block that of the character after it.
+    pub fn style_for_insert(&self, at: usize) -> Style {
+        let at = floor_boundary(&self.text, at);
+        if at > 0 { self.marks[at - 1] } else { self.marks.first().copied().unwrap_or_default() }
+    }
+
+    /// The flags every character of `start..end` has (none for an empty range).
+    pub fn common_style(&self, start: usize, end: usize) -> Style {
+        let (s, e) = (floor_boundary(&self.text, start.min(end)), floor_boundary(&self.text, start.max(end)));
+        if s == e {
+            return Style::NONE;
+        }
+        Style(self.marks[s..e].iter().fold(15, |acc, m| acc & m.0))
+    }
+
+    /// The stretches of one style, longest first-to-last: `(start, end, style)`, never empty.
+    pub fn spans(&self) -> Vec<(usize, usize, Style)> {
+        let mut out: Vec<(usize, usize, Style)> = vec![];
+        for (i, &m) in self.marks.iter().enumerate() {
+            match out.last_mut() {
+                Some(last) if last.2 == m => last.1 = i + 1,
+                _ => out.push((i, i + 1, m)),
+            }
+        }
+        out
     }
 
     /// Whether the block has a text field (everything but an image).
     pub fn is_text(&self) -> bool {
         self.kind != Kind::Image
+    }
+
+    /// Replace `start..end` (char boundaries) by `insert`, in `style`.
+    fn splice(&mut self, start: usize, end: usize, insert: &str, style: Style) {
+        self.text.replace_range(start..end, insert);
+        self.marks.splice(start..end, std::iter::repeat_n(style, insert.len()));
+    }
+
+    /// One mark per byte, the same for every byte of a character.
+    fn normalize_marks(&mut self) {
+        self.marks.resize(self.text.len(), Style::NONE);
+        for (i, c) in self.text.char_indices() {
+            let m = self.marks[i];
+            self.marks[i..i + c.len_utf8()].fill(m);
+        }
     }
 }
 
@@ -118,15 +173,14 @@ fn one_line(s: &str) -> String {
     }
 }
 
-/// Characters that start a marker somewhere in the format; a text starting with one is escaped.
+/// Characters that start a marker somewhere in the old format; a text starting with one was escaped.
 const SPECIAL: [char; 7] = ['\\', '*', '~', '<', '#', '-', '!'];
+/// Characters that start an inline marker (or an escape): escaped wherever they are in the text.
+const INLINE: [char; 4] = ['\\', '*', '~', '<'];
+/// Characters that start a block marker: escaped as the first character of a line.
+const LINE_START: [char; 3] = ['#', '-', '!'];
 
-fn escape(text: &str) -> String {
-    match text.chars().next() {
-        Some(c) if SPECIAL.contains(&c) => format!("\\{text}"),
-        _ => text.to_string(),
-    }
-}
+// ---- the format of older versions: markers around the whole text, only its first character escaped ----
 
 fn unescape(text: &str) -> String {
     let mut chars = text.chars();
@@ -140,36 +194,129 @@ fn unescape(text: &str) -> String {
     text.to_string()
 }
 
-fn wrap(style: Style, text: &str) -> String {
-    let mut s = escape(text);
-    if style.contains(Style::ITALIC) {
-        s = format!("*{s}*");
-    }
-    if style.contains(Style::BOLD) {
-        s = format!("**{s}**");
-    }
-    if style.contains(Style::STRIKE) {
-        s = format!("~~{s}~~");
-    }
-    if style.contains(Style::UNDERLINE) {
-        s = format!("<u>{s}</u>");
-    }
-    s
-}
-
 fn unwrap_inline(mut s: &str) -> (Style, String) {
     let mut style = Style::NONE;
     for (open, close, flag) in [("<u>", "</u>", Style::UNDERLINE), ("~~", "~~", Style::STRIKE), ("**", "**", Style::BOLD), ("*", "*", Style::ITALIC)] {
         if s.len() >= open.len() + close.len() && s.starts_with(open) && s.ends_with(close) {
             s = &s[open.len()..s.len() - close.len()];
-            style = Style(style.0 | flag.0);
+            style = style.with(flag, true);
         }
     }
     (style, unescape(s))
 }
 
+// ---- the format: a marker wherever a style changes ----
+
+/// The markers that change the style from `from` to `to`: those that end first (innermost
+/// first), then those that begin (outermost first). Each flag at most once, so a run of `*` is
+/// never ambiguous: `***` is bold and italic.
+fn markers(out: &mut String, from: Style, to: Style) {
+    for (flag, close) in [(Style::ITALIC, "*"), (Style::BOLD, "**"), (Style::STRIKE, "~~"), (Style::UNDERLINE, "</u>")] {
+        if from.contains(flag) && !to.contains(flag) {
+            out.push_str(close);
+        }
+    }
+    for (flag, open) in [(Style::UNDERLINE, "<u>"), (Style::STRIKE, "~~"), (Style::BOLD, "**"), (Style::ITALIC, "*")] {
+        if to.contains(flag) && !from.contains(flag) {
+            out.push_str(open);
+        }
+    }
+}
+
+/// A block's text with its styles, as stored.
+fn write_inline(b: &Block) -> String {
+    let mut out = String::new();
+    let mut cur = Style::NONE;
+    for (start, end, style) in b.spans() {
+        markers(&mut out, cur, style);
+        for c in b.text[start..end].chars() {
+            if INLINE.contains(&c) || (out.is_empty() && LINE_START.contains(&c)) {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        cur = style;
+    }
+    markers(&mut out, cur, Style::NONE);
+    out
+}
+
+/// Read what [`write_inline`] writes. `None` for anything it would not have written exactly (text
+/// from an older version), which is then read the old way.
+fn read_inline(s: &str) -> Option<(String, Vec<Style>)> {
+    let (mut text, mut marks, mut cur) = (String::new(), vec![], Style::NONE);
+    let mut rest = s;
+    while let Some(c) = rest.chars().next() {
+        let (flag, len, on) = if c == '\\' {
+            let n = rest[1..].chars().next().filter(|n| INLINE.contains(n) || LINE_START.contains(n))?;
+            text.push(n);
+            marks.extend(std::iter::repeat_n(cur, n.len_utf8()));
+            rest = &rest[1 + n.len_utf8()..];
+            continue;
+        } else if rest.starts_with("<u>") {
+            (Style::UNDERLINE, 3, true)
+        } else if rest.starts_with("</u>") {
+            (Style::UNDERLINE, 4, false)
+        } else if rest.starts_with("~~") {
+            (Style::STRIKE, 2, !cur.contains(Style::STRIKE))
+        } else if rest.starts_with("**") {
+            (Style::BOLD, 2, !cur.contains(Style::BOLD))
+        } else if c == '*' {
+            (Style::ITALIC, 1, !cur.contains(Style::ITALIC))
+        } else {
+            text.push(c);
+            marks.extend(std::iter::repeat_n(cur, c.len_utf8()));
+            rest = &rest[c.len_utf8()..];
+            continue;
+        };
+        cur = cur.with(flag, on);
+        rest = &rest[len..];
+    }
+    let b = Block { kind: Kind::Body, text, marks, image_id: None };
+    (write_inline(&b) == s).then_some((b.text, b.marks))
+}
+
+/// A block of `kind` from the stored rest of its line (after the kind's marker).
+fn read_block(kind: Kind, rest: &str) -> Block {
+    match read_inline(rest) {
+        Some((text, marks)) => Block { kind, text, marks, image_id: None },
+        None => {
+            let (style, text) = unwrap_inline(rest);
+            Block::new(kind, &text).with_style(style)
+        }
+    }
+}
+
 fn image_id(line: &str) -> Option<i64> {
     line.strip_prefix("![](img:")?.strip_suffix(')')?.parse().ok()
+}
+
+/// Where the text of `old` was replaced to make `new`, the caret now at `cursor` in `new` (if
+/// known): the replaced range `start..end` of `old` and the end of the inserted text in `new` (it
+/// starts at `start`). Typing puts the caret right after what it inserted, which settles what a
+/// bare comparison cannot (typing `a` after `a`).
+fn diff(old: &str, new: &str, cursor: Option<usize>) -> (usize, usize, usize) {
+    let common_prefix = |limit: usize| {
+        let mut p = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count().min(limit);
+        while !old.is_char_boundary(p) || !new.is_char_boundary(p) {
+            p -= 1;
+        }
+        p
+    };
+    if let Some(cursor) = cursor.map(|c| floor_boundary(new, c)) {
+        let after = &new[cursor..];
+        if old.len() >= after.len() && old.ends_with(after) {
+            let end = old.len() - after.len();
+            let start = common_prefix(end.min(cursor));
+            return (start, end, cursor);
+        }
+    }
+    let start = common_prefix(old.len().min(new.len()));
+    let mut suffix = old.bytes().rev().zip(new.bytes().rev()).take_while(|(a, b)| a == b).count().min(old.len().min(new.len()) - start);
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    (start, old.len() - suffix, new.len() - suffix)
 }
 
 impl Document {
@@ -190,12 +337,33 @@ impl Document {
             } else if b.kind == Kind::Title {
                 b.kind = Kind::Body;
             }
-            b.text = one_line(&b.text);
+            if b.text.contains(['\n', '\r']) {
+                // a line break and the one or two bytes of it become one space
+                let mut text = String::new();
+                let mut marks = vec![];
+                let mut chars = b.text.char_indices().peekable();
+                while let Some((at, c)) = chars.next() {
+                    let m = b.marks.get(at).copied().unwrap_or_default();
+                    let c = if c == '\r' || c == '\n' {
+                        if c == '\r' && chars.peek().is_some_and(|&(_, n)| n == '\n') {
+                            chars.next();
+                        }
+                        ' '
+                    } else {
+                        c
+                    };
+                    text.push(c);
+                    marks.extend(std::iter::repeat_n(m, c.len_utf8()));
+                }
+                b.text = text;
+                b.marks = marks;
+            }
             if b.kind == Kind::Image {
                 b.text.clear();
-                b.style = Style::NONE;
+                b.marks.clear();
             } else {
                 b.image_id = None;
+                b.normalize_marks();
             }
         }
         Document { blocks }
@@ -230,7 +398,7 @@ impl Document {
     /// The stored text (inverse of [`Document::parse`]).
     pub fn to_text(&self) -> String {
         // a note nobody wrote in is stored as before: no content at all
-        if self.is_empty() && self.blocks[0].style == Style::NONE {
+        if self.is_empty() {
             return String::new();
         }
         let mut out = String::new();
@@ -248,7 +416,7 @@ impl Document {
                     continue;
                 }
             }
-            out.push_str(&wrap(b.style, &b.text));
+            out.push_str(&write_inline(b));
         }
         out
     }
@@ -256,14 +424,30 @@ impl Document {
     // ---- editing ----
 
     /// The user edited a block's text (no line breaks; see [`Document::insert_text`] for those).
+    /// What was typed takes the style of the text before it.
     pub fn set_text(&mut self, block: usize, text: &str) {
         if let Some(b) = self.blocks.get_mut(block).filter(|b| b.is_text()) {
-            b.text = one_line(text);
+            let text = one_line(text);
+            let (start, end, inserted) = diff(&b.text, &text, None);
+            let style = b.style_for_insert(start);
+            b.splice(start, end, &text[start..inserted], style);
         }
     }
 
+    /// The user edited a block's text in its field to `text`, the caret now at byte `cursor`.
+    /// What was typed takes `typing` if given, else the style of the text it was typed after.
+    pub fn edit_text(&mut self, block: usize, text: &str, cursor: usize, typing: Option<Style>) {
+        let Some(b) = self.blocks.get_mut(block).filter(|b| b.is_text()) else { return };
+        let text = one_line(text);
+        let (start, end, inserted) = diff(&b.text, &text, Some(cursor));
+        let style = typing.unwrap_or_else(|| b.style_for_insert(start));
+        b.splice(start, end, &text[start..inserted], style);
+        debug_assert_eq!(b.text, text);
+    }
+
     /// Enter at `offset`: split the block. After a title or heading the new block is body; a list
-    /// item continues the list, and Enter on an empty list item turns it into body.
+    /// item continues the list, and Enter on an empty list item turns it into body. The text after
+    /// the caret keeps its styles.
     pub fn split(&mut self, block: usize, offset: usize) -> Caret {
         let Some(b) = self.blocks.get(block) else { return Caret { block: self.blocks.len() - 1, offset: 0 } };
         if b.kind == Kind::Image {
@@ -272,12 +456,13 @@ impl Document {
         }
         if b.kind == Kind::ListItem && b.text.is_empty() {
             self.blocks[block].kind = Kind::Body;
-            self.blocks[block].style = Style::NONE;
             return Caret { block, offset: 0 };
         }
         let at = floor_boundary(&b.text, offset);
-        let tail = self.blocks[block].text.split_off(at);
-        let new = following(&self.blocks[block], tail);
+        let b = &mut self.blocks[block];
+        let tail = b.text.split_off(at);
+        let marks = b.marks.split_off(at);
+        let new = following(&self.blocks[block], tail, marks);
         self.blocks.insert(block + 1, new);
         Caret { block: block + 1, offset: 0 }
     }
@@ -296,6 +481,7 @@ impl Document {
         let prev = &mut self.blocks[block - 1];
         let at = prev.text.len();
         prev.text.push_str(&cur.text);
+        prev.marks.extend(cur.marks);
         Some(Caret { block: block - 1, offset: at })
     }
 
@@ -308,6 +494,7 @@ impl Document {
         let next = self.blocks.remove(block + 1);
         if next.kind != Kind::Image {
             self.blocks[block].text.push_str(&next.text);
+            self.blocks[block].marks.extend(next.marks);
         }
         Some(Caret { block, offset })
     }
@@ -330,18 +517,60 @@ impl Document {
         }
         b.kind = kind;
         b.text.drain(..2);
+        b.marks.drain(..2);
         Some(Caret { block, offset: 0 })
     }
 
-    /// Toggle one style flag of a block. False when the block has no text (an image).
-    pub fn toggle_style(&mut self, block: usize, flag: Style) -> bool {
-        match self.blocks.get_mut(block) {
-            Some(b) if b.is_text() => {
-                b.style = b.style.toggled(flag);
-                true
-            }
-            _ => false,
+    /// Toggle one style flag over `start..end` of a block: off if every character there has it,
+    /// else on for all of them. False when nothing changes (an empty range, an image).
+    pub fn toggle_style(&mut self, block: usize, start: usize, end: usize, flag: Style) -> bool {
+        let Some(b) = self.blocks.get_mut(block).filter(|b| b.is_text()) else { return false };
+        let (s, e) = (floor_boundary(&b.text, start.min(end)), floor_boundary(&b.text, start.max(end)));
+        if s == e {
+            return false;
         }
+        let on = !b.common_style(s, e).contains(flag);
+        for m in &mut b.marks[s..e] {
+            *m = m.with(flag, on);
+        }
+        true
+    }
+
+    /// Toggle one style flag over the whole note (a select-all): off if every character has it,
+    /// else on everywhere. False when the note has no text.
+    pub fn toggle_style_all(&mut self, flag: Style) -> bool {
+        let mut marks = self.blocks.iter().flat_map(|b| b.marks.iter()).peekable();
+        if marks.peek().is_none() {
+            return false;
+        }
+        let on = !marks.all(|m| m.contains(flag));
+        for m in self.blocks.iter_mut().flat_map(|b| b.marks.iter_mut()) {
+            *m = m.with(flag, on);
+        }
+        true
+    }
+
+    /// The flags every character of the note has (none for a note without text).
+    pub fn common_style_all(&self) -> Style {
+        let mut marks = self.blocks.iter().flat_map(|b| b.marks.iter()).peekable();
+        if marks.peek().is_none() {
+            return Style::NONE;
+        }
+        Style(marks.fold(15, |acc, m| acc & m.0))
+    }
+
+    /// The word around byte `offset` of a block, when the offset is inside one (word characters
+    /// on both sides): its byte range.
+    pub fn word_at(&self, block: usize, offset: usize) -> Option<(usize, usize)> {
+        let t = &self.blocks.get(block)?.text;
+        let at = floor_boundary(t, offset);
+        let word = |c: char| c.is_alphanumeric() || c == '_' || c == '\'';
+        if !t[..at].chars().next_back().is_some_and(word) || !t[at..].chars().next().is_some_and(word) {
+            return None;
+        }
+        let start = t[..at].char_indices().rev().take_while(|&(_, c)| word(c)).last().map_or(at, |(i, _)| i);
+        let end = t[at..].char_indices().find(|&(_, c)| !word(c)).map_or(t.len(), |(i, _)| at + i);
+        Some((start, end))
     }
 
     /// Toggle a body block into a list item and back. False for titles, headings and images.
@@ -371,29 +600,44 @@ impl Document {
     }
 
     /// Replace `start..end` of a block's text with `text`, which may span lines (a paste): every
-    /// line after the first becomes a new block, as if Enter had been pressed there. Returns the
-    /// caret after the inserted text.
+    /// line after the first becomes a new block, as if Enter had been pressed there. The inserted
+    /// text takes the style of the text before it. Returns the caret after the inserted text.
     pub fn insert_text(&mut self, block: usize, start: usize, end: usize, text: &str) -> Caret {
         let Some(b) = self.blocks.get(block).filter(|b| b.is_text()) else {
             return Caret { block: block.min(self.blocks.len() - 1), offset: 0 };
         };
         let start = floor_boundary(&b.text, start);
         let end = floor_boundary(&b.text, end).max(start);
+        let style = b.style_for_insert(start);
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         let mut lines = normalized.split('\n');
         let first = lines.next().unwrap_or("");
-        let tail = b.text[end..].to_string();
         let b = &mut self.blocks[block];
-        b.text.truncate(start);
-        b.text.push_str(first);
+        let tail = b.text.split_off(end);
+        let tail_marks = b.marks.split_off(end);
+        b.splice(start, end, first, style);
         let mut caret = Caret { block, offset: b.text.len() };
         for line in lines {
-            let new = following(&self.blocks[caret.block], line.to_string());
+            let new = following(&self.blocks[caret.block], line.to_string(), vec![style; line.len()]);
             caret = Caret { block: caret.block + 1, offset: new.text.len() };
             self.blocks.insert(caret.block, new);
         }
-        self.blocks[caret.block].text.push_str(&tail);
+        let last = &mut self.blocks[caret.block];
+        last.text.push_str(&tail);
+        last.marks.extend(tail_marks);
         caret
+    }
+
+    /// The note's words as plain lines (what select-all copies); pictures are left out.
+    pub fn plain_text(&self) -> String {
+        self.blocks.iter().filter(|b| b.is_text()).map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n")
+    }
+
+    /// Select-all then typing, pasting or Delete: the whole note becomes `text` (which may span
+    /// lines). Returns the caret after it.
+    pub fn replace_all(&mut self, text: &str) -> Caret {
+        self.blocks = vec![Block::new(Kind::Title, "")];
+        self.insert_text(0, 0, 0, text)
     }
 
     /// The nearest block with a text field before `block`.
@@ -407,13 +651,10 @@ impl Document {
     }
 }
 
-/// The block that follows `prev` when Enter is pressed in it, holding `text`.
-fn following(prev: &Block, text: String) -> Block {
-    match prev.kind {
-        Kind::ListItem => Block { kind: Kind::ListItem, text, style: prev.style, image_id: None },
-        Kind::Body => Block { kind: Kind::Body, text, style: prev.style, image_id: None },
-        _ => Block { kind: Kind::Body, text, style: Style::NONE, image_id: None },
-    }
+/// The block that follows `prev` when Enter is pressed in it, holding `text` styled `marks`.
+fn following(prev: &Block, text: String, marks: Vec<Style>) -> Block {
+    let kind = if prev.kind == Kind::ListItem { Kind::ListItem } else { Kind::Body };
+    Block { kind, text, marks, image_id: None }
 }
 
 fn floor_boundary(s: &str, mut i: usize) -> usize {
@@ -428,8 +669,7 @@ fn parse_line(index: usize, line: &str) -> Block {
     if index == 0 {
         // The title: `# ` (or `## `, older notes) and the rest, or the whole line of a plain note.
         let rest = line.strip_prefix("# ").or_else(|| line.strip_prefix("## ")).unwrap_or(line);
-        let (style, text) = unwrap_inline(rest);
-        return Block { kind: Kind::Title, text, style, image_id: None };
+        return read_block(Kind::Title, rest);
     }
     if let Some(id) = image_id(line) {
         return Block::image(id);
@@ -441,8 +681,7 @@ fn parse_line(index: usize, line: &str) -> Block {
     } else {
         (Kind::Body, line)
     };
-    let (style, text) = unwrap_inline(rest);
-    Block { kind, text, style, image_id: None }
+    read_block(kind, rest)
 }
 
 #[cfg(test)]
@@ -487,7 +726,7 @@ mod tests {
         let d = Document::parse(MOCKUP);
         assert_eq!(kinds(&d), [Kind::Title, Kind::Heading, Kind::Body]);
         assert_eq!(texts(&d), ["Endfield Note", "Thermite Cutter : POG & Akekuri", "Currently POG no Weapon"]);
-        assert!(d.blocks()[1].style.contains(Style::BOLD) && d.blocks()[1].is_bold());
+        assert!(d.blocks()[1].marks.iter().all(|m| m.contains(Style::BOLD)));
         assert_eq!(d.to_text(), MOCKUP);
     }
 
@@ -498,8 +737,11 @@ mod tests {
         assert_eq!(kinds(&d), [Kind::Title, Kind::Heading, Kind::Body, Kind::ListItem, Kind::Image, Kind::Body]);
         assert_eq!(d.blocks()[3].text, "item");
         assert_eq!(d.blocks()[4].image_id, Some(42));
-        // the last line is a bold-italic-ish run of markers only at its ends: no flags, text kept
-        assert_eq!(d.blocks()[5].text, "**bold** *it* ~~s~~");
+        // markers inside a line style the words between them
+        let last = &d.blocks()[5];
+        assert_eq!(last.text, "bold it s");
+        assert_eq!(last.spans(), [(0, 4, Style::BOLD), (4, 5, Style::NONE), (5, 7, Style::ITALIC), (7, 8, Style::NONE), (8, 9, Style::STRIKE)]);
+        assert_eq!(d.to_text(), text);
         assert_eq!(Document::parse(&d.to_text()), d);
     }
 
@@ -515,9 +757,6 @@ mod tests {
     fn an_empty_note_is_stored_as_no_text() {
         assert_eq!(Document::new().to_text(), "");
         assert_eq!(Document::parse(&Document::new().to_text()), Document::new());
-        let mut styled = Document::new();
-        styled.toggle_style(0, Style::BOLD);
-        assert_eq!(Document::parse(&styled.to_text()), styled);
     }
 
     #[test]
@@ -579,7 +818,17 @@ mod tests {
                         3 => Block::new(Kind::Title, &random_text(&mut r)),
                         _ => Block::new(Kind::Body, &random_text(&mut r)),
                     };
-                    b.with_style(Style::from_bits(r.next(16) as u8))
+                    let mut b = b.with_style(Style::from_bits(r.next(16) as u8));
+                    if r.next(2) == 0 {
+                        // a style per character
+                        let starts: Vec<usize> = b.text.char_indices().map(|(i, _)| i).collect();
+                        for (k, &i) in starts.iter().enumerate() {
+                            let end = starts.get(k + 1).copied().unwrap_or(b.text.len());
+                            let s = Style::from_bits(r.next(16) as u8);
+                            b.marks[i..end].fill(s);
+                        }
+                    }
+                    b
                 })
                 .collect();
             let d = Document::from_blocks(blocks);
@@ -631,14 +880,12 @@ mod tests {
     #[test]
     fn enter_after_title_or_heading_starts_body() {
         let mut d = doc(&[(Kind::Title, "ti"), (Kind::Heading, "he")]);
-        d.toggle_style(0, Style::BOLD);
-        d.toggle_style(1, Style::BOLD);
+        d.toggle_style(0, 0, 2, Style::BOLD);
         d.split(0, 2);
         assert_eq!(kinds(&d), [Kind::Title, Kind::Body, Kind::Heading]);
-        assert_eq!(d.blocks()[1].style, Style::NONE);
+        assert!(d.blocks()[1].marks.is_empty());
         d.split(2, 2);
         assert_eq!(kinds(&d), [Kind::Title, Kind::Body, Kind::Heading, Kind::Body]);
-        assert_eq!(d.blocks()[3].style, Style::NONE);
         // the middle of a title: the title keeps its head, the rest is body
         let mut e = doc(&[(Kind::Title, "abcd")]);
         e.split(0, 2);
@@ -648,13 +895,13 @@ mod tests {
     #[test]
     fn enter_in_a_list_continues_it_and_on_an_empty_item_ends_it() {
         let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "milk")]);
-        d.toggle_style(1, Style::ITALIC);
-        d.split(1, 4);
+        d.toggle_style(1, 2, 4, Style::ITALIC);
+        d.split(1, 2);
         assert_eq!(kinds(&d), [Kind::Title, Kind::ListItem, Kind::ListItem]);
-        assert_eq!(d.blocks()[2].style, Style::ITALIC, "the new block inherits the style");
+        assert_eq!(d.blocks()[2].spans(), [(0, 2, Style::ITALIC)], "the text after the caret keeps its style");
+        d.set_text(2, "");
         assert_eq!(d.split(2, 0), Caret { block: 2, offset: 0 });
         assert_eq!(kinds(&d), [Kind::Title, Kind::ListItem, Kind::Body]);
-        assert_eq!(d.blocks()[2].style, Style::NONE);
         assert_eq!(d.len(), 3);
     }
 
@@ -720,17 +967,125 @@ mod tests {
     // ---- styles, lists, images ----
 
     #[test]
-    fn toggling_a_style_flips_one_flag_of_the_block() {
-        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "b")]);
-        assert!(d.toggle_style(1, Style::BOLD));
-        assert!(d.toggle_style(1, Style::UNDERLINE));
-        assert!(d.blocks()[1].style.contains(Style::BOLD) && d.blocks()[1].style.contains(Style::UNDERLINE));
-        assert!(d.toggle_style(1, Style::BOLD));
-        assert_eq!(d.blocks()[1].style, Style::UNDERLINE);
-        assert!(d.toggle_style(0, Style::ITALIC), "a title can be styled");
-        assert!(!d.toggle_style(5, Style::BOLD));
+    fn toggling_a_style_flips_one_flag_of_the_selection() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "one two")]);
+        assert!(d.toggle_style(1, 4, 7, Style::BOLD));
+        assert_eq!(d.blocks()[1].spans(), [(0, 4, Style::NONE), (4, 7, Style::BOLD)]);
+        assert!(d.toggle_style(1, 7, 2, Style::UNDERLINE), "the ends can come in either order");
+        assert_eq!(d.blocks()[1].spans(), [(0, 2, Style::NONE), (2, 4, Style::UNDERLINE), (4, 7, Style::BOLD.with(Style::UNDERLINE, true))]);
+        // part of the selection is bold: the whole of it becomes bold; all of it is: none of it stays
+        assert!(d.toggle_style(1, 0, 7, Style::BOLD));
+        assert_eq!(d.blocks()[1].common_style(0, 7), Style::BOLD);
+        assert!(d.toggle_style(1, 0, 7, Style::BOLD));
+        assert_eq!(d.blocks()[1].common_style(0, 7), Style::NONE);
+        assert_eq!(d.to_text(), "# t\non<u>e two</u>");
+        assert!(!d.toggle_style(1, 3, 3, Style::BOLD), "nothing selected");
+        assert!(d.toggle_style(0, 0, 1, Style::ITALIC), "a title can be styled");
+        assert!(!d.toggle_style(5, 0, 1, Style::BOLD));
         d.insert_image(1, 1);
-        assert!(!d.toggle_style(2, Style::BOLD), "an image has no text to style");
+        assert!(!d.toggle_style(2, 0, 1, Style::BOLD), "an image has no text to style");
+    }
+
+    #[test]
+    fn a_select_all_styles_the_whole_note() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "ab")]);
+        d.toggle_style(1, 0, 1, Style::BOLD);
+        assert_eq!(d.common_style_all(), Style::NONE);
+        assert!(d.toggle_style_all(Style::BOLD));
+        assert_eq!(d.common_style_all(), Style::BOLD);
+        assert!(d.toggle_style_all(Style::BOLD));
+        assert_eq!(d.common_style_all(), Style::NONE);
+        assert!(!Document::new().toggle_style_all(Style::BOLD));
+    }
+
+    #[test]
+    fn the_word_at_the_caret() {
+        let d = doc(&[(Kind::Title, "héllo wörld, x")]);
+        assert_eq!(d.word_at(0, 2), Some((0, 6)));
+        assert_eq!(d.word_at(0, 9), Some((7, 13)));
+        assert_eq!(d.word_at(0, 0), None, "at the start of a word");
+        assert_eq!(d.word_at(0, 6), None, "at its end");
+        assert_eq!(d.word_at(0, 14), None);
+    }
+
+    // ---- styles while editing ----
+
+    #[test]
+    fn typed_text_takes_the_style_before_it() {
+        let mut d = doc(&[(Kind::Title, "ab")]);
+        d.toggle_style(0, 0, 1, Style::BOLD);
+        // "a|b" -> "ax|b": after the bold a
+        d.edit_text(0, "axb", 2, None);
+        assert_eq!(d.blocks()[0].spans(), [(0, 2, Style::BOLD), (2, 3, Style::NONE)]);
+        // at the start: the style of what follows
+        d.edit_text(0, "yaxb", 1, None);
+        assert_eq!(d.blocks()[0].spans(), [(0, 3, Style::BOLD), (3, 4, Style::NONE)]);
+        // with a style asked for (a toolbar button with nothing selected)
+        d.edit_text(0, "yaxbz", 5, Some(Style::ITALIC));
+        assert_eq!(d.blocks()[0].spans(), [(0, 3, Style::BOLD), (3, 4, Style::NONE), (4, 5, Style::ITALIC)]);
+    }
+
+    #[test]
+    fn the_caret_settles_where_repeated_letters_were_typed() {
+        let mut d = doc(&[(Kind::Title, "aa")]);
+        d.toggle_style(0, 1, 2, Style::BOLD);
+        // the plain a was doubled: the caret after the first a
+        d.edit_text(0, "aaa", 1, None);
+        assert_eq!(d.blocks()[0].spans(), [(0, 2, Style::NONE), (2, 3, Style::BOLD)]);
+        // a selection replaced
+        d.edit_text(0, "aZ", 2, None);
+        assert_eq!(d.blocks()[0].text, "aZ");
+        // a deletion
+        d.edit_text(0, "Z", 0, None);
+        assert_eq!(d.blocks()[0].text, "Z");
+        assert_eq!(d.blocks()[0].marks.len(), 1);
+    }
+
+    #[test]
+    fn merges_and_pastes_keep_the_styles() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "ab"), (Kind::Body, "cd")]);
+        d.toggle_style(2, 0, 2, Style::ITALIC);
+        d.backspace(2, 0);
+        assert_eq!(d.blocks()[1].spans(), [(0, 2, Style::NONE), (2, 4, Style::ITALIC)]);
+        d.insert_text(1, 4, 4, "x\ny");
+        assert_eq!(d.blocks()[1].spans(), [(0, 2, Style::NONE), (2, 5, Style::ITALIC)]);
+        assert_eq!(d.blocks()[2].spans(), [(0, 1, Style::ITALIC)]);
+        d.delete(1, 5);
+        assert_eq!(d.blocks()[1].text, "abcdxy");
+        assert_eq!(d.blocks()[1].marks.len(), 6);
+    }
+
+    // ---- inline styles in the stored text ----
+
+    #[test]
+    fn styled_words_are_stored_with_markers_where_the_style_changes() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "plain bold both under")]);
+        d.toggle_style(1, 6, 15, Style::BOLD);
+        d.toggle_style(1, 11, 15, Style::ITALIC);
+        d.toggle_style(1, 16, 21, Style::UNDERLINE);
+        assert_eq!(d.to_text(), "# t\nplain **bold *both*** <u>under</u>");
+        assert_eq!(Document::parse(&d.to_text()), d);
+        let mut s = doc(&[(Kind::Title, r"a*b~c<d\e")]);
+        s.toggle_style(0, 1, 4, Style::STRIKE);
+        assert_eq!(s.to_text(), r"# a~~\*b\~~~c\<d\\e");
+        assert_eq!(Document::parse(&s.to_text()), s);
+    }
+
+    #[test]
+    fn older_notes_keep_their_meaning() {
+        // whole-line markers around text with a marker character inside
+        let d = Document::parse("t\n**a*b**\n*x* and *");
+        assert_eq!(d.blocks()[1].text, "a*b");
+        assert_eq!(d.blocks()[1].spans(), [(0, 3, Style::BOLD)]);
+        // an odd marker: read as before (the outer pair wraps the line)
+        assert_eq!((d.blocks()[2].text.as_str(), d.blocks()[2].spans()), ("x* and ", vec![(0, 7, Style::ITALIC)]));
+        // a backslash that escapes nothing, and a first-character escape
+        let e = Document::parse("C:\\Users\n\\**b** c");
+        assert_eq!(e.blocks()[0].text, r"C:\Users");
+        assert_eq!(e.blocks()[1].text, "**b** c");
+        for d in [d, e] {
+            assert_eq!(Document::parse(&d.to_text()), d);
+        }
     }
 
     #[test]
@@ -795,6 +1150,24 @@ mod tests {
         assert_eq!(d.prev_text_block(2), Some(0));
         assert_eq!(d.prev_text_block(0), None);
         assert_eq!(d.next_text_block(2), None);
+    }
+
+    #[test]
+    fn plain_text_is_the_lines_without_pictures() {
+        let mut d = doc(&[(Kind::Title, "T"), (Kind::Body, "a"), (Kind::Body, "b")]);
+        d.insert_image(1, 7);
+        assert_eq!(d.plain_text(), "T\na\nb");
+    }
+
+    #[test]
+    fn replacing_everything_starts_over_with_the_text() {
+        let mut d = doc(&[(Kind::Title, "T"), (Kind::Body, "a"), (Kind::Body, "b")]);
+        let c = d.replace_all("x\ny");
+        assert_eq!(texts(&d), ["x", "y"]);
+        assert_eq!(c, Caret { block: 1, offset: 1 });
+        let c = d.replace_all("");
+        assert!(d.is_empty());
+        assert_eq!(c, Caret { block: 0, offset: 0 });
     }
 
     #[test]

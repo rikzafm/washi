@@ -28,9 +28,14 @@ fn note(text: &str) -> Harness {
     h
 }
 
-/// The bottom of the last resting line, in the paper's frame.
+/// The bottom of the last resting line, in the paper's frame: its top plus one line pitch (the
+/// step between the lines, which the fields snap to whole physical pixels).
 fn last_line_bottom(h: &Harness) -> f32 {
-    h.text_runs(0).iter().map(|r| r.2).fold(0.0, f32::max) + 29.1
+    let mut ys: Vec<f32> = h.text_runs(0).iter().map(|r| r.2).collect();
+    ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ys.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+    let pitch = ys[ys.len() - 1] - ys[ys.len() - 2];
+    ys[ys.len() - 1] + pitch
 }
 
 #[test]

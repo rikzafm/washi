@@ -5,6 +5,11 @@
 //! would be (the paper's tilt about the paper's center). While editing, the stock level `TextInput`
 //! shows instead. Both must break lines in the same places, so this module wraps with the advances
 //! of the same embedded fonts (they have no kerning table, so the advances are exact).
+//!
+//! The four faces (regular, bold, italic, bold italic) have the same advances, so a line breaks in
+//! the same places whatever its characters' styles. The edit fields lay their text out in a blank
+//! face with those advances too (`fonts/WashiCaret.ttf`), and the words are drawn from this layout
+//! while editing as well, each piece in its own face.
 
 use crate::document::{Block, Kind, Style as Flags};
 use ttf_parser::Face;
@@ -123,21 +128,28 @@ fn push_word(lines: &mut [Vec<Word>], word: Word) {
 }
 
 /// Break one block's text into lines of words.
+///
+/// Lines break at the Unicode line-break opportunities (UAX #14), as Slint's own text layout does:
+/// after spaces, but also after a hyphen, a slash and the like. Breaking at spaces only would put
+/// fewer lines here than the edit fields show for text such as paths, and the note would then
+/// scroll short of its end and move the caret to the wrong lines.
 fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
-    let space = m.advance(' ');
     let mut lines: Vec<Vec<Word>> = vec![vec![]];
     let mut x = 0.0;
-    let mut pending = 0.0; // spaces seen since the last word
+    let mut pending = 0.0; // trailing spaces since the last word
     let mut at_line_start = true;
-    let mut pos = 0; // byte offset of the current word
-    for (i, word) in text.split(' ').enumerate() {
-        if i > 0 {
-            pending += space;
-            pos += 1;
+    let mut start = 0; // byte offset of the current fragment
+    for (end, _) in unicode_linebreak::linebreaks(text) {
+        if end <= start {
+            continue;
         }
-        let word_pos = pos;
-        pos += word.len();
+        let fragment = &text[start..end];
+        let word_pos = start;
+        start = end;
+        let word = fragment.trim_end_matches(' ');
+        let trailing = m.width(&fragment[word.len()..]);
         if word.is_empty() {
+            pending += trailing;
             continue;
         }
         let w = m.width(word);
@@ -165,14 +177,14 @@ fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
             }
             push_word(&mut lines, Word { text: chunk, at: 0.0, off: chunk_off });
             x = cw;
-            pending = 0.0;
+            pending = trailing;
             at_line_start = false;
             continue;
         }
         let at = x + pending;
         push_word(&mut lines, Word { text: word.to_string(), at, off: word_pos });
         x = at + w;
-        pending = 0.0;
+        pending = trailing;
         at_line_start = false;
     }
     lines
@@ -193,6 +205,23 @@ fn pieces(word: &str, max: f64, m: &Measure) -> Vec<String> {
     }
     if !cur.is_empty() {
         out.push(cur);
+    }
+    out
+}
+
+/// The stretches of `start..end` of a block drawn in one face (bold and italic the same).
+fn face_runs(b: &Block, start: usize, end: usize) -> Vec<(usize, usize)> {
+    let face = |i: usize| b.shown_at(i).bits() & (Flags::BOLD.bits() | Flags::ITALIC.bits());
+    let mut out = vec![];
+    let mut s = start;
+    for i in start + 1..end {
+        if b.text.is_char_boundary(i) && face(i) != face(s) {
+            out.push((s, i));
+            s = i;
+        }
+    }
+    if s < end {
+        out.push((s, end));
     }
     out
 }
@@ -219,7 +248,7 @@ fn line_starts(lines: &[Vec<Word>]) -> Vec<usize> {
 /// The visual line and x of the caret at byte `offset` of block `b`, in a paper `paper_w` wide.
 pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLine {
     let avail = paper_w - t.inset_left - t.inset_right;
-    let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), t.style(b.kind).size);
+    let m = Measure::new(false, false, t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
     let mut offset = offset.min(b.text.len());
@@ -233,7 +262,7 @@ pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLi
 /// The byte offset on visual `line` (clamped to the block's last) of block `b` nearest to `x`.
 pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> usize {
     let avail = paper_w - t.inset_left - t.inset_right;
-    let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), t.style(b.kind).size);
+    let m = Measure::new(false, false, t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
     let line = line.min(lines.len() - 1);
@@ -309,8 +338,7 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
             top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
             continue;
         }
-        let italic = b.style.contains(Flags::ITALIC);
-        let m = Measure::new(b.is_bold(), italic, st.size);
+        let m = Measure::new(false, false, st.size);
         let lines = wrap(&b.text, avail, &m);
         let base = baseline(&m, st.pitch);
         let thick = (st.size / 20.0).max(1.0);
@@ -329,22 +357,36 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
         }
         for (li, line) in lines.iter().enumerate() {
             let y = top + li as f64 * st.pitch;
-            for Word { text: word, at, .. } in line {
+            for Word { text: word, at, off } in line {
                 let mut x = t.inset_left + at;
-                for piece in pieces(word, t.max_run, &m) {
-                    let width = m.width(&piece);
-                    let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
-                    runs.push(Run { block: bi, kind: b.kind, bold: b.is_bold(), italic, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
-                    x += width;
+                for (s, e) in face_runs(b, *off, *off + word.len()) {
+                    let shown = b.shown_at(s);
+                    let (bold, italic) = (shown.contains(Flags::BOLD), shown.contains(Flags::ITALIC));
+                    for piece in pieces(&b.text[s..e], t.max_run, &m) {
+                        let width = m.width(&piece);
+                        let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
+                        runs.push(Run { block: bi, kind: b.kind, bold, italic, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                        x += width;
+                    }
                 }
             }
             if let (Some(first), Some(last)) = (line.first(), line.last()) {
-                let (x0, x1) = (t.inset_left + first.at, t.inset_left + last.at + m.width(&last.text));
-                if b.style.contains(Flags::UNDERLINE) {
-                    bar(&mut rules, x0, y + base + 0.1 * st.size, x1 - x0, thick);
-                }
-                if b.style.contains(Flags::STRIKE) {
-                    bar(&mut rules, x0, y + base - 0.3 * st.size, x1 - x0, thick);
+                // from the line's first word to the end of its last (the spaces between words
+                // included, those after the last left out)
+                let (from, to) = (first.off, last.off + last.text.len());
+                let x_of = |i: usize| t.inset_left + first.at + m.width(&b.text[from..i]);
+                for (flag, lift) in [(Flags::UNDERLINE, -0.1), (Flags::STRIKE, 0.3)] {
+                    let mut i = from;
+                    while i < to {
+                        // every byte of a character has its mark: a change is at a character boundary
+                        if !b.marks[i].contains(flag) {
+                            i += 1;
+                            continue;
+                        }
+                        let j = (i..to).find(|&k| !b.marks[k].contains(flag)).unwrap_or(to);
+                        bar(&mut rules, x_of(i), y + base - lift * st.size, x_of(j) - x_of(i), thick);
+                        i = j;
+                    }
                 }
             }
         }
@@ -375,7 +417,7 @@ pub fn extent_with_images(blocks: &[Block], paper_w: f64, t: &Tokens, image_size
             top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
             continue;
         }
-        let m = Measure::new(b.is_bold(), b.style.contains(Flags::ITALIC), st.size);
+        let m = Measure::new(false, false, st.size);
         top += wrap(&b.text, avail, &m).len() as f64 * st.pitch;
     }
     (tops, top)
@@ -512,6 +554,44 @@ mod tests {
         let runs = layout(Document::parse(&format!("t
 {long}")).blocks(), (363.0, 433.0), &TOKENS);
         assert!(runs.iter().filter(|r| r.block == 1).map(|r| r.line).max().unwrap() >= 1);
+    }
+
+    #[test]
+    fn lines_break_after_hyphens_like_the_edit_fields_do() {
+        // no spaces at all: only the hyphens let it break between words
+        let text = "t\nlibopenssl-sys-bfe5c79-libcrypto-lib-ct-b64";
+        let runs = layout(Document::parse(text).blocks(), (363.0, 433.0), &TOKENS);
+        let lines = line_texts(&runs, 1);
+        assert!(lines.len() >= 2, "{lines:?}");
+        assert!(lines.iter().take(lines.len() - 1).all(|l| l.ends_with('-')), "{lines:?}");
+        // the text is all there, in order
+        assert_eq!(lines.concat().replace(' ', ""), "libopenssl-sys-bfe5c79-libcrypto-lib-ct-b64");
+    }
+
+    #[test]
+    fn styled_words_are_drawn_in_their_own_face_and_break_like_plain_ones() {
+        let plain = Document::parse(MOCKUP);
+        let mut styled = plain.clone();
+        // "POG" bold, half of "Weapon" italic, "no" underlined
+        styled.toggle_style(2, 10, 13, Flags::BOLD);
+        styled.toggle_style(2, 20, 23, Flags::ITALIC);
+        styled.toggle_style(2, 14, 16, Flags::UNDERLINE);
+        let (runs, rules) = layout_all(styled.blocks(), (363.0, 433.0), &TOKENS);
+        let plain_runs = layout(plain.blocks(), (363.0, 433.0), &TOKENS);
+        assert_eq!(line_texts(&runs, 2).len(), line_texts(&plain_runs, 2).len(), "same line breaks");
+        let pog = runs.iter().find(|r| r.block == 2 && r.text == "POG").unwrap();
+        assert!(pog.bold && !pog.italic);
+        let wea = runs.iter().find(|r| r.block == 2 && r.text == "Wea").unwrap();
+        let pon = runs.iter().find(|r| r.block == 2 && r.text == "pon").unwrap();
+        assert!(!wea.italic && pon.italic, "a word is split where its style changes");
+        assert!((wea.x + wea.width - pon.x).abs() < 1e-9);
+        // the heading is bold throughout
+        assert!(runs.iter().filter(|r| r.block == 1).all(|r| r.bold));
+        // one underline, under "no" only
+        let no = runs.iter().find(|r| r.block == 2 && r.text == "no").unwrap();
+        let bars: Vec<&Rule> = rules.iter().filter(|r| r.block == 2).collect();
+        assert_eq!(bars.len(), 1);
+        assert!((bars[0].x - no.x).abs() < 1e-9 && (bars[0].width - no.width).abs() < 1e-9);
     }
 
     #[test]

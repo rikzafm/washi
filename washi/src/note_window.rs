@@ -143,6 +143,11 @@ struct Doc {
     rules: Rc<VecModel<RuleData>>,
     /// The block that last held the caret: what the toolbar and the format shortcuts act on.
     caret: Cell<usize>,
+    /// The caret's byte offset in that block and the selection's other end (equal: no selection).
+    selection: Cell<(usize, usize)>,
+    /// A format button pressed with nothing selected, outside a word: the style the next text
+    /// typed at that caret takes. Gone once the caret moves elsewhere.
+    typing: Cell<Option<(Caret, Flags)>>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
     /// Sizes and decoded pixels of the note's pictures.
@@ -169,6 +174,8 @@ impl Doc {
             runs: Rc::new(VecModel::default()),
             rules: Rc::new(VecModel::default()),
             caret: Cell::new(0),
+            selection: Cell::new((0, 0)),
+            typing: Cell::new(None),
             paper: Cell::new((363.0, 433.0)),
             history: RefCell::new(History::new(Document::new())),
             images,
@@ -206,6 +213,7 @@ impl Doc {
     /// Ctrl+Z (`redo` false) or Ctrl+Y: show the previous or next snapshot. The caret to place,
     /// or `None` when there is no such snapshot.
     fn step(&self, redo: bool) -> Option<Caret> {
+        self.typing.set(None);
         self.checkpoint();
         let target = {
             let mut h = self.history.borrow_mut();
@@ -221,7 +229,9 @@ impl Doc {
 
     fn tokens(ui: &NoteWindow) -> Tokens {
         let th = ui.global::<Theme>();
-        let style = |size: f32, pitch: f32| Style { size: size as f64, pitch: pitch as f64 };
+        // the edit fields step by whole physical pixels: the words must use the same pitch
+        let scale = ui.window().scale_factor() as f64;
+        let style = |size: f32, pitch: f32| Style { size: size as f64, pitch: (pitch as f64 * scale).round() / scale };
         Tokens {
             inset_left: th.get_text_inset_left() as f64,
             inset_right: th.get_text_inset_right() as f64,
@@ -258,6 +268,7 @@ impl Doc {
 
     /// Lay the words out again (text or paper size changed) from the tokens in ui/theme.slint.
     fn relayout(&self, ui: &NoteWindow) {
+        ui.set_pitch_scale(ui.window().scale_factor());
         let tokens = Self::tokens(ui);
         let doc = self.doc.borrow();
         let (mut runs, rules) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
@@ -265,7 +276,7 @@ impl Doc {
         self.rules.set_vec(
             rules
                 .iter()
-                .map(|r| RuleData { x: r.x as f32, y: r.y as f32, dx: r.dx as f32, dy: r.dy as f32, width: r.width as f32, height: r.height as f32 })
+                .map(|r| RuleData { block: r.block as i32, x: r.x as f32, y: r.y as f32, dx: r.dx as f32, dy: r.dy as f32, width: r.width as f32, height: r.height as f32 })
                 .collect::<Vec<_>>(),
         );
         let hint = doc.is_empty();
@@ -275,6 +286,7 @@ impl Doc {
         self.runs.set_vec(
             runs.iter()
                 .map(|r| RunData {
+                    block: if hint { -2 } else { r.block as i32 },
                     text: r.text.as_str().into(),
                     x: r.x as f32,
                     y: r.y as f32,
@@ -295,43 +307,130 @@ impl Doc {
         self.doc.borrow().to_text()
     }
 
+    /// What a key does over a select-all (its text): 1 a modifier key alone, so the selection stays;
+    /// 2 Backspace, Delete, Enter or a character replaced the whole note (the caret to place is
+    /// returned too); 0 any other key.
+    fn all_key(&self, key: &str) -> (i32, Option<Caret>) {
+        use slint::platform::Key;
+        let mut chars = key.chars();
+        let (Some(c), None) = (chars.next(), chars.next()) else { return (0, None) };
+        // Shift, Control, Alt, AltGr, CapsLock, Meta and their right-hand twins
+        if ('\u{10}'..='\u{18}').contains(&c) {
+            return (1, None);
+        }
+        let is = |k: Key| c == char::from(k);
+        let text = if is(Key::Backspace) || is(Key::Delete) || is(Key::Return) {
+            String::new()
+        } else if !c.is_control() && !('\u{f700}'..='\u{f8ff}').contains(&c) {
+            c.to_string()
+        } else {
+            return (0, None);
+        };
+        (2, Some(self.replace_all(&text)))
+    }
+
+    /// The whole note becomes `text`; the caret after it.
+    fn replace_all(&self, text: &str) -> Caret {
+        let before = self.doc.borrow().clone();
+        let caret = self.doc.borrow_mut().replace_all(text);
+        self.structural(before);
+        caret
+    }
+
     /// The caret's block, kept within the document.
     fn caret_block(&self) -> usize {
         self.caret.get().min(self.doc.borrow().len().saturating_sub(1))
     }
 
-    /// Toolbar button or shortcut `what` (0 bold, 1 italic, 2 underline, 3 strike, 4 list) on the
-    /// paragraph holding the caret. True when the document changed.
-    fn format(&self, what: i32) -> bool {
+    /// The style the next text typed at the caret takes: one a format button asked for there, or
+    /// that of the text before it.
+    fn typing_style(&self) -> Flags {
         let i = self.caret_block();
+        let (cursor, _) = self.selection.get();
+        match self.typing.get() {
+            Some((c, style)) if c == (Caret { block: i, offset: cursor }) => style,
+            _ => self.doc.borrow().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
+        }
+    }
+
+    /// Toolbar button or shortcut `what` (0 bold, 1 italic, 2 underline, 3 strike) on the selected
+    /// text: the whole note after a select-all, else the selection in the caret's paragraph, else
+    /// the word holding the caret; outside a word, on what is typed next. 4 (list) toggles the
+    /// caret's paragraph. True when the document changed.
+    fn format(&self, what: i32, all_selected: bool) -> bool {
+        let i = self.caret_block();
+        let flag = match what {
+            0 => Flags::BOLD,
+            1 => Flags::ITALIC,
+            2 => Flags::UNDERLINE,
+            3 => Flags::STRIKE,
+            4 => {
+                let before = self.doc.borrow().clone();
+                let done = self.doc.borrow_mut().toggle_list(i);
+                if done {
+                    self.structural(before);
+                }
+                return done;
+            }
+            _ => return false,
+        };
+        let (cursor, anchor) = self.selection.get();
         let before = self.doc.borrow().clone();
         let done = {
             let mut doc = self.doc.borrow_mut();
-            match what {
-                0 => doc.toggle_style(i, Flags::BOLD),
-                1 => doc.toggle_style(i, Flags::ITALIC),
-                2 => doc.toggle_style(i, Flags::UNDERLINE),
-                3 => doc.toggle_style(i, Flags::STRIKE),
-                4 => doc.toggle_list(i),
-                _ => false,
+            if all_selected {
+                doc.toggle_style_all(flag)
+            } else if cursor != anchor {
+                doc.toggle_style(i, cursor, anchor, flag)
+            } else if let Some((start, end)) = doc.word_at(i, cursor) {
+                doc.toggle_style(i, start, end, flag)
+            } else {
+                false
             }
         };
         if done {
+            self.typing.set(None);
             self.structural(before);
+        } else if !all_selected && cursor == anchor {
+            let style = self.typing_style().toggled(flag);
+            self.typing.set(Some((Caret { block: i, offset: cursor }, style)));
         }
         done
     }
 
-    /// Show the formats of the caret's paragraph on the toolbar buttons.
+    /// Show the formats of the selection (or of what is typed at the caret) on the toolbar buttons.
     fn show_formats(&self, ui: &NoteWindow) {
+        let style = {
+            let doc = self.doc.borrow();
+            let (cursor, anchor) = self.selection.get();
+            match doc.blocks().get(self.caret_block()) {
+                _ if ui.get_text_all_selected() => doc.common_style_all(),
+                Some(b) if cursor != anchor => b.common_style(cursor, anchor),
+                Some(_) => {
+                    drop(doc);
+                    self.typing_style()
+                }
+                None => Flags::NONE,
+            }
+        };
         let doc = self.doc.borrow();
         let b = doc.blocks().get(self.caret_block());
-        let has = |f: Flags| b.is_some_and(|b| b.style.contains(f));
-        ui.set_fmt_bold(b.is_some_and(|b| b.is_bold()));
-        ui.set_fmt_italic(has(Flags::ITALIC));
-        ui.set_fmt_underline(has(Flags::UNDERLINE));
-        ui.set_fmt_strike(has(Flags::STRIKE));
+        let heading = b.is_some_and(|b| b.kind == Kind::Heading);
+        ui.set_fmt_bold(heading || style.contains(Flags::BOLD));
+        ui.set_fmt_italic(style.contains(Flags::ITALIC));
+        ui.set_fmt_underline(style.contains(Flags::UNDERLINE));
+        ui.set_fmt_strike(style.contains(Flags::STRIKE));
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
+    }
+
+    /// The caret moved to `offset` of block `block`, the selection's other end at `anchor`. A style
+    /// asked for at another place is forgotten.
+    fn caret_moved(&self, block: usize, offset: usize, anchor: usize) {
+        self.caret.set(block);
+        self.selection.set((offset, anchor));
+        if self.typing.get().is_some_and(|(c, _)| c != (Caret { block, offset }) || offset != anchor) {
+            self.typing.set(None);
+        }
     }
 
     /// Ask the block at `c` to take the keyboard focus with the caret there, and scroll it into view.
@@ -365,7 +464,9 @@ impl Doc {
             let before = self.doc.borrow().clone();
             let mut doc = self.doc.borrow_mut();
             let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
-            doc.set_text(i, text);
+            // a style asked for with a format button applies to what is typed at its caret
+            let typing = self.typing.take().filter(|(c, _)| c.block == i).map(|(_, s)| s);
+            doc.edit_text(i, text, cursor, typing);
             // `# ` or `- ` typed at the start of a paragraph
             let caret = doc.auto_format(i, &old, cursor);
             drop(doc);
@@ -405,10 +506,18 @@ impl Doc {
     fn key(&self, i: usize, key: &str, offset: usize, ui: &NoteWindow) -> Option<(Caret, bool)> {
         use slint::platform::Key;
         let before = self.doc.borrow().clone();
+        // what is typed after Enter goes on in the style of the text before the caret
+        let carried = if self.typing.get().is_some_and(|(c, _)| c == (Caret { block: i, offset })) {
+            self.typing.get().map(|(_, s)| s)
+        } else {
+            before.blocks().get(i).map(|b| b.style_for_insert(offset))
+        };
         let mut doc = self.doc.borrow_mut();
         let is = |k: Key| key == char::from(k).to_string();
         let edit = if is(Key::Return) {
-            Some(doc.split(i, offset))
+            let c = doc.split(i, offset);
+            self.typing.set(carried.filter(|&s| s != Flags::NONE).map(|s| (c, s)));
+            Some(c)
         } else if is(Key::Backspace) {
             doc.backspace(i, offset)
         } else if is(Key::Delete) {
@@ -467,7 +576,8 @@ fn block_data(b: &Block) -> BlockData {
         Kind::ListItem => BlockKind::ListItem,
         Kind::Image => BlockKind::Image,
     };
-    BlockData { kind, text: b.text.as_str().into(), bold: b.is_bold(), italic: b.style.contains(Flags::ITALIC), img: Default::default(), img_w: 0, img_h: 0 }
+    // the words are drawn by the note; the field's face only matters while an input method composes
+    BlockData { kind, text: b.text.as_str().into(), bold: b.kind == Kind::Heading, italic: false, img: Default::default(), img_w: 0, img_h: 0 }
 }
 
 pub struct Note {
@@ -552,9 +662,14 @@ impl Note {
         }
         {
             let (changed, doc) = (changed.clone(), doc.clone());
+            let weak = ui.as_weak();
             ui.on_format(move |what| {
-                if doc.format(what) {
+                let Some(ui) = weak.upgrade() else { return };
+                if doc.format(what, ui.get_text_all_selected()) {
                     changed(None);
+                } else {
+                    // a style for what is typed next
+                    doc.show_formats(&ui);
                 }
             });
         }
@@ -589,10 +704,34 @@ impl Note {
             });
         }
         {
+            let doc = doc.clone();
+            ui.on_all_text(move || doc.doc.borrow().plain_text().into());
+        }
+        {
+            let (changed, doc) = (changed.clone(), doc.clone());
+            ui.on_replace_all(move |text| {
+                let caret = doc.replace_all(text.as_str());
+                changed(Some(caret));
+            });
+        }
+        {
+            let (changed, doc) = (changed.clone(), doc.clone());
+            ui.on_all_key(move |key| {
+                let (taken, caret) = doc.all_key(key.as_str());
+                if let Some(c) = caret {
+                    changed(Some(c));
+                }
+                taken
+            });
+        }
+        {
             let (doc, weak) = (doc.clone(), ui.as_weak());
-            ui.on_caret_moved(move |block, offset| {
+            ui.on_caret_moved(move |block, offset, anchor| {
+                let (block, offset) = (block.max(0) as usize, offset.max(0) as usize);
+                doc.caret_moved(block, offset, anchor.max(0) as usize);
                 if let Some(ui) = weak.upgrade() {
-                    doc.reveal(&ui, block.max(0) as usize, offset.max(0) as usize);
+                    doc.show_formats(&ui);
+                    doc.reveal(&ui, block, offset);
                 }
             });
         }

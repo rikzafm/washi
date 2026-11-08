@@ -161,6 +161,22 @@ impl Harness {
         });
     }
 
+    /// Press one special key with Shift held, several times (extends the selection).
+    pub fn press_shift(&mut self, note: usize, key: Key, times: usize) {
+        let id = self.id(note);
+        self.app().with_note(id, |n| {
+            let w = n.ui().window();
+            let shift: slint::SharedString = Key::Shift.into();
+            w.dispatch_event(WindowEvent::KeyPressed { text: shift.clone() });
+            for _ in 0..times {
+                w.dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+                w.dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+            }
+            w.dispatch_event(WindowEvent::KeyReleased { text: shift });
+        });
+        self.settle();
+    }
+
     /// Press one key several times.
     pub fn press_n(&mut self, note: usize, key: Key, times: usize) {
         for _ in 0..times {

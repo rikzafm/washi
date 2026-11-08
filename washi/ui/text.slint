@@ -6,8 +6,10 @@ import { BlockData, BlockKind, BlockView, RuleData, RunData } from "block.slint"
 //
 // The mockup text is tilted with the paper but the software renderer cannot rotate text
 // (slint#6068). At rest every word is therefore its own upright Text on the tilted baseline
-// (`runs`, laid out by src/textflow.rs). While a field has the focus the stock level TextInputs
-// show instead (caret, selection and IME stay Slint's) and the words' offsets settle to 0.
+// (`runs`, laid out by src/textflow.rs). While a field has the focus the words' offsets settle to
+// 0 and the stock level TextInputs lie over them: their text is in a blank face with the same
+// advances, so they only show the caret and the selection (caret, selection and IME stay Slint's),
+// and every word keeps its own style (bold, italic...) while editing too.
 export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
     in property <[RunData]> runs;
@@ -17,16 +19,41 @@ export component TextLayer inherits Rectangle {
     /// While the note is suspended (covered, minimized) losing the focus does not change its look.
     in property <bool> suspended: false;
     in property <int> resync: 0;
+    in property <float> pitch-scale: 1;
+    /// What the paper's tilted top edge needs to cut the resting words along it: the paper's own
+    /// size, its tilt and how far the note is scrolled (this layer sits at -scroll-y in the paper).
+    in property <length> paper-w: root.width;
+    in property <length> paper-h: root.height;
+    in property <angle> tilt: 0deg;
+    in property <length> scroll-y: 0px;
     callback block-edited(int, string, int);
     callback block-key(int, string, int) -> bool;
-    /// The caret moved: block, byte offset.
-    callback caret-moved(int, int);
+    /// The caret moved or the selection changed: block, caret byte offset, the selection's other end.
+    callback caret-moved(int, int, int);
+    /// The block whose field an input method is composing in (-1 none): it shows its own text.
+    property <int> composing-block: -1;
     /// Rust asks for the focus: block, caret offset, and a counter that changes with each request.
     in property <int> focus-block: -1;
     in property <int> focus-offset: 0;
     in property <int> focus-serial: 0;
     /// Ctrl+V in a field: true when the note took it (a picture on the clipboard).
     callback paste-image() -> bool;
+    /// Ctrl+A selected the whole note: every word is washed until the next key or click.
+    in-out property <bool> all-selected: false;
+    /// The note's text as plain lines (Rust), for copying.
+    callback all-text() -> string;
+    /// Replace the whole note by this text (typing, pasting or Delete over a select-all).
+    callback replace-all(string);
+    /// A key over a select-all, as its text (Rust): 1 a modifier key alone (the wash stays), 2 the key
+    /// replaced the whole note, 0 any other key.
+    callback all-key(string) -> int;
+    // The clipboard goes through a field of Slint's, so no platform code is needed.
+    clipboard := TextInput {
+        visible: false;
+        single-line: false;
+        width: 10px;
+        height: 10px;
+    }
     /// The block that last had the focus (-1 none yet): where the image button inserts.
     in-out property <int> last-focused: -1;
 
@@ -38,35 +65,81 @@ export component TextLayer inherits Rectangle {
     animate flat { duration: Theme.settle; easing: ease-in-out; }
     /// How much of the resting tilt the words still carry: 1 at rest, 0 while editing.
     out property <float> tilt-scale: 1 - flat;
+    /// A field has the focus: the level inputs show instead of the tilted words.
+    out property <bool> editing: root.focused-block >= 0;
 
-    for r in root.runs: Text {
-        visible: r.hint || root.flat < 1;
-        x: r.x + r.dx * root.tilt-scale;
-        y: r.y + r.dy * root.tilt-scale;
-        text: r.text;
-        wrap: no-wrap;
-        font-family: Theme.handwriting;
-        font-size: r.size;
-        font-weight: r.bold ? 700 : 400;
-        font-italic: r.italic;
-        line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
-        color: r.hint ? Theme.ink-hint : Theme.ink;
+    // The words' offsets (dx, dy) turn the layout about the paper's center, but the layout runs
+    // down the whole note while the paper only shows a window of it: measured from the layout's
+    // top, deep text would drift sideways (0.025 px per px of depth). Measured from the window
+    // (the scroll position), every line sits where the tilted paper puts it.
+    property <length> shift-x: root.scroll-y * Theme.text-tilt.sin();
+    property <length> shift-y: root.scroll-y * (1 - Theme.text-tilt.cos());
+
+    // The paper's tilted top edge (the paper turns clockwise around its center), as a y in this
+    // layer at the given x. The level clip of the note's text view cannot follow it.
+    pure function edge-y(x: length) -> length {
+        return (x - root.paper-w / 2 - root.paper-h / 2 * root.tilt.sin()) * root.tilt.tan()
+            + root.paper-h / 2 * (1 - root.tilt.cos()) + root.scroll-y;
+    }
+
+    // the select-all wash, level (a select-all can only be made while editing), under the words
+    for r in root.runs: Rectangle {
+        visible: root.all-selected && !r.hint;
+        x: r.x;
+        y: r.y;
+        width: r.width + r.size * 0.3;
+        height: r.pitch;
+        background: Theme.selection;
+    }
+
+    // Each resting word is cut along that edge on its own (they are at most a few pixels wide per
+    // step, so the cut follows the tilt within a pixel).
+    for r in root.runs: Rectangle {
+        property <length> pad: 4px;
+        property <length> top: r.y + (r.dy + root.shift-y) * root.tilt-scale - self.pad;
+        property <length> cut: max(self.top, root.edge-y(r.x + (r.dx + root.shift-x) * root.tilt-scale + r.width / 2));
+        visible: r.block != root.composing-block;
+        clip: true;
+        x: r.x + (r.dx + root.shift-x) * root.tilt-scale - self.pad;
+        y: self.cut;
+        width: r.width + 2 * self.pad;
+        height: max(0px, r.pitch + 2 * self.pad - (self.cut - self.top));
+
+        Text {
+            x: parent.pad;
+            y: parent.top - parent.cut + parent.pad;
+            text: r.text;
+            wrap: no-wrap;
+            font-family: Theme.handwriting;
+            font-size: r.size;
+            font-weight: r.bold ? 700 : 400;
+            font-italic: r.italic;
+            line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
+            color: r.hint ? Theme.ink-hint : Theme.ink;
+        }
     }
 
     // underlines, strike-throughs and list bullets: drawn by the app, level while editing
     for r in root.rules: Rectangle {
-        x: r.x + r.dx * root.tilt-scale;
-        y: r.y + r.dy * root.tilt-scale;
+        x: r.x + (r.dx + root.shift-x) * root.tilt-scale;
+        y: r.y + (r.dy + root.shift-y) * root.tilt-scale;
+        visible: r.block != root.composing-block && self.y >= root.edge-y(self.x + self.width / 2);
         width: r.width;
         height: r.height;
         border-radius: min(r.width, r.height) / 2;
         background: Theme.ink;
     }
 
-    VerticalLayout {
+    /// Where the edit fields actually end (the bottom of the last one), in this layer. The note
+    /// scrolls at least this far, even if the app's own layout counted fewer lines.
+    out property <length> fields-bottom: stack.y + stack.preferred-height;
+
+    stack := VerticalLayout {
         x: Theme.text-inset-left;
         y: Theme.text-inset-top;
         width: root.width - Theme.text-inset-left - Theme.text-inset-right;
+        // its own height, never the layer's: a layer too short would squeeze the fields together
+        height: self.preferred-height;
         alignment: start;
         for b[i] in root.blocks: BlockView {
             kind: b.kind;
@@ -76,6 +149,41 @@ export component TextLayer inherits Rectangle {
             img-w: b.img-w;
             img-h: b.img-h;
             paste-image => { return root.paste-image(); }
+            pitch-scale: root.pitch-scale;
+            all-selected: root.all-selected;
+            select-all => { root.all-selected = true; }
+            all-key-ended => { root.all-selected = false; }
+            all-key(e) => {
+                if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta && !e.modifiers.shift) {
+                    if (e.text == "a" || e.text == "\u{1}") { return true; }
+                    if (e.text == "c" || e.text == "\u{3}" || e.text == "x" || e.text == "\u{18}") {
+                        clipboard.text = root.all-text();
+                        clipboard.select-all();
+                        clipboard.copy();
+                        if (e.text == "x" || e.text == "\u{18}") { root.replace-all(""); root.all-selected = false; }
+                        return true;
+                    }
+                    if (e.text == "v" || e.text == "\u{16}") {
+                        clipboard.text = "";
+                        clipboard.paste();
+                        root.replace-all(clipboard.text);
+                        root.all-selected = false;
+                        return true;
+                    }
+                    if (e.text == "z" || e.text == "y" || e.text == "\u{1a}" || e.text == "\u{19}") {
+                        root.all-selected = false;
+                        return false;
+                    }
+                }
+                if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta) {
+                    // another shortcut (new note, or a format: that styles the whole note), the wash stays
+                    return false;
+                }
+                let r = root.all-key(e.text);
+                if (r == 1) { return true; }
+                root.all-selected = false;
+                return r == 2;
+            }
             italic: b.italic;
             autofocus: i == 0;
             show-input: root.flat >= 1;
@@ -88,7 +196,10 @@ export component TextLayer inherits Rectangle {
             focus-offset: root.focus-offset;
             edited(t, c) => { root.block-edited(i, t, c); }
             key(k, o) => { return root.block-key(i, k, o); }
-            caret-moved(o) => { root.caret-moved(i, o); }
+            caret-moved(o, a) => { root.caret-moved(i, o, a); }
+            composing-changed(c) => {
+                if (c) { root.composing-block = i; } else if (root.composing-block == i) { root.composing-block = -1; }
+            }
             focus-changed(f) => {
                 if (f) { root.focused-block = i; root.last-focused = i; root.focus-entered(i); } else if (!root.suspended && root.focused-block == i) { root.focused-block = -1; }
             }

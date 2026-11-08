@@ -2,6 +2,8 @@ import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import "../../fonts/ShadowsIntoLight-Italic.ttf";
 import "../../fonts/ShadowsIntoLight-BoldItalic.ttf";
+// The edit fields' face: the handwriting's advances, no ink (see `caret-font` in theme.slint).
+import "../../fonts/WashiCaret.ttf";
 import { Theme } from "theme.slint";
 
 export enum BlockKind { title, heading, body, list-item, image }
@@ -9,7 +11,7 @@ export enum BlockKind { title, heading, body, list-item, image }
 export struct BlockData {
     kind: BlockKind,
     text: string,
-    /// Drawn in the bold face (headings, and blocks with the bold flag).
+    /// The field's face while an input method composes in it (headings: bold).
     bold: bool,
     /// An image block: the picture (empty while the note is suspended) and its size in pixels,
     /// which sets the block's height (the text-area width times the aspect ratio).
@@ -19,8 +21,11 @@ export struct BlockData {
     italic: bool,
 }
 
-/// One word at rest: upright, at its level place (x, y) plus the offset (dx, dy) that puts it on the tilted baseline.
+/// One word (or a piece of one in a single style): upright, at its level place (x, y) plus the
+/// offset (dx, dy) that puts it on the tilted baseline at rest.
 export struct RunData {
+    /// The block it belongs to.
+    block: int,
     text: string,
     x: length,
     y: length,
@@ -37,6 +42,7 @@ export struct RunData {
 
 /// An underline, a strike-through or a list bullet: a level box plus the offset onto the tilted baseline.
 export struct RuleData {
+    block: int,
     x: length,
     y: length,
     dx: length,
@@ -56,6 +62,13 @@ export component BlockView inherits Rectangle {
     in property <int> img-h: 0;
     /// Ctrl+V: true when the note took it (the clipboard held a picture).
     callback paste-image() -> bool;
+    /// Ctrl+A: select the whole note (the note draws it and handles the keys that follow).
+    callback select-all();
+    /// A key while the whole note is selected: true when the note took it.
+    callback all-key(KeyEvent) -> bool;
+    /// The caret moved while everything was selected: the selection is over.
+    callback all-key-ended();
+    in property <bool> all-selected: false;
     in property <bool> italic: false;
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
@@ -72,16 +85,27 @@ export component BlockView inherits Rectangle {
     in property <int> focus-serial: 0;
     in property <int> focus-offset: 0;
     callback focus-changed(bool);
-    /// The caret of this block's field moved to this byte offset (the note keeps it in view).
-    callback caret-moved(int);
+    /// The caret of this block's field moved, or its selection changed: the caret's byte offset
+    /// and the selection's other end (the same offset when nothing is selected).
+    callback caret-moved(int, int);
+    /// An input method started (true) or ended composing in the field. While it composes, the
+    /// field shows its own text (the words drawn by the note cannot show what is being composed).
+    callback composing-changed(bool);
+    out property <bool> composing: input.preedit-text != "";
+    changed composing => { root.composing-changed(root.composing); }
     /// Bumped to make the field state its focus again (after a suspension).
     in property <int> resync: 0;
     changed resync => { root.focus-changed(input.has-focus); }
 
     property <length> size: kind == BlockKind.title ? Theme.title-size
         : kind == BlockKind.heading ? Theme.heading-size : Theme.body-size;
-    property <length> pitch: kind == BlockKind.title ? Theme.title-pitch
-        : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch;
+    /// The window's scale factor. The field's lines step by whole physical pixels (the text engine
+    /// rounds them), so the pitch is snapped the same way here and in src/textflow.rs; else the
+    /// field's caret and selection drift off the words by a fraction of a pixel per line.
+    in property <float> pitch-scale: 1;
+    property <length> pitch: Math.round((kind == BlockKind.title ? Theme.title-pitch
+        : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch) / 1px * root.pitch-scale) / root.pitch-scale * 1px - 0.001px;
+    // (a hair under: the field rounds its height up, so an exact pitch would add a pixel per block)
 
     property <bool> focused: input.has-focus;
     property <bool> reported: false;
@@ -90,6 +114,8 @@ export component BlockView inherits Rectangle {
         if (input.has-focus != root.reported) {
             root.reported = input.has-focus;
             root.focus-changed(root.reported);
+            // the caret is in this field now: where it is and what is selected
+            if (root.reported) { root.caret-moved(input.cursor-position-byte-offset, input.anchor-position-byte-offset); }
         }
     }
     changed focused => { root.report(); }
@@ -117,22 +143,40 @@ export component BlockView inherits Rectangle {
         wrap: word-wrap;
         single-line: false;
         text: root.text;
-        font-family: Theme.handwriting;
+        // The words (each in its own style) are drawn by the note from its own layout; the field
+        // lays its text out in a blank face with the same advances, so its caret and selection
+        // sit on those words. While an input method composes it shows its own text instead.
+        font-family: root.composing ? Theme.handwriting : Theme.caret-font;
         font-size: root.size;
-        font-weight: root.bold ? 700 : 400;
-        font-italic: root.italic;
+        font-weight: root.composing && root.bold ? 700 : 400;
+        font-italic: root.composing && root.italic;
         line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
         color: Theme.ink;
+        // see-through: the words under it stay readable
+        selection-background-color: Theme.selection-over;
+        selection-foreground-color: Theme.ink;
         // hidden, not removed: a click still lands in the field and starts editing
         opacity: root.show-input ? 1 : 0;
         // an image has no text field
         visible: root.kind != BlockKind.image;
         edited => { root.edited(self.text, self.cursor-position-byte-offset); }
         changed cursor-position-byte-offset => {
-            if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset); }
+            // a click or an arrow ends the select-all
+            if (root.all-selected && self.has-focus) { root.all-key-ended(); }
+            if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset, self.anchor-position-byte-offset); }
+        }
+        changed anchor-position-byte-offset => {
+            if (self.has-focus) { root.caret-moved(self.cursor-position-byte-offset, self.anchor-position-byte-offset); }
         }
         key-pressed(e) => {
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift && (e.text == "v" || e.text == "\u{16}") && root.paste-image()) {
+                return accept;
+            }
+            if (root.all-selected && root.all-key(e)) {
+                return accept;
+            }
+            if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift && !e.modifiers.meta && (e.text == "a" || e.text == "\u{1}")) {
+                root.select-all();
                 return accept;
             }
             // Ctrl+Z undoes, Ctrl+Y (or Ctrl+Shift+Z) redoes: the note keeps the history, not the field

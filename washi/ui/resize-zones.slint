@@ -12,9 +12,6 @@ export global ResizeZoneMetrics {
     out property <length> thickness: 8px;
     // Side of a corner zone, centered on the paper's corner.
     out property <length> corner: 16px;
-    // Height of the paper's top margin, measured from its top edge: grabbing it moves the note.
-    // It stays clear of the text, which starts below it.
-    out property <length> top-margin: 24px;
 }
 
 // Direction codes, shared with `washi::platform::ResizeEdge::from_code`:
@@ -51,7 +48,7 @@ component MoveArea inherits TouchArea {
     }
 }
 
-// Fills the window. Drag the pink tape or the paper's top margin to move; the eight zones on the
+// Fills the window. Drag either tape to move; the eight zones on the
 // paper's edges and corners resize.
 export component WindowHandles {
     callback start-move();
@@ -74,10 +71,15 @@ export component WindowHandles {
         -(root.r - root.l) / 2 + PaperTheme.tape-pink-offset-u, -(root.b - root.t) / 2 + PaperTheme.tape-pink-offset-v);
     property <length> tape-cy: PaperGeometry.y(root.width / 2, root.height / 2,
         -(root.r - root.l) / 2 + PaperTheme.tape-pink-offset-u, -(root.b - root.t) / 2 + PaperTheme.tape-pink-offset-v);
+    // The blue tape's box (the same image size, at the opposite corner).
+    property <length> blue-cx: PaperGeometry.x(root.width / 2, root.height / 2,
+        (root.r - root.l) / 2 + PaperTheme.tape-blue-offset-u, (root.b - root.t) / 2 + PaperTheme.tape-blue-offset-v);
+    property <length> blue-cy: PaperGeometry.y(root.width / 2, root.height / 2,
+        (root.r - root.l) / 2 + PaperTheme.tape-blue-offset-u, (root.b - root.t) / 2 + PaperTheme.tape-blue-offset-v);
     // Where the top edge zone starts: just past the tape, so the tape stays one grip.
     property <length> top-zone-x: root.tape-cx + root.tape-w / 2;
 
-    // Moving: the pink tape, and the top margin (the paper's top inset, below the top edge zone).
+    // Moving: only the two tapes. Nothing over the text may start a move, or text can't be selected.
     MoveArea {
         x: root.tape-cx - root.tape-w / 2;
         y: root.tape-cy - root.tape-h / 2;
@@ -88,10 +90,10 @@ export component WindowHandles {
         pointer-over => { root.pointer-over(); }
     }
     MoveArea {
-        x: root.l + root.th;
-        y: root.t + root.th / 2;
-        width: root.r - root.l - 2 * root.th;
-        height: ResizeZoneMetrics.top-margin - root.th / 2;
+        x: root.blue-cx - root.tape-w / 2;
+        y: root.blue-cy - root.tape-h / 2;
+        width: root.tape-w;
+        height: root.tape-h;
         start => { root.start-move(); }
         right-click(x, y) => { root.right-click(x, y); }
         pointer-over => { root.pointer-over(); }

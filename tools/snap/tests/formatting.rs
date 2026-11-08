@@ -1,5 +1,7 @@
-//! Ticket 11: the toolbar buttons and the shortcuts format the paragraph that holds the caret; the
-//! buttons show that paragraph's formats; `# ` and `- ` make a heading or list item. Real clicks and
+//! Ticket 11: the toolbar buttons and the shortcuts format the selected text (the word at the
+//! caret, or what is typed next, with nothing selected; the whole note after a select-all) and the
+//! list button the paragraph holding the caret; the buttons show the selection's formats; `# ` and
+//! `- ` make a heading or list item. Real clicks and
 //! key events through the app harness; the look is read from snapshots.
 
 use slint::platform::Key;
@@ -41,25 +43,34 @@ fn click_button(h: &mut Harness, k: usize) {
 }
 
 #[test]
-fn clicking_b_bolds_the_paragraph_with_the_caret_and_b_shows_active() {
+fn clicking_b_bolds_the_selected_text_and_b_shows_active() {
     let mut h = note("title\nbody text");
     h.press(0, Key::DownArrow); // the caret goes to the body
     assert_eq!(h.toolbar_active(0), [false; 5]);
+    h.press_shift(0, Key::RightArrow, 4); // "body"
+    click_button(&mut h, 0);
+    assert_eq!(h.note_text(0), "# title\n**body** text");
+    assert_eq!(h.toolbar_active(0), [true, false, false, false, false]);
+    // the rest of the paragraph too: part of the selection is bold, so all of it becomes bold
+    h.press(0, Key::Home);
+    h.press_shift(0, Key::End, 1);
+    assert!(!h.toolbar_active(0)[0], "not all of the selection is bold");
     click_button(&mut h, 0);
     assert_eq!(h.note_text(0), "# title\n**body text**");
-    assert_eq!(h.toolbar_active(0), [true, false, false, false, false]);
-    // and the caret is still in the body: typing goes there
+    // and the caret is still in the body: typing goes there, in the style before it
     h.press(0, Key::End);
     h.type_text(0, "!");
     assert_eq!(h.note_text(0), "# title\n**body text!**");
 }
 
 #[test]
-fn b_follows_the_caret_to_a_paragraph_that_is_not_bold() {
+fn b_follows_the_caret_to_text_that_is_not_bold() {
     let mut h = note("title\nbody text");
     h.press(0, Key::DownArrow);
+    h.press_shift(0, Key::End, 1);
     click_button(&mut h, 0);
     assert!(h.toolbar_active(0)[0]);
+    h.press(0, Key::Home);
     h.press(0, Key::UpArrow);
     assert!(!h.toolbar_active(0)[0], "the title is not bold");
     h.press(0, Key::DownArrow);
@@ -81,6 +92,7 @@ fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
     for (k, stored) in cases {
         let mut h = note("title\nbody");
         h.press(0, Key::DownArrow);
+        h.press_shift(0, Key::End, 1);
         click_button(&mut h, k);
         assert_eq!(h.note_text(0), format!("# title\n{stored}"), "button {k}");
         let mut active = [false; 5];
@@ -93,9 +105,10 @@ fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
 }
 
 #[test]
-fn the_shortcuts_format_the_paragraph_with_the_toolbar_hidden() {
+fn the_shortcuts_format_the_selection_with_the_toolbar_hidden() {
     let mut h = note("title\nbody");
     h.press(0, Key::DownArrow);
+    h.press_shift(0, Key::End, 1);
     assert_eq!(h.toolbar_opacity(0), 0.0);
     h.press_ctrl(0, 'b');
     assert_eq!(h.note_text(0), "# title\n**body**");
@@ -120,9 +133,61 @@ fn the_shortcuts_format_the_paragraph_with_the_toolbar_hidden() {
 }
 
 #[test]
+fn with_nothing_selected_a_format_takes_the_word_at_the_caret() {
+    let mut h = note("title\nbody text");
+    h.press(0, Key::DownArrow);
+    h.press_n(0, Key::RightArrow, 2); // inside "body"
+    h.press_ctrl(0, 'b');
+    assert_eq!(h.note_text(0), "# title\n**body** text");
+    assert!(h.toolbar_active(0)[0]);
+    h.press_ctrl(0, 'b');
+    assert_eq!(h.note_text(0), "# title\nbody text");
+}
+
+#[test]
+fn outside_a_word_a_format_applies_to_what_is_typed_next() {
+    let mut h = note("title\nbody");
+    h.press(0, Key::DownArrow);
+    h.press(0, Key::End);
+    h.press_ctrl(0, 'b');
+    assert_eq!(h.note_text(0), "# title\nbody", "nothing to style yet");
+    assert!(h.toolbar_active(0)[0], "B shows what typing will do");
+    h.type_text(0, " bold");
+    assert_eq!(h.note_text(0), "# title\nbody** bold**");
+    // off again, and Enter carries the style on
+    h.press_ctrl(0, 'b');
+    h.type_text(0, "!");
+    assert_eq!(h.note_text(0), "# title\nbody** bold**!");
+    h.press_ctrl(0, 'i');
+    h.press_enter(0);
+    assert!(h.toolbar_active(0)[1], "the new paragraph goes on in italic");
+    h.type_text(0, "x");
+    assert_eq!(h.note_text(0), "# title\nbody** bold**!\n*x*");
+    // moving the caret forgets a style asked for
+    h.press(0, Key::End);
+    h.press_ctrl(0, 'u');
+    h.press(0, Key::Home);
+    h.press(0, Key::End);
+    h.type_text(0, "y");
+    assert_eq!(h.note_text(0), "# title\nbody** bold**!\n*xy*");
+}
+
+#[test]
+fn after_a_select_all_a_format_styles_the_whole_note() {
+    let mut h = note("title\nbody");
+    h.press_ctrl(0, 'a');
+    h.press_ctrl(0, 'b');
+    assert_eq!(h.note_text(0), "# **title**\n**body**");
+    assert!(h.toolbar_active(0)[0]);
+    h.press_ctrl(0, 'b');
+    assert_eq!(h.note_text(0), "# title\nbody");
+}
+
+#[test]
 fn a_shortcut_does_not_type_its_letter_or_cut() {
     let mut h = note("title\nbody");
     h.press(0, Key::DownArrow);
+    h.press_shift(0, Key::End, 1);
     h.press_ctrl(0, 'b');
     h.press_ctrl_shift(0, 'x');
     assert!(h.note_text(0).contains("body"), "{:?}", h.note_text(0));
@@ -131,7 +196,8 @@ fn a_shortcut_does_not_type_its_letter_or_cut() {
 #[test]
 fn headings_and_titles_take_the_styles_but_only_body_becomes_a_list_item() {
     let mut h = note("title\nbody");
-    h.press_ctrl(0, 'i'); // in the title
+    h.press_shift(0, Key::End, 1); // in the title
+    h.press_ctrl(0, 'i');
     assert_eq!(h.note_text(0), "# *title*\nbody");
     h.press_ctrl_shift(0, 'l');
     assert_eq!(h.note_text(0), "# *title*\nbody", "a title is not a list item");
@@ -167,10 +233,14 @@ fn typing_hash_space_or_dash_space_at_the_start_of_a_paragraph_makes_a_heading_o
 fn formats_are_saved_and_come_back_after_a_restart() {
     let mut h = note("title\nbody\nmore");
     h.press(0, Key::DownArrow);
+    h.press_shift(0, Key::End, 1);
     click_button(&mut h, 0);
     click_button(&mut h, 2);
+    h.press(0, Key::End);
     h.press(0, Key::DownArrow);
     click_button(&mut h, 4);
+    h.press(0, Key::End);
+    h.press_shift(0, Key::Home, 1);
     h.press_ctrl(0, 'i');
     h.advance(ms(500));
     let want = "# title\n<u>**body**</u>\n- *more*";
@@ -242,6 +312,17 @@ fn a_list_item_has_a_bullet_left_of_its_text() {
     assert_eq!(left_ink(&shot("t\nitem", true)), 0);
     assert!(left_ink(&shot("t\n- item", true)) >= 8, "no bullet");
     assert!(left_ink(&shot("t\n- item", false)) >= 8, "no bullet at rest");
+}
+
+#[test]
+fn a_bold_word_is_bold_while_editing_and_at_rest_and_the_rest_of_the_line_is_not() {
+    for editing in [true, false] {
+        let plain = shot("t\nplain words then", editing);
+        let mixed = shot("t\nplain **words** then", editing);
+        let all = shot("t\n**plain words then**", editing);
+        assert!(ink_count(&mixed) > ink_count(&plain), "editing {editing}: the bold word adds ink");
+        assert!(ink_count(&mixed) < ink_count(&all), "editing {editing}: the plain words stay thin");
+    }
 }
 
 #[test]

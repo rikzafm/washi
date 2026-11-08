@@ -39,7 +39,20 @@ rendered snapshot, not against this score.
   synthetic italic uses. Made with `tools/fonts.py slant`. This is for italic text in note blocks; it is not
   scored against the mockup (the mockup has no italic text).
 
-So the app has all four faces for text: Regular, Bold, Italic, Bold Italic, each a real file.
+So the app has all four faces for text: Regular, Bold, Italic, Bold Italic, each a real file. All four have the
+same advances (emboldening and shearing keep them), so a line breaks in the same places whatever the styles of
+its characters.
+
+### The edit fields' face (`WashiCaret.ttf`)
+
+Bold, italic, underline and strike apply to any stretch of text, but a Slint `TextInput` draws its whole text in
+one face. So the note draws the words itself while editing too (from its own layout, each piece in its face), and
+the fields lay their text out in **Washi Caret**: Shadows Into Light with every outline removed and every metric
+kept. The field still places and draws the caret, the selection and the line breaks (and blinks and handles the
+input method) exactly over the drawn words, but shows no ink of its own. While an input method composes, the
+field switches to the real face for the moment. Made with
+`python tools/fonts.py blank fonts/ShadowsIntoLight.ttf fonts/WashiCaret.ttf "Washi Caret"` (OFL 1.1, renamed as
+a derivative).
 
 ### Toolbar glyphs
 

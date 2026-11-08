@@ -5,6 +5,7 @@
   python tools/fonts.py subset <src> <dst>  subset every .ttf in <src> into <dst> (Latin + Latin-1 + punctuation)
   python tools/fonts.py embolden <src> <dst> <ratio> <family>        real bold face from outlines
   python tools/fonts.py slant <src> <dst> <skew> <family> plain|bold  real italic face by shearing
+  python tools/fonts.py blank <src> <dst> <family>               same advances, no outlines (edit fields)
 
 `subset` needs fonttools:  pip install fonttools
 """
@@ -208,7 +209,35 @@ def slant(src, dst, skew, family, bold):
     print("wrote", dst, os.path.getsize(dst), "bytes")
 
 
+def blank(src, dst, family):
+    """A face with the advances of `src` and no ink: the edit fields lay their text out (caret,
+    selection, line breaks) in it while the app draws the styled words itself. Needs fonttools."""
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(src)
+    glyf = font["glyf"]
+    for name in font.getGlyphOrder():
+        glyf[name] = TTGlyphPen(None).glyph()
+    for rec in font["name"].names:
+        if rec.nameID in (1, 16):
+            rec.string = family
+        elif rec.nameID in (2, 17):
+            rec.string = "Regular"
+        elif rec.nameID == 4:
+            rec.string = family
+        elif rec.nameID == 6:
+            rec.string = family.replace(" ", "") + "-Regular"
+        elif rec.nameID == 3:
+            rec.string = family.replace(" ", "") + "-Regular;blank"
+    font.save(dst)
+    print("wrote", dst, os.path.getsize(dst), "bytes")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 5 and sys.argv[1] == "blank":
+        blank(sys.argv[2], sys.argv[3], sys.argv[4])
+        sys.exit(0)
     if len(sys.argv) == 6 and sys.argv[1] == "embolden":
         embolden(sys.argv[2], sys.argv[3], float(sys.argv[4]), sys.argv[5])
     elif len(sys.argv) == 7 and sys.argv[1] == "slant":
