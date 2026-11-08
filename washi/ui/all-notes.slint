@@ -42,7 +42,7 @@ component SidebarRow inherits Rectangle {
     property <Frame> pill-frame: {
         w: 603.0,
         h: 625.0,
-        cx: 124.0,
+        cx: 124.8,
         cy: root.row-cy,
         cs: Math.cos(-1.0deg),
         sn: Math.sin(-1.0deg),
@@ -56,7 +56,7 @@ component SidebarRow inherits Rectangle {
         w: 188.0 + 2.0 * growth;
         h: 35.0 + 2.0 * growth;
         r: 8.0 + growth;
-        fill: #00000008;
+        fill: #00000006;
     }
 
     if root.selected : TRect {
@@ -75,7 +75,7 @@ component SidebarRow inherits Rectangle {
         width: 170px;
         text: root.item.title;
         font-family: "Shadows Into Light";
-        font-size: 15.5px;
+        font-size: 15.2px;
         font-weight: root.selected ? 700 : 400;
         color: #2B2F36;
         overflow: elide;
@@ -119,12 +119,12 @@ export component AllNotesWindow inherits Window {
     callback cancel-delete();
     callback confirm-delete();
 
-    property <float> closed-header-y: 217.0 + root.open-notes.length * 42.0;
-    property <float> new-button-cy: root.closed-header-y + 45.5 + root.closed-notes.length * 38.0;
+    property <float> closed-header-y: 225.0 + root.open-notes.length * 38.0;
+    property <float> new-button-cy: root.closed-header-y + 46.0 + root.closed-notes.length * 38.0;
     property <Frame> new-button-frame: {
         w: 603.0,
         h: 625.0,
-        cx: 83.5,
+        cx: 84.0,
         cy: root.new-button-cy,
         cs: Math.cos(-1.0deg),
         sn: Math.sin(-1.0deg),
@@ -132,8 +132,8 @@ export component AllNotesWindow inherits Window {
     property <Frame> paper-frame: {
         w: 603.0,
         h: 625.0,
-        cx: 411.4,
-        cy: 311.1,
+        cx: 412.1,
+        cy: 311.6,
         cs: Math.cos(1.5deg),
         sn: Math.sin(1.5deg),
     };
@@ -158,8 +158,8 @@ export component AllNotesWindow inherits Window {
 
     // --- Left Sidebar ("Notes") ---
     Text {
-        x: 33px;
-        y: 114px;
+        x: 33.8px;
+        y: 112px;
         text: "Notes";
         font-family: "Shadows Into Light";
         font-size: 30px;
@@ -167,30 +167,39 @@ export component AllNotesWindow inherits Window {
     }
 
     Text {
-        x: 33px;
-        y: 161px;
-        text: root.open-count + " open · " + root.closed-count + " closed";
+        x: 33.8px;
+        y: 162px;
+        text: root.open-count + " open · ";
         font-family: "Shadows Into Light";
-        font-size: 13px;
+        font-size: 12.6px;
         color: #5B616B;
     }
 
     Text {
-        x: 39px;
+        x: 79.5px;
+        y: 161.2px;
+        text: root.closed-count + " closed";
+        font-family: "Shadows Into Light";
+        font-size: 12.6px;
+        color: #5B616B;
+    }
+
+    Text {
+        x: 39.5px;
         y: 195px;
         text: "OPEN";
         font-family: "Shadows Into Light";
-        font-size: 13px;
-        letter-spacing: 0.5px;
+        font-size: 12.6px;
+        letter-spacing: 0.4px;
         color: #5B616B;
     }
 
     for item[i] in root.open-notes: SidebarRow {
         item: item;
         selected: item.id == root.selected-note-id;
-        row-cy: 234.5 + i * 42.0;
-        text-x: 41px;
-        text-y: (222.0 + i * 42.0) * 1px;
+        row-cy: 234.6 + i * 38.0;
+        text-x: (40.5 + i * 0.5) * 1px;
+        text-y: (223.8 + i * 38.0) * 1px;
         clicked => {
             root.confirming-delete = false;
             root.select-note(item.id);
@@ -198,12 +207,12 @@ export component AllNotesWindow inherits Window {
     }
 
     Text {
-        x: 41px;
-        y: root.closed-header-y * 1px;
+        x: 41.5px;
+        y: (root.closed-header-y - 0.5) * 1px;
         text: "CLOSED";
         font-family: "Shadows Into Light";
-        font-size: 13px;
-        letter-spacing: 0.5px;
+        font-size: 12.6px;
+        letter-spacing: 0.3px;
         color: #5B616B;
     }
 
@@ -211,8 +220,8 @@ export component AllNotesWindow inherits Window {
         item: item;
         selected: item.id == root.selected-note-id;
         row-cy: root.closed-header-y + 39.5 + j * 38.0;
-        text-x: 42px;
-        text-y: (root.closed-header-y + 26.0 + j * 38.0) * 1px;
+        text-x: (42.5 + j * 0.66) * 1px;
+        text-y: (root.closed-header-y + 28.0 + j * 38.0) * 1px;
         clicked => {
             root.confirming-delete = false;
             root.select-note(item.id);
@@ -222,32 +231,32 @@ export component AllNotesWindow inherits Window {
     // "+ New note" button
     TRect {
         f: root.new-button-frame;
-        u0: -45.5;
-        v0: -15.0;
-        w: 91.0;
-        h: 30.0;
-        r: 8.0;
+        u0: -45.0;
+        v0: -15.5;
+        w: 90.0;
+        h: 31.0;
+        r: 7.5;
         fill: #2B2F36;
     }
 
     Text {
-        x: (83.5 - 45.5) * 1px;
-        y: (root.new-button-cy - 15.0) * 1px;
-        width: 91px;
-        height: 30px;
+        x: (84.0 - 45.0) * 1px;
+        y: (root.new-button-cy - 15.5) * 1px;
+        width: 90px;
+        height: 31px;
         text: "+ New note";
         font-family: "Shadows Into Light";
-        font-size: 14.5px;
+        font-size: 15.0px;
         color: #FFFFFD;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
     TouchArea {
-        x: (83.5 - 45.5) * 1px;
-        y: (root.new-button-cy - 15.0) * 1px;
-        width: 91px;
-        height: 30px;
+        x: (84.0 - 45.0) * 1px;
+        y: (root.new-button-cy - 15.5) * 1px;
+        width: 90px;
+        height: 31px;
         mouse-cursor: pointer;
         clicked => {
             root.confirming-delete = false;
@@ -262,8 +271,8 @@ export component AllNotesWindow inherits Window {
         viewbox-width: root.width / 1px;
         viewbox-height: root.height / 1px;
         commands: PaperGeometry.quad(
-            411.4px, 311.1px + PaperTheme.shadow-offset-y,
-            167px + growth, 209px + growth);
+            412.1px, 311.6px + PaperTheme.shadow-offset-y,
+            167.4px + growth, 209.4px + growth);
         fill: PaperTheme.shadow-colors[i];
     }
 
@@ -272,13 +281,13 @@ export component AllNotesWindow inherits Window {
         height: root.height;
         viewbox-width: root.width / 1px;
         viewbox-height: root.height / 1px;
-        commands: PaperGeometry.quad(411.4px, 311.1px, 167px, 209px);
+        commands: PaperGeometry.quad(412.1px, 311.6px, 167.4px, 209.4px);
         fill: #FFFFFD;
     }
 
     for r in root.status-runs: Text {
-        x: (244.4 + r.u + r.dx) * 1px;
-        y: (102.1 + r.v + r.dy) * 1px;
+        x: (244.7 + r.u + r.dx) * 1px;
+        y: (104.1 + r.v + r.dy) * 1px;
         text: r.text;
         wrap: no-wrap;
         font-family: "Shadows Into Light";
@@ -289,8 +298,8 @@ export component AllNotesWindow inherits Window {
     }
 
     for r in root.preview-runs: Text {
-        x: (244.4 + r.u + r.dx) * 1px;
-        y: (102.1 + r.v + r.dy) * 1px;
+        x: (244.7 + r.u + r.dx) * 1px;
+        y: (102.9 + r.v + r.dy) * 1px;
         text: r.text;
         wrap: no-wrap;
         font-family: "Shadows Into Light";
@@ -307,20 +316,20 @@ export component AllNotesWindow inherits Window {
         width: 603px;
         height: 625px;
 
-        // 1. Open / Focus on desktop (u_center = 39.5, du = -127.5, dv = 181.5)
+        // 1. Open / Focus on desktop (du = -127.5, dv = 181.5)
         TRect {
             f: root.paper-frame;
-            u0: -127.5 - 15.5;
-            v0: 181.5 - 15.5;
-            w: 31.0;
-            h: 31.0;
-            r: 8.0;
+            u0: -127.5 - 15.2;
+            v0: 181.2 - 15.2;
+            w: 30.4;
+            h: 30.4;
+            r: 7.5;
             fill: root.selected-note-open ? #F0F0EE : (open-hit.has-hover ? #F0F0EE : transparent);
         }
 
         Path {
-            x: Tilt.x(root.paper-frame, -127.5, 181.5) * 1px - 8px;
-            y: Tilt.y(root.paper-frame, -127.5, 181.5) * 1px - 8px;
+            x: Tilt.x(root.paper-frame, -127.0, 181.8) * 1px - 8px;
+            y: Tilt.y(root.paper-frame, -127.0, 181.8) * 1px - 8px;
             width: 16px;
             height: 16px;
             viewbox-width: 24;
@@ -328,7 +337,7 @@ export component AllNotesWindow inherits Window {
             commands: "M9 9h10v10H9zM5 15H4V4h11v1";
             fill: transparent;
             stroke: root.selected-note-open ? #2B2F36 : #5B616B;
-            stroke-width: 1.5px;
+            stroke-width: 1.3px;
             stroke-line-cap: round;
             stroke-line-join: round;
         }
@@ -342,10 +351,10 @@ export component AllNotesWindow inherits Window {
             clicked => { root.open-or-focus-note(); }
         }
 
-        // 2. Close (×) (u_center = 76.5, du = -90.5, dv = 181.5)
+        // 2. Close (×) (du = -91.0, dv = 181.8)
         TRect {
             f: root.paper-frame;
-            u0: -90.5 - 15.5;
+            u0: -91.0 - 15.5;
             v0: 181.5 - 15.5;
             w: 31.0;
             h: 31.0;
@@ -354,8 +363,8 @@ export component AllNotesWindow inherits Window {
         }
 
         Path {
-            x: Tilt.x(root.paper-frame, -90.5, 181.5) * 1px - 7px;
-            y: Tilt.y(root.paper-frame, -90.5, 181.5) * 1px - 7px;
+            x: Tilt.x(root.paper-frame, -91.2, 181.9) * 1px - 7px;
+            y: Tilt.y(root.paper-frame, -91.2, 181.9) * 1px - 7px;
             width: 14px;
             height: 14px;
             viewbox-width: 24;
@@ -363,23 +372,23 @@ export component AllNotesWindow inherits Window {
             commands: "M6 6l12 12M18 6L6 18";
             fill: transparent;
             stroke: #5B616B;
-            stroke-width: 1.6px;
+            stroke-width: 1.35px;
             stroke-line-cap: round;
         }
 
         close-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, -90.5, 181.5) * 1px - 15.5px;
-            y: Tilt.y(root.paper-frame, -90.5, 181.5) * 1px - 15.5px;
+            x: Tilt.x(root.paper-frame, -91.0, 181.5) * 1px - 15.5px;
+            y: Tilt.y(root.paper-frame, -91.0, 181.5) * 1px - 15.5px;
             width: 31px;
             height: 31px;
             mouse-cursor: pointer;
             clicked => { root.close-note(); }
         }
 
-        // 3. Export (↓) (u_center = 112.5, du = -54.5, dv = 181.5)
+        // 3. Export (↓) (du = -55.0, dv = 182.0)
         TRect {
             f: root.paper-frame;
-            u0: -54.5 - 15.5;
+            u0: -55.0 - 15.5;
             v0: 181.5 - 15.5;
             w: 31.0;
             h: 31.0;
@@ -388,33 +397,33 @@ export component AllNotesWindow inherits Window {
         }
 
         Path {
-            x: Tilt.x(root.paper-frame, -54.5, 181.5) * 1px - 7.5px;
-            y: Tilt.y(root.paper-frame, -54.5, 181.5) * 1px - 7.5px;
-            width: 15px;
-            height: 15px;
+            x: 344px;
+            y: 483.2px;
+            width: 16px;
+            height: 16px;
             viewbox-width: 24;
             viewbox-height: 24;
-            commands: "M12 4v11M7.5 11l4.5 4.5 4.5-4.5M5 19.5h14";
+            commands: "M12 4.5v10M8 10.5l4 4 4-4M5.5 19.5h13";
             fill: transparent;
             stroke: #5B616B;
-            stroke-width: 1.6px;
+            stroke-width: 1.35px;
             stroke-line-cap: round;
             stroke-line-join: round;
         }
 
         export-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, -54.5, 181.5) * 1px - 15.5px;
-            y: Tilt.y(root.paper-frame, -54.5, 181.5) * 1px - 15.5px;
+            x: Tilt.x(root.paper-frame, -55.0, 181.5) * 1px - 15.5px;
+            y: Tilt.y(root.paper-frame, -55.0, 181.5) * 1px - 15.5px;
             width: 31px;
             height: 31px;
             mouse-cursor: pointer;
             clicked => { root.export-note(); }
         }
 
-        // 4. Delete (🗑) (u_center = 149.0, du = -18.0, dv = 181.5)
+        // 4. Delete (🗑) (du = -18.5, dv = 182.0)
         TRect {
             f: root.paper-frame;
-            u0: -18.0 - 15.5;
+            u0: -18.5 - 15.5;
             v0: 181.5 - 15.5;
             w: 31.0;
             h: 31.0;
@@ -423,8 +432,8 @@ export component AllNotesWindow inherits Window {
         }
 
         Path {
-            x: Tilt.x(root.paper-frame, -18.0, 181.5) * 1px - 8px;
-            y: Tilt.y(root.paper-frame, -18.0, 181.5) * 1px - 8px;
+            x: Tilt.x(root.paper-frame, -18.3, 182.0) * 1px - 8px;
+            y: Tilt.y(root.paper-frame, -18.3, 182.0) * 1px - 8px;
             width: 16px;
             height: 16px;
             viewbox-width: 24;
@@ -432,14 +441,14 @@ export component AllNotesWindow inherits Window {
             commands: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13";
             fill: transparent;
             stroke: #8A1F2B;
-            stroke-width: 1.5px;
+            stroke-width: 1.3px;
             stroke-line-cap: round;
             stroke-line-join: round;
         }
 
         del-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, -18.0, 181.5) * 1px - 15.5px;
-            y: Tilt.y(root.paper-frame, -18.0, 181.5) * 1px - 15.5px;
+            x: Tilt.x(root.paper-frame, -18.5, 181.5) * 1px - 15.5px;
+            y: Tilt.y(root.paper-frame, -18.5, 181.5) * 1px - 15.5px;
             width: 31px;
             height: 31px;
             mouse-cursor: pointer;
@@ -457,65 +466,65 @@ export component AllNotesWindow inherits Window {
         width: 603px;
         height: 625px;
 
-        // "Delete for good?" along the 1.5deg paper baseline (u = 25px, v = 378px)
+        // "Delete for good?" along the 1.5deg paper baseline
         Text {
-            x: (Tilt.x(root.paper-frame, -124.0, 180.0) - 18.0) * 1px;
-            y: (Tilt.y(root.paper-frame, -124.0, 180.0) - 11.0) * 1px;
+            x: (Tilt.x(root.paper-frame, -124.7, 180.0) - 18.0) * 1px;
+            y: (Tilt.y(root.paper-frame, -124.7, 180.0) - 10.7) * 1px;
             text: "Delete";
             wrap: no-wrap;
             font-family: "Shadows Into Light";
-            font-size: 15.5px;
+            font-size: 15.4px;
             color: #2B2F36;
         }
 
         Text {
-            x: (Tilt.x(root.paper-frame, -94.0, 180.0) - 8.5) * 1px;
-            y: (Tilt.y(root.paper-frame, -94.0, 180.0) - 11.0) * 1px;
+            x: (Tilt.x(root.paper-frame, -90.7, 180.0) - 8.5) * 1px;
+            y: (Tilt.y(root.paper-frame, -90.7, 180.0) - 11.0) * 1px;
             text: "for";
             wrap: no-wrap;
             font-family: "Shadows Into Light";
-            font-size: 15.5px;
+            font-size: 15.4px;
             color: #2B2F36;
         }
 
         Text {
-            x: (Tilt.x(root.paper-frame, -66.0, 180.0) - 16.0) * 1px;
-            y: (Tilt.y(root.paper-frame, -66.0, 180.0) - 11.0) * 1px;
+            x: (Tilt.x(root.paper-frame, -61.2, 180.0) - 16.0) * 1px;
+            y: (Tilt.y(root.paper-frame, -61.2, 180.0) - 10.7) * 1px;
             text: "good?";
             wrap: no-wrap;
             font-family: "Shadows Into Light";
-            font-size: 15.5px;
+            font-size: 15.4px;
             color: #2B2F36;
         }
 
-        // "Keep" button (u0 = 191 - 167 = 24.0, v0 = 376 - 209 = 167.0, w = 53, h = 31, r = 7.5)
+        // "Keep" button
         TRect {
             f: root.paper-frame;
-            u0: 24.0;
-            v0: 167.0;
-            w: 53.0;
-            h: 31.0;
+            u0: 23.3;
+            v0: 166.5;
+            w: 54.0;
+            h: 30.5;
             r: 7.5;
             fill: keep-hit.pressed ? #E4E4E2 : (keep-hit.has-hover ? #EAEAE8 : #F0F0EE);
         }
 
         Text {
-            x: Tilt.x(root.paper-frame, 50.5, 182.5) * 1px - 26.5px;
-            y: Tilt.y(root.paper-frame, 50.5, 182.5) * 1px - 15.5px;
-            width: 53px;
-            height: 31px;
+            x: Tilt.x(root.paper-frame, 50.8, 181.2) * 1px - 27.0px;
+            y: Tilt.y(root.paper-frame, 50.8, 181.2) * 1px - 15.5px;
+            width: 54px;
+            height: 30px;
             text: "Keep";
             font-family: "Shadows Into Light";
-            font-size: 14.5px;
+            font-size: 14.2px;
             color: #2B2F36;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
 
         keep-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, 50.5, 182.5) * 1px - 26.5px;
-            y: Tilt.y(root.paper-frame, 50.5, 182.5) * 1px - 15.5px;
-            width: 53px;
+            x: Tilt.x(root.paper-frame, 50.3, 181.8) * 1px - 27.0px;
+            y: Tilt.y(root.paper-frame, 50.3, 181.8) * 1px - 15.2px;
+            width: 54px;
             height: 31px;
             mouse-cursor: pointer;
             clicked => {
@@ -524,34 +533,34 @@ export component AllNotesWindow inherits Window {
             }
         }
 
-        // "Delete" button (u0 = 251 - 167 = 84.0, v0 = 376 - 209 = 167.0, w = 58, h = 31, r = 7.5)
+        // "Delete" button
         TRect {
             f: root.paper-frame;
-            u0: 84.0;
-            v0: 167.0;
-            w: 58.0;
-            h: 31.0;
+            u0: 83.3;
+            v0: 166.5;
+            w: 59.5;
+            h: 30.5;
             r: 7.5;
             fill: confirm-hit.pressed ? #721923 : (confirm-hit.has-hover ? #9B2331 : #8A1F2B);
         }
 
         Text {
-            x: Tilt.x(root.paper-frame, 113.0, 182.5) * 1px - 29px;
-            y: Tilt.y(root.paper-frame, 113.0, 182.5) * 1px - 15.5px;
-            width: 58px;
-            height: 31px;
+            x: Tilt.x(root.paper-frame, 112.2, 180.5) * 1px - 29.5px;
+            y: Tilt.y(root.paper-frame, 112.2, 180.5) * 1px - 15.5px;
+            width: 59px;
+            height: 30px;
             text: "Delete";
             font-family: "Shadows Into Light";
-            font-size: 14.5px;
+            font-size: 13.8px;
             color: #FFFFFD;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
 
         confirm-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, 113.0, 182.5) * 1px - 29px;
-            y: Tilt.y(root.paper-frame, 113.0, 182.5) * 1px - 15.5px;
-            width: 58px;
+            x: Tilt.x(root.paper-frame, 113.0, 181.8) * 1px - 29.5px;
+            y: Tilt.y(root.paper-frame, 113.0, 181.8) * 1px - 15.2px;
+            width: 59px;
             height: 31px;
             mouse-cursor: pointer;
             clicked => {
@@ -562,17 +571,17 @@ export component AllNotesWindow inherits Window {
 
     Image {
         source: @image-url("assets/tape-pink.png");
-        width: self.source.width / 3 * 1px;
-        height: self.source.height / 3 * 1px;
-        x: 281.2px - self.width / 2;
-        y: 111.1px - self.height / 2;
+        x: 236px;
+        y: 71px;
+        width: 79px;
+        height: 63px;
     }
 
     Image {
         source: @image-url("assets/tape-blue.png");
-        width: self.source.width / 3 * 1px;
-        height: self.source.height / 3 * 1px;
-        x: 545.2px - self.width / 2;
-        y: 518.9px - self.height / 2;
+        x: 508px;
+        y: 487px;
+        width: 80px;
+        height: 64px;
     }
 }

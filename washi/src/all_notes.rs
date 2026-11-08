@@ -13,10 +13,10 @@ use std::rc::Rc;
 pub const ALL_NOTES_WIDTH: f32 = 603.0;
 pub const ALL_NOTES_HEIGHT: f32 = 625.0;
 
-pub const PREVIEW_PAPER_CENTER: (f64, f64) = (411.4, 311.1);
-pub const PREVIEW_PAPER_SIZE: (f64, f64) = (334.0, 418.0);
+pub const PREVIEW_PAPER_CENTER: (f64, f64) = (412.1, 311.6);
+pub const PREVIEW_PAPER_SIZE: (f64, f64) = (334.8, 418.8);
 pub const PREVIEW_TILT_DEG: f64 = 1.5;
-const MAX_STEP_WIDTH: f64 = 16.0;
+const MAX_STEP_WIDTH: f64 = 28.0;
 const MAX_PREVIEW_V: f64 = 365.0;
 
 struct ViewState {
@@ -130,9 +130,9 @@ pub fn layout_preview_runs(content: &str) -> Vec<PreviewRun> {
         prev_group = Some(grp);
 
         let (u0, size, pitch, avail, default_bold) = match b.kind {
-            Kind::Title => (25.0, 33.0, 46.0, 280.0, false),
-            Kind::Heading => (24.0, 16.0, 22.0, 280.0, true),
-            Kind::Body | Kind::ListItem | Kind::Image => (24.0, 15.5, 22.0, 278.0, false),
+            Kind::Title => (25.6, 33.2, 46.0, 285.0, false),
+            Kind::Heading => (24.2, 16.8, 22.0, 290.0, true),
+            Kind::Body | Kind::ListItem | Kind::Image => (24.8, 15.42, 22.0, 275.0, false),
         };
 
         let block_text = if b.kind == Kind::ListItem && !b.text.is_empty() {
@@ -181,9 +181,9 @@ fn apply_selected_note(ui: &AllNotesWindow, rows: &[AllNoteRow], selected_id: Op
             let status = format_status_line(row, now_ms);
             let status_runs = layout_line_runs(
                 &status,
-                24.0,
+                24.5,
                 26.0,
-                13.5,
+                12.65,
                 20.0,
                 false,
                 false,
