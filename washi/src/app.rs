@@ -87,7 +87,7 @@ struct Inner {
     viewers: RefCell<Vec<(u64, Rc<ImageViewer>)>>,
     next_viewer: Cell<u64>,
     /// Currently open dropdown menu floating window, if any.
-    dropdown: RefCell<Option<DropdownMenu>>,
+    dropdown: RefCell<Option<Rc<DropdownMenu>>>,
 }
 
 /// A picture on its way into a note.
@@ -129,7 +129,7 @@ const IMAGE_SIZES: [u8; 4] = [25, 50, 75, 100];
 const MENU_OPEN_BASE: u32 = 1000;
 
 /// A new note opens this far (logical px, right and down) from the note it was made from.
-const NEW_NOTE_OFFSET: i32 = 30;
+pub const NEW_NOTE_OFFSET: i32 = 30;
 
 impl App {
     /// The real entry point: make sure this is the only Washi, then start. `Ok(None)` means
@@ -252,10 +252,22 @@ impl App {
             NoteEvent::WindowClosed | NoteEvent::Close => self.close_note(id),
             NoteEvent::New => self.new_note_from(id),
             NoteEvent::Delete => self.delete_note(id),
-            NoteEvent::InsertImage => self.insert_image_from_file(id),
-            NoteEvent::OpenImage(block) => self.open_viewer(id, block),
-            NoteEvent::ContextMenu { at, image } => self.show_menu(id, at, image),
+            NoteEvent::InsertImage => {
+                self.dismiss_dropdown();
+                self.insert_image_from_file(id);
+            }
+            NoteEvent::OpenImage(block) => {
+                self.dismiss_dropdown();
+                self.open_viewer(id, block);
+            }
+            NoteEvent::ContextMenu { at, image } => {
+                self.dismiss_dropdown();
+                self.show_menu(id, at, image);
+            }
             NoteEvent::PointerMoved => self.0.suspend.poke(),
+            NoteEvent::PointerDown => {
+                self.dismiss_dropdown();
+            }
             NoteEvent::StartMove => {
                 self.dismiss_dropdown();
                 let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
@@ -311,10 +323,13 @@ impl App {
 
     /// The platform saw a note move or resize: remember where it is once the user stops.
     pub fn geometry_changed(&self, id: NoteId) {
-        if self.dropdown_note_id() == Some(id) {
-            self.dismiss_dropdown();
-        }
+        self.dismiss_dropdown_if(id);
         self.with_note(id, |n| n.geometry_changed());
+    }
+
+    /// Clone the handle to the open dropdown menu, if any.
+    fn dropdown(&self) -> Option<Rc<DropdownMenu>> {
+        self.0.dropdown.borrow().clone()
     }
 
     /// Whether the dropdown menu is open for any note.
@@ -334,45 +349,34 @@ impl App {
 
     /// Invoke the toggle pin callback on the active dropdown (for testing).
     pub fn invoke_dropdown_toggle_pin(&self) {
-        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
-        if let Some(ui) = ui {
-            ui.invoke_toggle_pin();
+        if let Some(d) = self.dropdown() {
+            d.invoke_toggle_pin();
         }
     }
 
     /// Invoke the delete note callback on the active dropdown (for testing).
     pub fn invoke_dropdown_delete_note(&self) {
-        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
-        if let Some(ui) = ui {
-            ui.invoke_delete_note();
+        if let Some(d) = self.dropdown() {
+            d.invoke_delete_note();
         }
     }
 
     /// Invoke the new note callback on the active dropdown (for testing).
     pub fn invoke_dropdown_new_note(&self) {
-        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
-        if let Some(ui) = ui {
-            ui.invoke_new_note();
+        if let Some(d) = self.dropdown() {
+            d.invoke_new_note();
         }
     }
 
     /// The list of notes in the currently open dropdown menu.
     pub fn dropdown_notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
-        use slint::Model;
-        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
-        if let Some(ui) = ui {
-            let model = ui.get_notes();
-            model.iter().collect()
-        } else {
-            Vec::new()
-        }
+        self.dropdown().map(|d| d.notes()).unwrap_or_default()
     }
 
     /// Invoke the select note callback on the active dropdown (for testing).
     pub fn invoke_dropdown_select_note(&self, id: NoteId) {
-        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
-        if let Some(ui) = ui {
-            ui.invoke_select_note(id as i32);
+        if let Some(d) = self.dropdown() {
+            d.invoke_select_note(id);
         }
     }
 
@@ -393,35 +397,25 @@ impl App {
 
     /// The screen position of the open dropdown menu window in logical pixels, if any.
     pub fn dropdown_position(&self) -> Option<(f32, f32)> {
-        let menu = self.0.dropdown.borrow();
-        let ui = menu.as_ref().and_then(|d| d.ui().as_weak().upgrade())?;
-        let pos = ui.window().position();
-        let sf = ui.window().scale_factor();
-        Some((pos.x as f32 / sf, pos.y as f32 / sf))
+        self.dropdown().map(|d| d.position())
     }
 
     /// The size of the open dropdown menu window in logical pixels, if any.
     pub fn dropdown_size(&self) -> Option<(f32, f32)> {
-        let menu = self.0.dropdown.borrow();
-        let ui = menu.as_ref().and_then(|d| d.ui().as_weak().upgrade())?;
-        let size = ui.window().size();
-        let sf = ui.window().scale_factor();
-        Some((size.width as f32 / sf, size.height as f32 / sf))
+        self.dropdown().map(|d| d.size())
     }
 
     /// Dispatch a window event to the active dropdown window (for testing).
     pub fn dispatch_dropdown_event(&self, event: slint::platform::WindowEvent) {
-        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
-        if let Some(ui) = ui {
-            ui.window().dispatch_event(event);
+        if let Some(d) = self.dropdown() {
+            d.dispatch_event(event);
         }
     }
 
     /// Invoke dismiss on the active dropdown (for testing).
     pub fn invoke_dropdown_dismiss(&self) {
-        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
-        if let Some(ui) = ui {
-            ui.invoke_dismiss();
+        if let Some(d) = self.dropdown() {
+            d.invoke_dismiss();
         }
     }
 
@@ -429,8 +423,16 @@ impl App {
     pub fn dismiss_dropdown(&self) {
         let menu = self.0.dropdown.borrow_mut().take();
         if let Some(m) = menu {
+            m.close();
             let note_id = m.note_id();
             self.with_note(note_id, |n| n.set_dropdown_open(false));
+        }
+    }
+
+    /// Dismiss the open dropdown menu if it belongs to note `id`.
+    fn dismiss_dropdown_if(&self, id: NoteId) {
+        if self.dropdown_note_id() == Some(id) {
+            self.dismiss_dropdown();
         }
     }
 
@@ -540,12 +542,12 @@ impl App {
                     if let Some(inner) = weak.upgrade() {
                         let app = App(inner);
                         app.dismiss_dropdown();
-                        app.new_note();
+                        app.new_note_from(id);
                     }
                 });
 
                 note.set_dropdown_open(true);
-                *self.0.dropdown.borrow_mut() = Some(menu);
+                *self.0.dropdown.borrow_mut() = Some(Rc::new(menu));
             }
             Err(e) => eprintln!("washi: could not open dropdown menu: {e}"),
         }
@@ -695,9 +697,7 @@ impl App {
     /// Close a note: save it, remember where it was, mark it closed and release its window.
     /// Closing the last open note quits Washi.
     pub fn close_note(&self, id: NoteId) {
-        if self.dropdown_note_id() == Some(id) {
-            self.dismiss_dropdown();
-        }
+        self.dismiss_dropdown_if(id);
         let Some((was_empty, geometry)) = self.with_note(id, |n| (n.text().trim().is_empty(), n.geometry())) else {
             return;
         };
@@ -725,9 +725,7 @@ impl App {
 
     /// Delete a note for good, after asking.
     pub fn delete_note(&self, id: NoteId) {
-        if self.dropdown_note_id() == Some(id) {
-            self.dismiss_dropdown();
-        }
+        self.dismiss_dropdown_if(id);
         if !self.0.env.dialogs.confirm("Delete this note permanently? This cannot be undone.") {
             return;
         }
@@ -803,7 +801,7 @@ impl App {
     /// Keep a note's window above the others (or not), and remember it.
     pub fn set_always_on_top(&self, id: NoteId, on: bool) {
         self.with_note(id, |n| n.set_always_on_top(on));
-        if let Some(ref d) = *self.0.dropdown.borrow() {
+        if let Some(d) = self.dropdown() {
             if d.note_id() == id {
                 d.set_pinned(on);
             }
@@ -1000,9 +998,7 @@ impl App {
     /// Take a note out of the app. Its window is released on the next turn of the event loop,
     /// because this may run inside one of that window's own callbacks.
     fn remove_note(&self, id: NoteId) {
-        if self.dropdown_note_id() == Some(id) {
-            self.dismiss_dropdown();
-        }
+        self.dismiss_dropdown_if(id);
         let (note, now_empty) = {
             let mut notes = self.0.notes.borrow_mut();
             let at = notes.iter().position(|n| n.id() == id);

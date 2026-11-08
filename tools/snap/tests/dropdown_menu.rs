@@ -246,7 +246,7 @@ fn dropdown_window_geometry_positioning_and_rendering() {
     let card_x = win_x + metrics.shadow_margin;
     let card_y = win_y + metrics.shadow_margin;
 
-    assert!(((card_x + metrics.card_width) - (btn_screen_x + bw)).abs() <= 2.0, "card right aligns with button right");
+    assert!(((card_x + metrics.card_width) - (btn_screen_x + bw)).abs() <= 1.0, "card right matches button right with 0px overhang (subpixel precision)");
     assert!((card_y - (btn_screen_y + bh + metrics.gap)).abs() <= 2.0, "card top is gap below button");
 
     // Verify software rendering of dropdown window
@@ -343,4 +343,52 @@ fn snap_render_verifies_menu_button_appearance_on_hover() {
         .count();
 
     assert!(changed_button_pixels > 0, "hovering menu button draws button graphics (three dots)");
+}
+
+#[test]
+fn dropdown_dismissal_on_note_canvas_interaction() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+
+    // Open dropdown on note 0
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+
+    // Click on note canvas (e.g. at 100, 100)
+    h.click(0, 100.0, 100.0);
+
+    // Dropdown should be dismissed
+    assert!(!h.is_dropdown_open(), "clicking note canvas dismisses dropdown");
+    assert!(!h.is_note_dropdown_open(0));
+}
+
+#[test]
+fn dropdown_new_note_spawns_near_origin_note_with_multiple_notes() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+
+    // Create a second note offset from note 0
+    h.right_click(0, Some(&["New note"]));
+    assert_eq!(h.open_note_count(), 2);
+
+    let g0 = h.note_geometry(0);
+    let g1 = h.note_geometry(1);
+    assert_ne!((g0.x, g0.y), (g1.x, g1.y));
+
+    // Open dropdown on note 0 (which is not the last note in notes list)
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+    assert_eq!(h.dropdown_note_id(), Some(h.note_id(0)));
+
+    // Click "+ New" from dropdown
+    h.invoke_dropdown_new_note();
+
+    // Dropdown should be dismissed and note 2 created
+    assert!(!h.is_dropdown_open());
+    assert_eq!(h.open_note_count(), 3);
+
+    let g2 = h.note_geometry(2);
+    // Note 2 should be offset from note 0, not note 1
+    assert_eq!(g2.x, g0.x + washi::NEW_NOTE_OFFSET);
+    assert_eq!(g2.y, g0.y + washi::NEW_NOTE_OFFSET);
 }
