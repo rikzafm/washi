@@ -83,10 +83,10 @@ fn scrollbar_pixels(s: &snap::shot::Snapshot, paper: (f64, f64)) -> usize {
     let scale = 1.5;
     let (pw, ph) = (((paper.0 + 84.0) * scale).round() as i64, ((paper.1 + 84.0) * scale).round() as i64);
     let (ox, oy) = ((s.width as i64 - pw) / 2, (s.height as i64 - ph) / 2);
-    let x0 = ox + ((42.0 + paper.0 - 24.0 - 2.0) * scale) as i64;
-    let (y0, y1) = (oy + (46.0 * scale) as i64, oy + ((42.0 + paper.1 - 56.0 - 40.0) * scale) as i64);
+    let x0 = ox + ((42.0 + paper.0 - 16.0) * scale) as i64;
+    let (y0, y1) = (oy + (80.0 * scale) as i64, oy + ((42.0 + paper.1 - 56.0 - 20.0) * scale) as i64);
     let near = |p: [u8; 3]| p.iter().zip([0x8B, 0x91, 0x9A]).all(|(&a, b): (&u8, i32)| (a as i32 - b).abs() <= 4);
-    (y0..y1).flat_map(|y| (x0..x0 + (8.0 * scale) as i64).map(move |x| (x, y))).filter(|&(x, y)| near(s.pixel(x as u32, y as u32))).count()
+    (y0..y1).flat_map(|y| (x0..x0 + (16.0 * scale) as i64).map(move |x| (x, y))).filter(|&(x, y)| near(s.pixel(x as u32, y as u32))).count()
 }
 
 #[test]
