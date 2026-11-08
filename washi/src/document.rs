@@ -154,6 +154,23 @@ pub struct Caret {
     pub offset: usize,
 }
 
+/// A selection across the note: where it started (`anchor`) and where it ends now (`focus`).
+/// `focus` may come before `anchor` (a drag upwards). An image endpoint has offset 0 and the
+/// image is part of the range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Range {
+    pub anchor: Caret,
+    pub focus: Caret,
+}
+
+impl Range {
+    /// `(start, end)`: the earlier caret first.
+    pub fn ordered(self) -> (Caret, Caret) {
+        let key = |c: Caret| (c.block, c.offset);
+        if key(self.anchor) <= key(self.focus) { (self.anchor, self.focus) } else { (self.focus, self.anchor) }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Document {
     blocks: Vec<Block>,
@@ -539,24 +556,61 @@ impl Document {
     /// Toggle one style flag over the whole note (a select-all): off if every character has it,
     /// else on everywhere. False when the note has no text.
     pub fn toggle_style_all(&mut self, flag: Style) -> bool {
-        let mut marks = self.blocks.iter().flat_map(|b| b.marks.iter()).peekable();
-        if marks.peek().is_none() {
-            return false;
-        }
-        let on = !marks.all(|m| m.contains(flag));
-        for m in self.blocks.iter_mut().flat_map(|b| b.marks.iter_mut()) {
-            *m = m.with(flag, on);
-        }
-        true
+        self.toggle_style_range(self.all(), flag)
     }
 
     /// The flags every character of the note has (none for a note without text).
     pub fn common_style_all(&self) -> Style {
-        let mut marks = self.blocks.iter().flat_map(|b| b.marks.iter()).peekable();
-        if marks.peek().is_none() {
+        self.common_style_range(self.all())
+    }
+
+    /// The range from the start of the note to its end (a select-all).
+    pub fn all(&self) -> Range {
+        let last = self.blocks.len() - 1;
+        Range { anchor: Caret { block: 0, offset: 0 }, focus: Caret { block: last, offset: self.blocks[last].text.len() } }
+    }
+
+    /// The non-empty text stretches `(block, start, end)` of a range, one per text block in it.
+    fn range_spans(&self, range: Range) -> Vec<(usize, usize, usize)> {
+        let (s, e) = range.ordered();
+        let last = self.blocks.len() - 1;
+        let (s, e) = (Caret { block: s.block.min(last), ..s }, Caret { block: e.block.min(last), ..e });
+        (s.block..=e.block)
+            .filter_map(|i| {
+                let b = &self.blocks[i];
+                if !b.is_text() {
+                    return None;
+                }
+                let from = if i == s.block { floor_boundary(&b.text, s.offset) } else { 0 };
+                let to = if i == e.block { floor_boundary(&b.text, e.offset) } else { b.text.len() };
+                (from < to).then_some((i, from, to))
+            })
+            .collect()
+    }
+
+    /// Toggle one style flag over a range: off if every character in it has the flag, else on for
+    /// all of them. False when the range holds no text.
+    pub fn toggle_style_range(&mut self, range: Range, flag: Style) -> bool {
+        let spans = self.range_spans(range);
+        if spans.is_empty() {
+            return false;
+        }
+        let on = !spans.iter().all(|&(i, s, e)| self.blocks[i].common_style(s, e).contains(flag));
+        for (i, s, e) in spans {
+            for m in &mut self.blocks[i].marks[s..e] {
+                *m = m.with(flag, on);
+            }
+        }
+        true
+    }
+
+    /// The flags every character of a range has (none for a range without text).
+    pub fn common_style_range(&self, range: Range) -> Style {
+        let spans = self.range_spans(range);
+        if spans.is_empty() {
             return Style::NONE;
         }
-        Style(marks.fold(15, |acc, m| acc & m.0))
+        Style(spans.iter().fold(15, |acc, &(i, s, e)| acc & self.blocks[i].common_style(s, e).0))
     }
 
     /// The word around byte `offset` of a block, when the offset is inside one (word characters
@@ -630,14 +684,68 @@ impl Document {
 
     /// The note's words as plain lines (what select-all copies); pictures are left out.
     pub fn plain_text(&self) -> String {
-        self.blocks.iter().filter(|b| b.is_text()).map(|b| b.text.as_str()).collect::<Vec<_>>().join("\n")
+        self.plain_range(self.all())
+    }
+
+    /// The words of a range as plain lines (what copy takes); pictures are left out.
+    pub fn plain_range(&self, range: Range) -> String {
+        let (s, e) = range.ordered();
+        let last = self.blocks.len() - 1;
+        (s.block.min(last)..=e.block.min(last))
+            .filter(|&i| self.blocks[i].is_text())
+            .map(|i| {
+                let t = &self.blocks[i].text;
+                let from = if i == s.block { floor_boundary(t, s.offset) } else { 0 };
+                let to = if i == e.block { floor_boundary(t, e.offset) } else { t.len() };
+                &t[from..to.max(from)]
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Select-all then typing, pasting or Delete: the whole note becomes `text` (which may span
     /// lines). Returns the caret after it.
     pub fn replace_all(&mut self, text: &str) -> Caret {
-        self.blocks = vec![Block::new(Kind::Title, "")];
-        self.insert_text(0, 0, 0, text)
+        self.replace_range(self.all(), text)
+    }
+
+    /// Delete a range. The blocks it touches merge into one; returns the caret where the range was.
+    pub fn delete_range(&mut self, range: Range) -> Caret {
+        self.replace_range(range, "")
+    }
+
+    /// Replace a range with `text`, which may span lines. The first and last blocks merge and keep
+    /// the first block's kind, and the blocks between them go, images included (an image at either
+    /// end goes too). Inside one block this is [`Document::insert_text`]. Returns the caret after
+    /// the inserted text.
+    pub fn replace_range(&mut self, range: Range, text: &str) -> Caret {
+        let (s, e) = range.ordered();
+        let last = self.blocks.len() - 1;
+        let (s, e) = (Caret { block: s.block.min(last), ..s }, Caret { block: e.block.min(last), ..e });
+        if s.block == e.block {
+            return self.insert_text(s.block, s.offset, e.offset, text);
+        }
+        let first = &self.blocks[s.block];
+        let end = &self.blocks[e.block];
+        let mut merged = if first.is_text() {
+            let mut b = first.clone();
+            let at = floor_boundary(&b.text, s.offset);
+            b.text.truncate(at);
+            b.marks.truncate(at);
+            b
+        } else if end.is_text() {
+            Block::new(end.kind, "")
+        } else {
+            Block::new(Kind::Body, "")
+        };
+        let from = merged.text.len();
+        if end.is_text() {
+            let at = floor_boundary(&end.text, e.offset);
+            merged.text.push_str(&end.text[at..]);
+            merged.marks.extend_from_slice(&end.marks[at..]);
+        }
+        self.blocks.splice(s.block..=e.block, [merged]);
+        self.insert_text(s.block, from, from, text)
     }
 
     /// The nearest block with a text field before `block`.
@@ -1176,5 +1284,173 @@ mod tests {
         d.set_text(0, "a\nb");
         assert_eq!(d.blocks()[0].text, "a b");
         assert_eq!(Document::parse(&d.to_text()), d);
+    }
+
+    // ---- ranges ----
+
+    fn c(block: usize, offset: usize) -> Caret {
+        Caret { block, offset }
+    }
+    fn r(a: Caret, f: Caret) -> Range {
+        Range { anchor: a, focus: f }
+    }
+    /// Title "Title", body "alpha", image, body "omega", list item "tail".
+    fn five() -> Document {
+        Document::from_blocks(vec![
+            Block::new(Kind::Title, "Title"),
+            Block::new(Kind::Body, "alpha"),
+            Block::image(7),
+            Block::new(Kind::Body, "omega"),
+            Block::new(Kind::ListItem, "tail"),
+        ])
+    }
+
+    #[test]
+    fn ordered_puts_the_earlier_caret_first_whichever_way_it_was_dragged() {
+        let (a, b) = (c(1, 3), c(3, 1));
+        assert_eq!(r(a, b).ordered(), (a, b));
+        assert_eq!(r(b, a).ordered(), (a, b));
+        assert_eq!(r(c(2, 4), c(2, 1)).ordered(), (c(2, 1), c(2, 4)));
+    }
+
+    #[test]
+    fn replace_range_inside_one_block_is_insert_text() {
+        let mut a = five();
+        let mut b = five();
+        let got = a.replace_range(r(c(1, 1), c(1, 4)), "X
+Y");
+        assert_eq!(got, b.insert_text(1, 1, 4, "X
+Y"));
+        assert_eq!(a, b);
+        assert_eq!(texts(&a), ["Title", "aX", "Ya", "", "omega", "tail"]);
+    }
+
+    #[test]
+    fn replace_range_across_two_blocks_merges_them_and_keeps_the_first_kind() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Heading, "Hello"), (Kind::ListItem, "world")]);
+        let caret = d.replace_range(r(c(1, 2), c(2, 3)), "x");
+        assert_eq!(texts(&d), ["t", "Hexld"]);
+        assert_eq!(kinds(&d), [Kind::Title, Kind::Heading]);
+        assert_eq!(caret, c(1, 3));
+    }
+
+    #[test]
+    fn delete_range_across_three_blocks_drops_the_image_and_the_blocks_between() {
+        let mut d = five();
+        let caret = d.delete_range(r(c(1, 2), c(3, 2)));
+        assert_eq!(texts(&d), ["Title", "alega", "tail"]);
+        assert_eq!(kinds(&d), [Kind::Title, Kind::Body, Kind::ListItem]);
+        assert_eq!(caret, c(1, 2));
+    }
+
+    #[test]
+    fn a_reversed_range_behaves_like_the_ordered_one() {
+        let mut a = five();
+        let mut b = five();
+        let ca = a.replace_range(r(c(3, 2), c(1, 2)), "Q");
+        let cb = b.replace_range(r(c(1, 2), c(3, 2)), "Q");
+        assert_eq!((a, ca), (b, cb));
+    }
+
+    #[test]
+    fn replace_range_from_the_start_to_the_end_of_the_note_is_replace_all() {
+        let mut d = five();
+        let caret = d.replace_range(r(c(0, 0), c(4, 4)), "x
+y");
+        assert_eq!(texts(&d), ["x", "y"]);
+        assert_eq!(kinds(&d), [Kind::Title, Kind::Body]);
+        assert_eq!(caret, c(1, 1));
+        let mut d = five();
+        assert_eq!(d.replace_range(r(c(4, 4), c(0, 0)), ""), c(0, 0));
+        assert_eq!(texts(&d), [""]);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn a_range_at_the_start_or_end_of_the_note() {
+        let mut d = five();
+        assert_eq!(d.delete_range(r(c(0, 0), c(0, 3))), c(0, 0));
+        assert_eq!(d.blocks()[0].text, "le");
+        let mut d = five();
+        assert_eq!(d.delete_range(r(c(3, 2), c(4, 4))), c(3, 2));
+        assert_eq!(texts(&d), ["Title", "alpha", "", "om"]);
+        let mut d = five();
+        assert_eq!(d.delete_range(r(c(0, 3), c(1, 0))), c(0, 3));
+        assert_eq!(texts(&d)[..2], ["Titalpha", ""]);
+    }
+
+    #[test]
+    fn a_collapsed_range_inserts_text_and_deletes_nothing() {
+        let mut d = five();
+        assert_eq!(d.replace_range(r(c(1, 2), c(1, 2)), "--"), c(1, 4));
+        assert_eq!(d.blocks()[1].text, "al--pha");
+        let before = five();
+        let mut d = five();
+        assert_eq!(d.delete_range(r(c(1, 2), c(1, 2))), c(1, 2));
+        assert_eq!(d, before);
+    }
+
+    #[test]
+    fn an_image_at_either_end_of_a_range_is_deleted_with_it() {
+        let mut d = five();
+        let caret = d.delete_range(r(c(1, 3), c(2, 0)));
+        assert_eq!(texts(&d), ["Title", "alp", "omega", "tail"]);
+        assert_eq!(caret, c(1, 3));
+        let mut d = five();
+        let caret = d.delete_range(r(c(2, 0), c(3, 2)));
+        assert_eq!(texts(&d), ["Title", "alpha", "ega", "tail"]);
+        assert_eq!(caret, c(2, 0));
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "a")]);
+        d.insert_image(1, 3);
+        let mut d2 = d.clone();
+        // image to image with no text beside them leaves one empty body line
+        d2.insert_image(2, 4);
+        d2.delete_range(r(c(2, 0), c(3, 0)));
+        assert!(d2.blocks().iter().all(|b| b.kind != Kind::Image));
+    }
+
+    #[test]
+    fn plain_range_joins_lines_with_newlines_and_skips_images() {
+        let d = five();
+        assert_eq!(d.plain_range(r(c(1, 2), c(4, 2))), "pha
+omega
+ta");
+        assert_eq!(d.plain_range(r(c(4, 2), c(1, 2))), "pha
+omega
+ta");
+        assert_eq!(d.plain_range(r(c(1, 1), c(1, 3))), "lp");
+        assert_eq!(d.plain_range(r(c(1, 1), c(1, 1))), "");
+        assert_eq!(d.plain_range(r(c(0, 0), c(4, 4))), d.plain_text());
+    }
+
+    #[test]
+    fn toggle_style_range_across_blocks_makes_everything_bold_if_only_part_is() {
+        let mut d = Document::from_blocks(vec![
+            Block::new(Kind::Title, "t"),
+            Block::new(Kind::Body, "abc").with_style(Style::BOLD),
+            Block::new(Kind::Body, "def"),
+        ]);
+        let range = r(c(1, 1), c(2, 2));
+        assert_eq!(d.common_style_range(range), Style::NONE);
+        assert!(d.toggle_style_range(range, Style::BOLD));
+        assert_eq!(d.common_style_range(range), Style::BOLD);
+        assert_eq!(d.blocks()[1].marks, [Style::BOLD; 3]);
+        assert_eq!(d.blocks()[2].marks, [Style::BOLD, Style::BOLD, Style::NONE]);
+        assert!(d.toggle_style_range(range, Style::BOLD));
+        assert_eq!(d.blocks()[1].marks, [Style::BOLD, Style::NONE, Style::NONE]);
+        assert_eq!(d.blocks()[2].marks, [Style::NONE; 3]);
+    }
+
+    #[test]
+    fn style_over_a_range_without_text_does_nothing() {
+        let mut d = five();
+        assert!(!d.toggle_style_range(r(c(1, 2), c(1, 2)), Style::BOLD));
+        assert!(!d.toggle_style_range(r(c(2, 0), c(2, 0)), Style::BOLD));
+        assert_eq!(d.common_style_range(r(c(1, 2), c(1, 2))), Style::NONE);
+        let mut one = doc(&[(Kind::Title, "ab"), (Kind::Body, "cd")]);
+        let mut same = one.clone();
+        assert!(one.toggle_style_range(r(c(1, 1), c(1, 0)), Style::ITALIC));
+        assert!(same.toggle_style(1, 0, 1, Style::ITALIC));
+        assert_eq!(one, same);
     }
 }
