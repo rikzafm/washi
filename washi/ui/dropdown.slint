@@ -123,10 +123,10 @@ export component DropdownMenuWindow inherits Window {
                 width: 90px;
                 height: 100%;
                 text: "JUMP TO";
-                font-size: 11px;
-                font-weight: 700;
-                letter-spacing: 0.6px;
-                color: #8B919A;
+                font-family: "Shadows Into Light";
+                font-size: 16px;
+                font-weight: 400;
+                color: #7E8691;
                 vertical-alignment: center;
             }
 
@@ -139,7 +139,7 @@ export component DropdownMenuWindow inherits Window {
                     root.toggle_pin();
                 }
 
-                property <color> pin-color: root.pinned ? #2B2F36 : (self.hover-state ? #2B2F36 : #8B919A);
+                property <color> pin-color: root.pinned ? #2B2F36 : (self.hover-state ? #2B2F36 : #4E535A);
                 property <bool> hover-state: self.background != transparent;
 
                 // Pushpin line art matching mockup
@@ -192,7 +192,7 @@ export component DropdownMenuWindow inherits Window {
                     root.delete_note();
                 }
 
-                property <color> trash-color: #D32F2F;
+                property <color> trash-color: #D35A5A;
 
                 Path {
                     width: 22px;
@@ -251,7 +251,7 @@ export component DropdownMenuWindow inherits Window {
             x: 0;
             y: 44px;
             width: root.card-width;
-            height: 204px;
+            height: 212px;
             clip: true;
 
             if root.notes.length == 0 : Rectangle {
@@ -273,13 +273,13 @@ export component DropdownMenuWindow inherits Window {
                 width: 100%;
                 height: 100%;
                 for item in root.notes : Rectangle {
-                    height: 52px;
+                    height: 56px;
 
                     item-btn := Rectangle {
                         x: 10px;
                         y: 1px;
                         width: parent.width - 20px;
-                        height: 50px;
+                        height: 54px;
                         border-radius: 8px;
                         background: item-touch.pressed ? #ECECE8 : (item-touch.has-hover ? #F6F6F4 : transparent);
 
@@ -292,39 +292,38 @@ export component DropdownMenuWindow inherits Window {
                             }
                         }
 
-                        VerticalLayout {
+                        // Left gutter for tape swatch (aligned with header JUMP TO at x=8px relative to item-btn)
+                        if item.has-tape : Rectangle {
                             x: 8px;
+                            y: 8px;
+                            width: 22px;
+                            height: 14px;
+                            Image {
+                                source: @image-url("assets/tape-pink-flat.png");
+                                width: 22px;
+                                height: 7px;
+                                y: (parent.height - self.height) / 2;
+                                image-fit: contain;
+                            }
+                        }
+
+                        // Text content: title on top line, preview snippet and timestamp below
+                        VerticalLayout {
+                            x: 34px;
                             y: 3px;
-                            width: parent.width - 16px;
+                            width: parent.width - 42px;
                             height: parent.height - 6px;
                             spacing: 1px;
                             alignment: center;
 
-                            HorizontalLayout {
-                                spacing: 6px;
-                                height: 21px;
-
-                                if item.has-tape : Rectangle {
-                                    width: 24px;
-                                    height: 21px;
-                                    Image {
-                                        source: @image-url("assets/tape-pink-flat.png");
-                                        width: 24px;
-                                        height: 8px;
-                                        y: (parent.height - self.height) / 2;
-                                        image-fit: contain;
-                                    }
-                                }
-
-                                Text {
-                                    text: item.title;
-                                    font-family: "Shadows Into Light";
-                                    font-size: 18px;
-                                    font-weight: 400;
-                                    color: #2B2F36;
-                                    overflow: elide;
-                                    vertical-alignment: center;
-                                }
+                            Text {
+                                text: item.title;
+                                font-family: "Shadows Into Light";
+                                font-size: 18px;
+                                font-weight: 400;
+                                color: #2B2F36;
+                                overflow: elide;
+                                vertical-alignment: center;
                             }
 
                             Text {
@@ -333,8 +332,8 @@ export component DropdownMenuWindow inherits Window {
                                 font-size: 14px;
                                 font-weight: 400;
                                 color: #7E8691;
-                                overflow: elide;
-                                vertical-alignment: center;
+                                wrap: word-wrap;
+                                vertical-alignment: top;
                             }
                         }
                     }
@@ -345,26 +344,26 @@ export component DropdownMenuWindow inherits Window {
         // --- Dotted Divider Line ---
         divider := Rectangle {
             x: 18px;
-            y: root.card-height - 62px;
+            y: root.card-height - 58px;
             width: root.card-width - 36px;
             height: 2px;
 
-            for i in 34: Rectangle {
+            for i in 36: Rectangle {
                 x: i * 6.5px;
                 y: 0px;
                 width: 2px;
                 height: 1.5px;
                 border-radius: 0.75px;
-                background: #E0E2E5;
+                background: #D8DBE0;
             }
         }
 
         // --- Bottom Action Bar ---
         action-bar := HorizontalLayout {
             x: 14px;
-            y: root.card-height - 56px;
+            y: root.card-height - 52px;
             width: root.card-width - 28px;
-            height: 48px;
+            height: 46px;
             alignment: space-between;
 
             // + New
