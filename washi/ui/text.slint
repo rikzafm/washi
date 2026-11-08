@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { BlockData, BlockKind, BlockView, RuleData, RunData } from "block.slint";
+import { BlockData, BlockKind, BlockView, RuleData, RunData, SelRect } from "block.slint";
 
 // The note's text, in the paper's frame (fixed insets, not proportions of the size). `width` and
 // `height` are the paper's.
@@ -38,8 +38,16 @@ export component TextLayer inherits Rectangle {
     in property <int> focus-serial: 0;
     /// Ctrl+V in a field: true when the note took it (a picture on the clipboard).
     callback paste-image() -> bool;
-    /// Ctrl+A selected the whole note: every word is washed until the next key or click.
+    /// The wash of the note's selection (Rust): one level box per line the selection touches.
+    in property <[SelRect]> sel-rects;
+    /// Ctrl+A selected the whole note: Rust fills `sel-rects` until the next key or click.
     in-out property <bool> all-selected: false;
+    callback select-all();
+    /// The select-all ended (a key or a click): Rust takes the wash away.
+    callback select-cleared();
+    changed all-selected => {
+        if (root.all-selected) { root.select-all(); } else { root.select-cleared(); }
+    }
     /// The note's text as plain lines (Rust), for copying.
     callback all-text() -> string;
     /// Replace the whole note by this text (typing, pasting or Delete over a select-all).
@@ -82,13 +90,12 @@ export component TextLayer inherits Rectangle {
             + root.paper-h / 2 * (1 - root.tilt.cos()) + root.scroll-y;
     }
 
-    // the select-all wash, level (a select-all can only be made while editing), under the words
-    for r in root.runs: Rectangle {
-        visible: root.all-selected && !r.hint;
-        x: r.x;
-        y: r.y;
-        width: r.width + r.size * 0.3;
-        height: r.pitch;
+    // the selection wash, level (a selection can only be made while editing), under the words
+    for s in root.sel-rects: Rectangle {
+        x: s.x;
+        y: s.y;
+        width: s.width;
+        height: s.height;
         background: Theme.selection;
     }
 

@@ -11,7 +11,7 @@
 //! face with those advances too (`fonts/WashiCaret.ttf`), and the words are drawn from this layout
 //! while editing as well, each piece in its own face.
 
-use crate::document::{Block, Kind, Style as Flags};
+use crate::document::{Block, Caret, Kind, Range, Style as Flags};
 use ttf_parser::Face;
 
 const REGULAR: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight.ttf");
@@ -437,10 +437,92 @@ pub fn caret_span_with_images(blocks: &[Block], block: usize, offset: usize, pap
     Some((y, y + pitch))
 }
 
+/// The caret under `point` (level paper frame, x from the paper's left edge): the block whose top is
+/// the last one above the point, the visual line within it, then the nearest character boundary.
+/// Above the first block is the start of the note, below the last its end. On an image the upper
+/// half is the image's start and the lower half the start of the block after it (an image caret
+/// has offset 0; the last image has no block after it).
+pub fn hit(blocks: &[Block], point: (f64, f64), paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Caret {
+    let (tops, bottom) = extent_with_images(blocks, paper_w, t, image_size);
+    let Some(last) = blocks.len().checked_sub(1) else { return Caret { block: 0, offset: 0 } };
+    if point.1 < tops[0] {
+        return Caret { block: 0, offset: 0 };
+    }
+    if point.1 >= bottom {
+        return Caret { block: last, offset: if blocks[last].kind == Kind::Image { 0 } else { blocks[last].text.len() } };
+    }
+    let block = tops.iter().rposition(|&top| top <= point.1).unwrap_or(0);
+    let b = &blocks[block];
+    if b.kind == Kind::Image {
+        let end = tops.get(block + 1).copied().unwrap_or(bottom);
+        let lower = point.1 >= tops[block] + (end - tops[block]) / 2.0;
+        return Caret { block: if lower && block < last { block + 1 } else { block }, offset: 0 };
+    }
+    let pitch = t.style(b.kind).pitch;
+    let line = ((point.1 - tops[block]) / pitch).floor().max(0.0) as usize;
+    Caret { block, offset: offset_at(b, line, point.0 - t.inset_left, paper_w, t) }
+}
+
+/// A level box in the paper's frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// The wash of a selection: a level rect for each visual line the range touches, from the caret x of
+/// where the range starts on the line to where it ends. A line that ends inside the range (a wrap,
+/// or a paragraph break) gets a trailing pad of 0.3 em, so an empty paragraph shows a sliver. An
+/// image in the range is washed over its whole size.
+pub fn selection_rects(blocks: &[Block], range: Range, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Vec<Rect> {
+    let (start, end) = range.ordered();
+    if start == end {
+        return vec![];
+    }
+    let avail = paper_w - t.inset_left - t.inset_right;
+    let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+    let mut out = vec![];
+    for bi in start.block..=end.block.min(blocks.len().saturating_sub(1)) {
+        let b = &blocks[bi];
+        let st = t.style(b.kind);
+        if b.kind == Kind::Image {
+            let height = image_size(b).map_or(st.pitch, |px| image_height(avail, px));
+            out.push(Rect { x: t.inset_left, y: tops[bi], width: avail, height, });
+            continue;
+        }
+        let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
+        let to = if bi == end.block { end.offset.min(b.text.len()) } else { b.text.len() };
+        let m = Measure::new(false, false, st.size);
+        let lines = wrap(&b.text, avail, &m);
+        let starts = line_starts(&lines);
+        for (li, &ls) in starts.iter().enumerate() {
+            let last = li + 1 == starts.len();
+            let le = if last { b.text.len() } else { starts[li + 1] };
+            if (from >= le && !last) || to < ls {
+                continue;
+            }
+            let (a, e) = (from.clamp(ls, le), to.clamp(ls, le));
+            let pad = if last { bi < end.block } else { to > le };
+            if a >= e && !pad {
+                continue;
+            }
+            // the space a wrap breaks at is not shown washed: the pad stands for it
+            let shown_end = if last { e } else { e.min(ls + b.text[ls..le].trim_end().len()).max(a) };
+            let x0 = m.width(&b.text[ls..a]);
+            let x1 = m.width(&b.text[ls..shown_end]);
+            let tail = if pad { st.size * 0.3 } else { 0.0 };
+            out.push(Rect { x: t.inset_left + x0, y: tops[bi] + li as f64 * st.pitch, width: x1 - x0 + tail, height: st.pitch });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{Block, Document};
+    use crate::document::{Block, Caret, Document, Range};
 
     pub const TOKENS: Tokens = Tokens {
         inset_left: 32.0,
@@ -621,6 +703,117 @@ mod tests {
                 assert_eq!(caret_line(b, back, 363.0, &TOKENS), c, "{:?} at {o}", b.text);
             }
         }
+    }
+
+    /// The centre of the caret's line box for `c`, in the paper's frame (level).
+    fn point_of(d: &Document, c: Caret) -> (f64, f64) {
+        let (tops, _) = extent(d.blocks(), 363.0, &TOKENS);
+        let b = &d.blocks()[c.block];
+        let cl = caret_line(b, c.offset, 363.0, &TOKENS);
+        let pitch = TOKENS.style(b.kind).pitch;
+        (TOKENS.inset_left + cl.x, tops[c.block] + (cl.line as f64 + 0.5) * pitch)
+    }
+
+    #[test]
+    fn hit_is_the_inverse_of_the_caret_position_for_every_offset() {
+        let d = Document::parse(MOCKUP);
+        for (block, b) in d.blocks().iter().enumerate() {
+            for offset in (0..=b.text.len()).filter(|&o| b.text.is_char_boundary(o)) {
+                let c = Caret { block, offset };
+                let got = hit(d.blocks(), point_of(&d, c), 363.0, &TOKENS, &|_| None);
+                assert_eq!(got.block, block);
+                // a caret after a wrapping space sits where the next line starts: compare positions
+                let (a, e) = (&d.blocks()[got.block], &d.blocks()[block]);
+                assert_eq!(caret_line(a, got.offset, 363.0, &TOKENS), caret_line(e, offset, 363.0, &TOKENS), "block {block} offset {offset}");
+            }
+        }
+    }
+
+    #[test]
+    fn hit_snaps_above_the_first_block_below_the_last_and_to_the_sides() {
+        let d = Document::parse(MOCKUP);
+        let none = |_: &Block| None;
+        assert_eq!(hit(d.blocks(), (100.0, 2.0), 363.0, &TOKENS, &none), Caret { block: 0, offset: 0 });
+        let last = d.blocks().len() - 1;
+        let len = d.blocks()[last].text.len();
+        assert_eq!(hit(d.blocks(), (100.0, 5000.0), 363.0, &TOKENS, &none), Caret { block: last, offset: len });
+        // left of the text area is the start of the line, right of it the end
+        let (_, y) = point_of(&d, Caret { block: 0, offset: 0 });
+        assert_eq!(hit(d.blocks(), (-50.0, y), 363.0, &TOKENS, &none).offset, 0);
+        assert_eq!(hit(d.blocks(), (5000.0, y), 363.0, &TOKENS, &none).offset, d.blocks()[0].text.len());
+        // the gap between two blocks belongs to the block above it
+        let (tops, _) = extent(d.blocks(), 363.0, &TOKENS);
+        assert_eq!(hit(d.blocks(), (5000.0, tops[1] - 1.0), 363.0, &TOKENS, &none).block, 0);
+    }
+
+    #[test]
+    fn hit_on_an_image_snaps_to_its_start_or_to_the_start_of_what_follows() {
+        let d = Document::from_blocks(vec![Block::new(Kind::Title, "t"), Block::image(1), Block::new(Kind::Body, "after")]);
+        let size = |b: &Block| b.image_id.map(|_| (200, 100));
+        let (tops, _) = extent_with_images(d.blocks(), 363.0, &TOKENS, &size);
+        let h = image_height(363.0 - TOKENS.inset_left - TOKENS.inset_right, (200, 100));
+        assert_eq!(hit(d.blocks(), (100.0, tops[1] + h * 0.25), 363.0, &TOKENS, &size), Caret { block: 1, offset: 0 });
+        assert_eq!(hit(d.blocks(), (100.0, tops[1] + h * 0.75), 363.0, &TOKENS, &size), Caret { block: 2, offset: 0 });
+    }
+
+    fn rects(d: &Document, range: Range) -> Vec<Rect> {
+        selection_rects(d.blocks(), range, 363.0, &TOKENS, &|_| None)
+    }
+
+    #[test]
+    fn selection_rects_cover_exactly_the_lines_in_the_range() {
+        let d = Document::parse(MOCKUP);
+        // the whole body: four lines, one level rect each, stacked at the body's pitch
+        let body = Range { anchor: Caret { block: 2, offset: 0 }, focus: Caret { block: 2, offset: d.blocks()[2].text.len() } };
+        let r = rects(&d, body);
+        let (tops, _) = extent(d.blocks(), 363.0, &TOKENS);
+        assert_eq!(r.len(), 4);
+        for (i, s) in r.iter().enumerate() {
+            assert!((s.y - (tops[2] + i as f64 * TOKENS.body.pitch)).abs() < 1e-9);
+            assert!((s.height - TOKENS.body.pitch).abs() < 1e-9);
+            assert!((s.x - TOKENS.inset_left).abs() < 1e-9);
+        }
+        // a collapsed range shows nothing; a reversed one is the same as the ordered one
+        assert!(rects(&d, Range { anchor: body.anchor, focus: body.anchor }).is_empty());
+        let rev = Range { anchor: body.focus, focus: body.anchor };
+        assert_eq!(rects(&d, rev), r);
+        // inside one line: from the caret x of the start to the caret x of the end (no pad: the line goes on)
+        let b = &d.blocks()[2];
+        let part = Range { anchor: Caret { block: 2, offset: 2 }, focus: Caret { block: 2, offset: 6 } };
+        let p = rects(&d, part);
+        assert_eq!(p.len(), 1);
+        let (x0, x1) = (caret_line(b, 2, 363.0, &TOKENS).x, caret_line(b, 6, 363.0, &TOKENS).x);
+        assert!((p[0].x - (TOKENS.inset_left + x0)).abs() < 1e-9 && (p[0].width - (x1 - x0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn lines_that_end_inside_the_range_get_a_pad_and_an_empty_paragraph_a_sliver() {
+        let d = Document::from_blocks(vec![Block::new(Kind::Title, "ab"), Block::new(Kind::Body, ""), Block::new(Kind::Body, "cd")]);
+        let range = Range { anchor: Caret { block: 0, offset: 1 }, focus: Caret { block: 2, offset: 1 } };
+        let r = rects(&d, range);
+        assert_eq!(r.len(), 3, "{r:?}");
+        let pad = TOKENS.title.size * 0.3;
+        let b = &d.blocks()[0];
+        let w = caret_line(b, 2, 363.0, &TOKENS).x - caret_line(b, 1, 363.0, &TOKENS).x;
+        assert!((r[0].width - (w + pad)).abs() < 1e-9);
+        // the empty paragraph: nothing but the pad
+        assert!((r[1].width - TOKENS.body.size * 0.3).abs() < 1e-9 && r[1].width > 1.0);
+        // the last line ends in the range's end: no pad
+        let c = caret_line(&d.blocks()[2], 1, 363.0, &TOKENS).x;
+        assert!((r[2].width - c).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_image_inside_the_range_is_washed_over_its_whole_size() {
+        let d = Document::from_blocks(vec![Block::new(Kind::Title, "t"), Block::image(1), Block::new(Kind::Body, "after")]);
+        let size = |b: &Block| b.image_id.map(|_| (200, 100));
+        let range = Range { anchor: Caret { block: 0, offset: 0 }, focus: Caret { block: 2, offset: 3 } };
+        let r = selection_rects(d.blocks(), range, 363.0, &TOKENS, &size);
+        let (tops, _) = extent_with_images(d.blocks(), 363.0, &TOKENS, &size);
+        let avail = 363.0 - TOKENS.inset_left - TOKENS.inset_right;
+        let img = r.iter().find(|s| (s.y - tops[1]).abs() < 1e-9).expect("a rect at the image's top");
+        assert!((img.x - TOKENS.inset_left).abs() < 1e-9 && (img.width - avail).abs() < 1e-9);
+        assert!((img.height - image_height(avail, (200, 100))).abs() < 1e-9);
     }
 
     #[test]

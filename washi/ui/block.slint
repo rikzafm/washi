@@ -41,6 +41,14 @@ export struct RunData {
 }
 
 /// An underline, a strike-through or a list bullet: a level box plus the offset onto the tilted baseline.
+/// One level box of the selection wash, in the paper's frame (Rust lays them out, src/textflow.rs).
+export struct SelRect {
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+}
+
 export struct RuleData {
     block: int,
     x: length,

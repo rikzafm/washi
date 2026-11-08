@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{Block, Caret, Document, Kind, Style as Flags};
+use crate::document::{Block, Caret, Document, Kind, Range, Style as Flags};
 use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
@@ -141,6 +141,10 @@ struct Doc {
     model: Rc<VecModel<BlockData>>,
     runs: Rc<VecModel<RunData>>,
     rules: Rc<VecModel<RuleData>>,
+    /// The wash of the note-level selection, one level box per line it touches.
+    sel_rects: Rc<VecModel<SelRect>>,
+    /// The note-level selection shown by `sel_rects` (for now only a select-all), if any.
+    range: Cell<Option<Range>>,
     /// The block that last held the caret: what the toolbar and the format shortcuts act on.
     caret: Cell<usize>,
     /// The caret's byte offset in that block and the selection's other end (equal: no selection).
@@ -173,6 +177,8 @@ impl Doc {
             model: Rc::new(VecModel::default()),
             runs: Rc::new(VecModel::default()),
             rules: Rc::new(VecModel::default()),
+            sel_rects: Rc::new(VecModel::default()),
+            range: Cell::new(None),
             caret: Cell::new(0),
             selection: Cell::new((0, 0)),
             typing: Cell::new(None),
@@ -279,6 +285,7 @@ impl Doc {
                 .map(|r| RuleData { block: r.block as i32, x: r.x as f32, y: r.y as f32, dx: r.dx as f32, dy: r.dy as f32, width: r.width as f32, height: r.height as f32 })
                 .collect::<Vec<_>>(),
         );
+        self.fill_sel_rects(&doc, &tokens);
         let hint = doc.is_empty();
         if hint {
             runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
@@ -301,6 +308,29 @@ impl Doc {
                 })
                 .collect::<Vec<_>>(),
         );
+    }
+
+    /// Fill the wash model from the note-level range (empty when there is none).
+    fn fill_sel_rects(&self, doc: &Document, tokens: &Tokens) {
+        let rects = match self.range.get() {
+            Some(range) if !doc.is_empty() => textflow::selection_rects(doc.blocks(), range, self.paper.get().0, tokens, &|b| self.images.size(b)),
+            _ => vec![],
+        };
+        self.sel_rects.set_vec(
+            rects.iter().map(|r| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 }).collect::<Vec<_>>(),
+        );
+    }
+
+    /// Ctrl+A: the note-level selection becomes the whole note.
+    fn select_all(&self, ui: &NoteWindow) {
+        self.range.set(Some(self.doc.borrow().all()));
+        self.fill_sel_rects(&self.doc.borrow(), &Self::tokens(ui));
+    }
+
+    /// The select-all ended: no wash.
+    fn clear_selection(&self) {
+        self.range.set(None);
+        self.sel_rects.set_vec(vec![]);
     }
 
     fn text(&self) -> String {
@@ -612,6 +642,7 @@ impl Note {
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
         ui.set_rules(slint::ModelRc::from(doc.rules.clone()));
+        ui.set_sel_rects(slint::ModelRc::from(doc.sel_rects.clone()));
         doc.relayout(&ui);
         doc.show_formats(&ui);
         ui.set_text(doc.text().as_str().into());
@@ -702,6 +733,18 @@ impl Note {
                 }
                 true
             });
+        }
+        {
+            let (doc, weak) = (doc.clone(), ui.as_weak());
+            ui.on_select_all(move || {
+                if let Some(ui) = weak.upgrade() {
+                    doc.select_all(&ui);
+                }
+            });
+        }
+        {
+            let doc = doc.clone();
+            ui.on_select_cleared(move || doc.clear_selection());
         }
         {
             let doc = doc.clone();
