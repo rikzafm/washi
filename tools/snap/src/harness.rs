@@ -358,6 +358,39 @@ impl Harness {
         self.settle();
     }
 
+    /// The center of toolbar button `k` (0 B, 1 I, 2 U, 3 ab, 4 A, 5 list, 6 image) in window
+    /// coordinates: the button row sits in the paper's frame, turned about the paper's center.
+    pub fn toolbar_button(&self, note: usize, k: usize) -> (f32, f32) {
+        let du = 23.2 + 20.0 + k as f32 * 42.667;
+        self.paper_point(note, du, -55.8 + 20.0 + self.paper_size(note).1)
+    }
+
+    /// A point inside the color popover's body, in window coordinates (the caption row, clear of
+    /// the swatches and of Clear): 22 px from the paper's left edge plus and 30 px above the band.
+    pub fn picker_point(&self, note: usize) -> (f32, f32) {
+        self.paper_point(note, 22.0 + 110.0, self.paper_size(note).1 - 56.0 - 10.0 - 20.0)
+    }
+
+    fn paper_size(&self, note: usize) -> (f32, f32) {
+        let (w, h) = self.note_size(note);
+        let margin = self.app().with_note(self.id(note), |n| n.ui().get_window_margin()).unwrap();
+        (w as f32 - 2.0 * margin, h as f32 - 2.0 * margin)
+    }
+
+    /// A point `(u, v)` px from the paper's top-left corner (untilted frame), in window coordinates.
+    fn paper_point(&self, note: usize, u: f32, v: f32) -> (f32, f32) {
+        let (w, h) = self.note_size(note);
+        let (pw, ph) = self.paper_size(note);
+        let (du, dv) = (u - pw / 2.0, v - ph / 2.0);
+        let (s, c) = 1.5f32.to_radians().sin_cos();
+        (w as f32 / 2.0 + du * c - dv * s, h as f32 / 2.0 + du * s + dv * c)
+    }
+
+    /// Whether the color popover is open.
+    pub fn picker_open(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.ui().get_picker_open()).unwrap()
+    }
+
     /// Which toolbar buttons show as active: B, I, U, ab, list.
     pub fn toolbar_active(&self, note: usize) -> [bool; 5] {
         self.app()
