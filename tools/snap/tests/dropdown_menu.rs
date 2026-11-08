@@ -448,6 +448,17 @@ fn all_notes_sidebar_selection_and_new_note_button() {
     h.invoke_dropdown_all_notes();
     assert!(h.is_all_notes_open());
     assert_eq!(h.all_notes_selected_id(), Some(id0));
+    assert_eq!(
+        h.all_notes_status_text().as_deref(),
+        Some("Open on your desktop · edited today")
+    );
+    let open_preview: String = h
+        .all_notes_preview_runs()
+        .iter()
+        .map(|r| r.text.as_str())
+        .collect();
+    assert!(open_preview.contains("Endfield Note"));
+    assert!(open_preview.contains("Thermite Cutter"));
 
     let open_items = h.all_notes_open_items();
     let closed_items = h.all_notes_closed_items();
@@ -457,12 +468,23 @@ fn all_notes_sidebar_selection_and_new_note_button() {
     assert_eq!(closed_items.len(), 1);
     assert_eq!(closed_items[0].title.as_str(), "Meeting ideas");
 
-    // Selecting a closed note updates selection and resets confirming-delete
+    // Selecting a closed note updates selection, status text, preview runs, and resets confirming-delete
     h.set_all_notes_confirming_delete(true);
     assert_eq!(h.all_notes_confirming_delete(), Some(true));
     h.invoke_all_notes_select_note(closed_id);
     assert_eq!(h.all_notes_selected_id(), Some(closed_id));
     assert_eq!(h.all_notes_confirming_delete(), Some(false));
+    assert_eq!(
+        h.all_notes_status_text().as_deref(),
+        Some("Closed · edited today")
+    );
+    let closed_preview: String = h
+        .all_notes_preview_runs()
+        .iter()
+        .map(|r| r.text.as_str())
+        .collect();
+    assert!(closed_preview.contains("Meeting ideas"));
+    assert!(closed_preview.contains("Roadmap"));
 
     // Clicking "+ New note" creates a new note on the desktop and refreshes All Notes
     h.set_all_notes_confirming_delete(true);
@@ -479,4 +501,7 @@ fn all_notes_sidebar_selection_and_new_note_button() {
     // Desk background at top-left (10, 10) is #D6DBE2 (214, 219, 226)
     let bg = pixels[(10 * w + 10) as usize];
     assert_eq!((bg.r, bg.g, bg.b), (214, 219, 226));
+    // Preview card paper center at (411, 311) is #FFFFFD
+    let paper = pixels[(311 * w + 411) as usize];
+    assert!(paper.r >= 252 && paper.g >= 252 && paper.b >= 250);
 }

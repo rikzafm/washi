@@ -1,26 +1,226 @@
 //! All Notes ("Notes") window and lifecycle controller.
 
-use crate::dropdown::extract_title_and_preview;
-use crate::note_window::{AllNoteItem, AllNotesWindow};
+use crate::document::{Document, Kind, PALETTE, Style as DocStyle};
+use crate::dropdown::{extract_title_and_preview, format_relative_timestamp};
+use crate::note_window::{AllNoteItem, AllNotesWindow, PreviewRun};
 use crate::platform::NoteId;
 use crate::storage::AllNoteRow;
+use crate::textflow;
 use slint::ComponentHandle;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub const ALL_NOTES_WIDTH: f32 = 603.0;
 pub const ALL_NOTES_HEIGHT: f32 = 625.0;
 
+pub const PREVIEW_PAPER_CENTER: (f64, f64) = (411.4, 311.1);
+pub const PREVIEW_PAPER_SIZE: (f64, f64) = (334.0, 418.0);
+pub const PREVIEW_TILT_DEG: f64 = 1.5;
+const MAX_STEP_WIDTH: f64 = 16.0;
+const MAX_PREVIEW_V: f64 = 365.0;
+
+struct ViewState {
+    rows: RefCell<Vec<AllNoteRow>>,
+    now_ms: Cell<i64>,
+}
+
+pub fn format_status_line(row: &AllNoteRow, now_ms: i64) -> String {
+    let rel = format_relative_timestamp(row.updated_at, now_ms);
+    let rel_clean = rel.strip_prefix("· ").unwrap_or(&rel).trim();
+    let rel_str = if rel_clean.is_empty() { "today" } else { rel_clean };
+    if row.is_open {
+        format!("Open on your desktop · edited {rel_str}")
+    } else {
+        format!("Closed · edited {rel_str}")
+    }
+}
+
+fn layout_line_runs(
+    text: &str,
+    u0: f64,
+    v: f64,
+    size: f64,
+    pitch: f64,
+    bold: bool,
+    italic: bool,
+    color: slint::Color,
+) -> Vec<PreviewRun> {
+    textflow::line_pieces(text, size, MAX_STEP_WIDTH)
+        .into_iter()
+        .map(|(piece, at, w)| {
+            let u = u0 + at;
+            let (dx, dy) = textflow::tilt_offset(
+                u + w / 2.0,
+                v + pitch / 2.0,
+                PREVIEW_PAPER_SIZE,
+                PREVIEW_TILT_DEG,
+            );
+            PreviewRun {
+                text: piece.into(),
+                u: u as f32,
+                v: v as f32,
+                dx: dx as f32,
+                dy: dy as f32,
+                width: w as f32,
+                size: size as f32,
+                bold,
+                italic,
+                color,
+            }
+        })
+        .collect()
+}
+
+fn wrap_text_lines(text: &str, size: f64, max_width: f64) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0.0;
+
+    for word in text.split(' ') {
+        let space_w = if current.is_empty() {
+            0.0
+        } else {
+            textflow::line_width(" ", size)
+        };
+        let word_w = textflow::line_width(word, size);
+        if !current.is_empty() && current_w + space_w + word_w > max_width + 1e-6 {
+            lines.push(std::mem::take(&mut current));
+            current_w = 0.0;
+        }
+        if current.is_empty() {
+            current.push_str(word);
+            current_w = word_w;
+        } else {
+            current.push(' ');
+            current.push_str(word);
+            current_w += space_w + word_w;
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+pub fn layout_preview_runs(content: &str) -> Vec<PreviewRun> {
+    let doc = Document::parse(content);
+    let blocks = doc.blocks();
+    let default_ink = slint::Color::from_rgb_u8(0x2B, 0x2F, 0x36);
+
+    let mut runs = Vec::new();
+    let mut v = 48.0;
+    let mut prev_group: Option<Kind> = None;
+
+    for b in blocks {
+        if b.kind == Kind::Image {
+            continue;
+        }
+        let grp = if b.kind == Kind::ListItem { Kind::Body } else { b.kind };
+        if let Some(prev) = prev_group {
+            if prev != grp {
+                v += if grp == Kind::Heading { 10.0 } else { 12.0 };
+            }
+        }
+        prev_group = Some(grp);
+
+        let (u0, size, pitch, avail, default_bold) = match b.kind {
+            Kind::Title => (25.0, 33.0, 46.0, 280.0, false),
+            Kind::Heading => (24.0, 16.0, 22.0, 280.0, true),
+            Kind::Body | Kind::ListItem | Kind::Image => (24.0, 15.5, 22.0, 278.0, false),
+        };
+
+        let block_text = if b.kind == Kind::ListItem && !b.text.is_empty() {
+            format!("• {}", b.text)
+        } else {
+            b.text.clone()
+        };
+
+        let common_style = b.common_style(0, b.text.len());
+        let bold = default_bold || common_style.contains(DocStyle::BOLD);
+        let italic = common_style.contains(DocStyle::ITALIC);
+        let ink_color = b
+            .common_ink(0, b.text.len())
+            .and_then(|idx| PALETTE.get(idx as usize))
+            .map(|sw| {
+                slint::Color::from_rgb_u8(
+                    ((sw.ink >> 16) & 0xFF) as u8,
+                    ((sw.ink >> 8) & 0xFF) as u8,
+                    (sw.ink & 0xFF) as u8,
+                )
+            })
+            .unwrap_or(default_ink);
+
+        let lines = wrap_text_lines(&block_text, size, avail);
+        for line in lines {
+            if v >= MAX_PREVIEW_V {
+                return runs;
+            }
+            if !line.is_empty() {
+                runs.extend(layout_line_runs(
+                    &line, u0, v, size, pitch, bold, italic, ink_color,
+                ));
+            }
+            v += pitch;
+        }
+    }
+
+    runs
+}
+
+fn apply_selected_note(ui: &AllNotesWindow, rows: &[AllNoteRow], selected_id: Option<NoteId>, now_ms: i64) {
+    match selected_id.and_then(|id| rows.iter().find(|r| r.id == id)) {
+        Some(row) => {
+            ui.set_selected_note_id(row.id as i32);
+            ui.set_selected_note_open(row.is_open);
+            let status = format_status_line(row, now_ms);
+            let status_runs = layout_line_runs(
+                &status,
+                24.0,
+                26.0,
+                13.5,
+                20.0,
+                false,
+                false,
+                slint::Color::from_rgb_u8(0x5B, 0x61, 0x6B),
+            );
+            let preview_runs = layout_preview_runs(&row.content);
+            ui.set_status_text(status.into());
+            ui.set_status_runs(slint::ModelRc::from(Rc::new(slint::VecModel::from(status_runs))));
+            ui.set_preview_runs(slint::ModelRc::from(Rc::new(slint::VecModel::from(preview_runs))));
+        }
+        None => {
+            ui.set_selected_note_id(-1);
+            ui.set_selected_note_open(false);
+            ui.set_status_text("".into());
+            ui.set_status_runs(slint::ModelRc::default());
+            ui.set_preview_runs(slint::ModelRc::default());
+        }
+    }
+}
+
 pub struct AllNotesView {
     ui: AllNotesWindow,
+    state: Rc<ViewState>,
 }
 
 impl AllNotesView {
     pub fn open(
         initial_selected_id: NoteId,
         rows: &[AllNoteRow],
+        now_ms: i64,
         on_close: Rc<dyn Fn()>,
     ) -> Result<Self, slint::PlatformError> {
         let ui = AllNotesWindow::new()?;
+        let state = Rc::new(ViewState {
+            rows: RefCell::new(rows.to_vec()),
+            now_ms: Cell::new(now_ms),
+        });
 
         {
             let on_close = on_close.clone();
@@ -37,29 +237,34 @@ impl AllNotesView {
         }
         {
             let weak_ui = ui.as_weak();
+            let state = state.clone();
             ui.on_select_note(move |id| {
                 if let Some(ui) = weak_ui.upgrade() {
-                    use slint::Model;
                     ui.set_confirming_delete(false);
-                    ui.set_selected_note_id(id);
-                    let is_open = ui.get_open_notes().iter().any(|item| item.id == id);
-                    ui.set_selected_note_open(is_open);
+                    apply_selected_note(
+                        &ui,
+                        &state.rows.borrow(),
+                        (id >= 0).then_some(id as NoteId),
+                        state.now_ms.get(),
+                    );
                 }
             });
         }
 
-        let view = Self { ui };
-        view.refresh(rows, Some(initial_selected_id));
+        let view = Self { ui, state };
+        view.refresh(rows, Some(initial_selected_id), now_ms);
         view.ui.show()?;
         Ok(view)
     }
 
     pub fn select_note(&self, id: NoteId) {
-        use slint::Model;
         self.ui.set_confirming_delete(false);
-        self.ui.set_selected_note_id(id as i32);
-        let is_open = self.ui.get_open_notes().iter().any(|item| item.id == id as i32);
-        self.ui.set_selected_note_open(is_open);
+        apply_selected_note(
+            &self.ui,
+            &self.state.rows.borrow(),
+            Some(id),
+            self.state.now_ms.get(),
+        );
     }
 
     pub fn invoke_select_note(&self, id: NoteId) {
@@ -72,7 +277,10 @@ impl AllNotesView {
         self.ui.invoke_new_note();
     }
 
-    pub fn refresh(&self, rows: &[AllNoteRow], preferred_selected_id: Option<NoteId>) {
+    pub fn refresh(&self, rows: &[AllNoteRow], preferred_selected_id: Option<NoteId>, now_ms: i64) {
+        *self.state.rows.borrow_mut() = rows.to_vec();
+        self.state.now_ms.set(now_ms);
+
         let mut open_items = Vec::new();
         let mut closed_items = Vec::new();
 
@@ -103,17 +311,7 @@ impl AllNotesView {
             .or_else(|| current_selected.filter(|&id| rows.iter().any(|r| r.id == id)))
             .or_else(|| rows.first().map(|r| r.id));
 
-        match target_id {
-            Some(id) => {
-                self.ui.set_selected_note_id(id as i32);
-                let is_open = rows.iter().find(|r| r.id == id).is_some_and(|r| r.is_open);
-                self.ui.set_selected_note_open(is_open);
-            }
-            None => {
-                self.ui.set_selected_note_id(-1);
-                self.ui.set_selected_note_open(false);
-            }
-        }
+        apply_selected_note(&self.ui, rows, target_id, now_ms);
     }
 
     pub fn ui(&self) -> &AllNotesWindow {
@@ -141,6 +339,15 @@ impl AllNotesView {
     pub fn closed_notes(&self) -> Vec<AllNoteItem> {
         use slint::Model;
         self.ui.get_closed_notes().iter().collect()
+    }
+
+    pub fn status_text(&self) -> String {
+        self.ui.get_status_text().to_string()
+    }
+
+    pub fn preview_runs(&self) -> Vec<PreviewRun> {
+        use slint::Model;
+        self.ui.get_preview_runs().iter().collect()
     }
 
     pub fn confirming_delete(&self) -> bool {
@@ -215,7 +422,7 @@ mod tests {
     fn select_note_updates_selected_id_open_status_and_resets_confirming_delete() {
         init_test_platform();
         let rows = sample_rows();
-        let view = AllNotesView::open(1, &rows, Rc::new(|| {})).expect("AllNotesView::open");
+        let view = AllNotesView::open(1, &rows, 1_000, Rc::new(|| {})).expect("AllNotesView::open");
 
         assert_eq!(view.selected_note_id(), Some(1));
         assert!(view.ui().get_selected_note_open());
@@ -239,7 +446,7 @@ mod tests {
     fn new_note_callback_resets_confirming_delete_and_invokes_handler() {
         init_test_platform();
         let rows = sample_rows();
-        let view = AllNotesView::open(1, &rows, Rc::new(|| {})).expect("AllNotesView::open");
+        let view = AllNotesView::open(1, &rows, 1_000, Rc::new(|| {})).expect("AllNotesView::open");
 
         let new_called = Rc::new(Cell::new(false));
         let nc = new_called.clone();
@@ -251,6 +458,75 @@ mod tests {
         view.invoke_new_note();
         assert!(new_called.get());
         assert!(!view.confirming_delete());
+    }
+
+    #[test]
+    fn status_text_and_preview_runs_match_mockup_line_breaks_and_update_on_selection() {
+        init_test_platform();
+        let day_ms = 24 * 60 * 60 * 1000;
+        let now_ms = 1_700_000_000_000i64;
+        let mockup_content = "# Endfield Note\n## Thermite Cutter : POG & Akekuri\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";
+        let rows = vec![
+            AllNoteRow {
+                id: 1,
+                content: mockup_content.into(),
+                updated_at: now_ms,
+                is_open: true,
+                z_order: 2,
+            },
+            AllNoteRow {
+                id: 2,
+                content: "# Meeting ideas\nQ4 roadmap".into(),
+                updated_at: now_ms - day_ms,
+                is_open: false,
+                z_order: 0,
+            },
+        ];
+        let view = AllNotesView::open(1, &rows, now_ms, Rc::new(|| {})).expect("AllNotesView::open");
+
+        assert_eq!(view.status_text(), "Open on your desktop · edited today");
+
+        let runs = view.preview_runs();
+        assert!(!runs.is_empty(), "preview_runs should not be empty");
+
+        // Group runs by v coordinate to reconstruct wrapped lines
+        let mut lines_by_v: Vec<(f32, Vec<String>, bool, f32)> = Vec::new();
+        for r in &runs {
+            if let Some(last) = lines_by_v.last_mut().filter(|l| (l.0 - r.v).abs() < 0.5) {
+                last.1.push(r.text.to_string());
+            } else {
+                lines_by_v.push((r.v, vec![r.text.to_string()], r.bold, r.size));
+            }
+        }
+        let line_strings: Vec<String> = lines_by_v.iter().map(|(_, pieces, _, _)| pieces.concat()).collect();
+        assert_eq!(
+            line_strings,
+            vec![
+                "Endfield Note",
+                "Thermite Cutter : POG & Akekuri",
+                "Currently POG no Weapon : Ideal for him are",
+                "Never Rest or White Night Nova. The last can",
+                "be get in a box",
+            ]
+        );
+        // Title at v=48, size=33
+        assert!((lines_by_v[0].0 - 48.0).abs() < 1.0);
+        assert!((lines_by_v[0].3 - 33.0).abs() < 0.5);
+        // Heading at v=104, bold=true
+        assert!((lines_by_v[1].0 - 104.0).abs() < 1.0);
+        assert!(lines_by_v[1].2);
+        // Body lines at v=138, 160, 182, size=15.5
+        assert!((lines_by_v[2].0 - 138.0).abs() < 1.0);
+        assert!((lines_by_v[3].0 - 160.0).abs() < 1.0);
+        assert!((lines_by_v[4].0 - 182.0).abs() < 1.0);
+
+        // Selecting closed note 2 updates status text and preview runs
+        view.invoke_select_note(2);
+        assert_eq!(view.status_text(), "Closed · edited yesterday");
+        let closed_runs = view.preview_runs();
+        let closed_text: String = closed_runs.iter().map(|r| r.text.as_str()).collect();
+        assert!(closed_text.contains("Meeting ideas"));
+        assert!(closed_text.contains("Q4 roadmap"));
     }
 
     #[test]
@@ -274,7 +550,7 @@ mod tests {
             AllNoteRow { id: 5, content: "Reading list\nBody".into(), updated_at: 600, is_open: false, z_order: 0 },
             AllNoteRow { id: 6, content: "Trip to Kyoto\nBody".into(), updated_at: 500, is_open: false, z_order: 0 },
         ];
-        let view = AllNotesView::open(1, &rows, Rc::new(|| {})).expect("AllNotesView::open");
+        let view = AllNotesView::open(1, &rows, 1_000, Rc::new(|| {})).expect("AllNotesView::open");
         win.set_size(slint::PhysicalSize::new(603, 625));
 
         let render_pixels = || {
@@ -351,6 +627,97 @@ mod tests {
         click(83.5, 498.5);
         assert!(new_clicked.get(), "clicking + New note button should fire new-note callback");
         assert!(!view.confirming_delete());
+    }
+
+    #[test]
+    fn preview_card_renders_tilted_paper_shadow_tapes_and_typography() {
+        let win = slint::platform::software_renderer::MinimalSoftwareWindow::new(
+            slint::platform::software_renderer::RepaintBufferType::NewBuffer,
+        );
+        struct RenderPlatform(Rc<slint::platform::software_renderer::MinimalSoftwareWindow>);
+        impl slint::platform::Platform for RenderPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let _ = slint::platform::set_platform(Box::new(RenderPlatform(win.clone())));
+
+        let mockup_content = "# Endfield Note\n## Thermite Cutter : POG & Akekuri\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";
+        let rows = vec![AllNoteRow {
+            id: 1,
+            content: mockup_content.into(),
+            updated_at: 1_000,
+            is_open: true,
+            z_order: 1,
+        }];
+        let _view = AllNotesView::open(1, &rows, 1_000, Rc::new(|| {})).expect("AllNotesView::open");
+        win.set_size(slint::PhysicalSize::new(603, 625));
+
+        win.request_redraw();
+        let mut buf = vec![slint::Rgb8Pixel::default(); 603 * 625];
+        win.draw_if_needed(|r| {
+            r.render(&mut buf, 603);
+        });
+
+        let px = |x: usize, y: usize| buf[y * 603 + x];
+
+        // 1. Paper center (411, 311) is #FFFFFD
+        let center_px = px(411, 311);
+        assert!(
+            center_px.r >= 252 && center_px.g >= 252 && center_px.b >= 250,
+            "paper center (411, 311) should be #FFFFFD, got {center_px:?}"
+        );
+
+        // 2. Soft shadow below bottom edge of paper around (411, 526) is darker than desk (#D6DBE2 = 214, 219, 226)
+        let shadow_px = px(411, 526);
+        assert!(
+            shadow_px.r < 214 && shadow_px.g < 219 && shadow_px.b < 226,
+            "paper shadow at (411, 526) should be darker than desk, got {shadow_px:?}"
+        );
+
+        // 3. Pink tape around (281, 111) has warm pink pixels (r > b + 10)
+        let has_pink_tape = (105..=117).any(|y| (265..=295).any(|x| {
+            let p = px(x, y);
+            p.r as i32 > p.b as i32 + 10 && p.r < 250
+        }));
+        assert!(has_pink_tape, "pink tape should render around (281, 111)");
+
+        // 4. Blue tape around (545, 519) has cool blue pixels (b > r + 10)
+        let has_blue_tape = (512..=525).any(|y| (530..=560).any(|x| {
+            let p = px(x, y);
+            p.b as i32 > p.r as i32 + 10 && p.r < 245
+        }));
+        assert!(has_blue_tape, "blue tape should render around (545, 519)");
+
+        // 5. Status line ink around x=[273..450], y=[128..148]
+        let has_status_ink = (128..=148).any(|y| (273..=450).any(|x| {
+            let p = px(x, y);
+            p.r < 160 && p.g < 165 && p.b < 175
+        }));
+        assert!(has_status_ink, "status line should render ink in top band of preview card");
+
+        // 6. Title ("Endfield Note") ink around x=[273..430], y=[155..190]
+        let has_title_ink = (155..=190).any(|y| (273..=430).any(|x| {
+            let p = px(x, y);
+            p.r < 100 && p.g < 100 && p.b < 110
+        }));
+        assert!(has_title_ink, "title should render dark ink on preview card");
+
+        // 7. Heading ("Thermite Cutter : POG & Akekuri") ink around x=[272..480], y=[208..228]
+        let has_heading_ink = (208..=228).any(|y| (272..=480).any(|x| {
+            let p = px(x, y);
+            p.r < 100 && p.g < 100 && p.b < 110
+        }));
+        assert!(has_heading_ink, "heading should render dark ink on preview card");
+
+        // 8. Three body lines ink around y=[240..260], y=[262..282], y=[284..304]
+        for (line_idx, (y0, y1)) in [(240usize, 260usize), (262, 282), (284, 304)].into_iter().enumerate() {
+            let has_line_ink = (y0..=y1).any(|y| (270..=520).any(|x| {
+                let p = px(x, y);
+                p.r < 100 && p.g < 100 && p.b < 110
+            }));
+            assert!(has_line_ink, "body line {line_idx} should render dark ink in y=[{y0}..{y1}]");
+        }
     }
 }
 

@@ -975,6 +975,14 @@ impl Harness {
         self.app.as_ref().map(|a| a.all_notes_closed_items()).unwrap_or_default()
     }
 
+    pub fn all_notes_status_text(&self) -> Option<String> {
+        self.app.as_ref().and_then(|a| a.all_notes_status_text())
+    }
+
+    pub fn all_notes_preview_runs(&self) -> Vec<washi::note_window::PreviewRun> {
+        self.app.as_ref().map(|a| a.all_notes_preview_runs()).unwrap_or_default()
+    }
+
     pub fn all_notes_confirming_delete(&self) -> Option<bool> {
         self.app.as_ref().and_then(|a| a.all_notes_confirming_delete())
     }
