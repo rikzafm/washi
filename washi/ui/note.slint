@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { BlockData, RuleData, RunData } from "block.slint";
+import { BlockData, RuleData, RunData, SelRect } from "block.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
@@ -33,6 +33,12 @@ export component NoteWindow inherits Window {
     in property <[RunData]> runs;
     /// Underlines, strike-throughs and list bullets, to be drawn with the words.
     in property <[RuleData]> rules;
+    /// The wash of the selection (Rust): a level box for each line it touches.
+    in property <[SelRect]> sel-rects;
+    /// Ctrl+A: Rust sets the selection to the whole note and fills `sel-rects`; `select-cleared`
+    /// when that selection ended.
+    callback select-all();
+    callback select-cleared();
     /// The formats of the selection, or of what is typed at the caret (the toolbar buttons' active state).
     in property <bool> fmt-bold: false;
     in property <bool> fmt-italic: false;
@@ -181,6 +187,9 @@ export component NoteWindow inherits Window {
                     blocks: root.blocks;
                     runs: root.runs;
                     rules: root.rules;
+                    sel-rects: root.sel-rects;
+                    select-all => { root.select-all(); }
+                    select-cleared => { root.select-cleared(); }
                     focus-entered(i) => { root.focus-entered(i); }
                     suspended: root.suspended;
                     resync: root.text-resync;

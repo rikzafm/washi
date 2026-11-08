@@ -545,6 +545,14 @@ impl Harness {
             .unwrap()
     }
 
+    /// The boxes of the selection wash `(x, y, width, height)`, level, in the paper's frame.
+    pub fn sel_rects(&self, note: usize) -> Vec<(f32, f32, f32, f32)> {
+        use slint::Model;
+        self.app()
+            .with_note(self.id(note), |n| n.ui().get_sel_rects().iter().map(|r| (r.x, r.y, r.width, r.height)).collect())
+            .unwrap()
+    }
+
     /// The window loses (or regains) the system focus: no field has the keyboard focus then.
     pub fn set_window_active(&mut self, note: usize, active: bool) {
         self.app().with_note(self.id(note), |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(active)));
