@@ -1,12 +1,11 @@
 // Dropdown menu window for note Quick Jump and actions.
 // Floats relative to the parent note's "..." trigger button.
 
-import "../../fonts/Gelasio-Bold.ttf";
 import "../../fonts/ShadowsIntoLight.ttf";
 import { ListView } from "std-widgets.slint";
 
 component HeaderIconButton inherits Rectangle {
-    in property <length> icon-size: 26px;
+    in property <length> icon-size: 22px;
     in property <color> hover-bg: #F0F0EE;
     in property <color> press-bg: #E0E0DE;
     callback clicked();
@@ -28,9 +27,9 @@ component BottomActionButton inherits Rectangle {
     in property <string> text;
     callback clicked();
 
-    height: 30px;
-    border-radius: 6px;
-    background: hit.pressed ? #E4E4E2 : (hit.has-hover ? #F0F0EE : transparent);
+    height: 48px;
+    border-radius: 8px;
+    background: hit.pressed ? #E4E4E0 : (hit.has-hover ? #F4F4F0 : transparent);
 
     hit := TouchArea {
         width: 100%;
@@ -92,7 +91,7 @@ export component DropdownMenuWindow inherits Window {
         }
     }
 
-    // The upright card
+    // The upright card matching mockup
     card := Rectangle {
         x: root.shadow-margin;
         y: root.shadow-margin;
@@ -100,8 +99,8 @@ export component DropdownMenuWindow inherits Window {
         height: root.card-height;
         background: #FFFFFF;
         border-radius: 14px;
-        drop-shadow-blur: 16px;
-        drop-shadow-color: #00000028;
+        drop-shadow-blur: 18px;
+        drop-shadow-color: #00000022;
         drop-shadow-offset-y: 6px;
         clip: true;
 
@@ -113,147 +112,136 @@ export component DropdownMenuWindow inherits Window {
 
         // --- Header ---
         header := Rectangle {
-            x: 16px;
-            y: 12px;
-            width: root.card-width - 32px;
-            height: 28px;
+            x: 18px;
+            y: 14px;
+            width: root.card-width - 36px;
+            height: 24px;
 
             Text {
                 x: 0;
                 y: 0;
+                width: 90px;
                 height: 100%;
                 text: "JUMP TO";
-                font-family: "Gelasio";
                 font-size: 11px;
                 font-weight: 700;
+                letter-spacing: 0.6px;
                 color: #8B919A;
                 vertical-alignment: center;
             }
 
-            // Right-aligned button group: Pin and Delete
-            HorizontalLayout {
-                x: parent.width - self.width;
-                y: 0;
-                height: 100%;
-                spacing: 4px;
-
-                // Pin Button
-                pin-btn := HeaderIconButton {
-                    clicked => {
-                        root.toggle_pin();
-                    }
-
-                    property <color> pin-color: root.pinned ? #2B2F36 : (self.hover-state ? #2B2F36 : #8B919A);
-                    property <bool> hover-state: self.background != transparent;
-
-                    // Pin head bar
-                    Rectangle {
-                        x: 8px;
-                        y: 6px;
-                        width: 10px;
-                        height: 2px;
-                        border-radius: 1px;
-                        background: pin-btn.pin-color;
-                    }
-                    // Pin body cone
-                    Path {
-                        width: 26px;
-                        height: 26px;
-                        viewbox-width: 26;
-                        viewbox-height: 26;
-                        fill: pin-btn.pin-color;
-                        MoveTo { x: 10; y: 8; }
-                        LineTo { x: 16; y: 8; }
-                        LineTo { x: 15; y: 13; }
-                        LineTo { x: 11; y: 13; }
-                        Close { }
-                    }
-                    // Pin rim
-                    Rectangle {
-                        x: 7px;
-                        y: 13px;
-                        width: 12px;
-                        height: 2px;
-                        border-radius: 0.5px;
-                        background: pin-btn.pin-color;
-                    }
-                    // Pin needle point
-                    Path {
-                        width: 26px;
-                        height: 26px;
-                        viewbox-width: 26;
-                        viewbox-height: 26;
-                        stroke: pin-btn.pin-color;
-                        stroke-width: 1.5px;
-                        stroke-line-cap: round;
-                        MoveTo { x: 13; y: 15; }
-                        LineTo { x: 13; y: 20; }
-                    }
+            // Pin button
+            pin-btn := HeaderIconButton {
+                x: parent.width - 50px;
+                y: 1px;
+                icon-size: 22px;
+                clicked => {
+                    root.toggle_pin();
                 }
 
-                // Delete Button
-                trash-btn := HeaderIconButton {
-                    hover-bg: #FFEBEE;
-                    press-bg: #FFCDD2;
-                    clicked => {
-                        root.delete_note();
-                    }
+                property <color> pin-color: root.pinned ? #2B2F36 : (self.hover-state ? #2B2F36 : #8B919A);
+                property <bool> hover-state: self.background != transparent;
 
-                    property <color> trash-color: #D32F2F;
+                // Pushpin line art matching mockup
+                Rectangle {
+                    x: 6px;
+                    y: 3px;
+                    width: 10px;
+                    height: 1.5px;
+                    border-radius: 0.5px;
+                    background: pin-btn.pin-color;
+                }
+                Path {
+                    width: 22px;
+                    height: 22px;
+                    viewbox-width: 22;
+                    viewbox-height: 22;
+                    fill: pin-btn.pin-color;
+                    MoveTo { x: 8.5; y: 4.5; }
+                    LineTo { x: 13.5; y: 4.5; }
+                    LineTo { x: 12.5; y: 9.5; }
+                    LineTo { x: 9.5; y: 9.5; }
+                    Close { }
+                }
+                Rectangle {
+                    x: 5px;
+                    y: 9.5px;
+                    width: 12px;
+                    height: 1.5px;
+                    border-radius: 0.5px;
+                    background: pin-btn.pin-color;
+                }
+                Rectangle {
+                    x: 10.25px;
+                    y: 11px;
+                    width: 1.5px;
+                    height: 7px;
+                    border-radius: 0.5px;
+                    background: pin-btn.pin-color;
+                }
+            }
 
-                    // Lid handle
-                    Path {
-                        width: 26px;
-                        height: 26px;
-                        viewbox-width: 26;
-                        viewbox-height: 26;
-                        stroke: trash-btn.trash-color;
-                        stroke-width: 1.3px;
-                        stroke-line-cap: round;
-                        MoveTo { x: 11; y: 6.5; }
-                        LineTo { x: 11; y: 5; }
-                        LineTo { x: 15; y: 5; }
-                        LineTo { x: 15; y: 6.5; }
-                    }
-                    // Lid horizontal line
-                    Rectangle {
-                        x: 6.5px;
-                        y: 6.5px;
-                        width: 13px;
-                        height: 1.5px;
-                        border-radius: 0.75px;
-                        background: trash-btn.trash-color;
-                    }
-                    // Bin outline
-                    Path {
-                        width: 26px;
-                        height: 26px;
-                        viewbox-width: 26;
-                        viewbox-height: 26;
-                        stroke: trash-btn.trash-color;
-                        stroke-width: 1.3px;
-                        stroke-line-join: round;
-                        stroke-line-cap: round;
-                        MoveTo { x: 8; y: 8; }
-                        LineTo { x: 8.5; y: 19; }
-                        LineTo { x: 17.5; y: 19; }
-                        LineTo { x: 18; y: 8; }
-                    }
-                    // Inner slats
-                    Rectangle {
-                        x: 11px;
-                        y: 10px;
-                        width: 1.2px;
-                        height: 6.5px;
-                        background: trash-btn.trash-color;
-                    }
-                    Rectangle {
-                        x: 13.8px;
-                        y: 10px;
-                        width: 1.2px;
-                        height: 6.5px;
-                        background: trash-btn.trash-color;
-                    }
+            // Trash button
+            trash-btn := HeaderIconButton {
+                x: parent.width - 24px;
+                y: 1px;
+                icon-size: 22px;
+                hover-bg: #FFEBEE;
+                press-bg: #FFCDD2;
+                clicked => {
+                    root.delete_note();
+                }
+
+                property <color> trash-color: #D32F2F;
+
+                Path {
+                    width: 22px;
+                    height: 22px;
+                    viewbox-width: 22;
+                    viewbox-height: 22;
+                    stroke: trash-btn.trash-color;
+                    stroke-width: 1.2px;
+                    stroke-line-cap: round;
+                    MoveTo { x: 9.5; y: 4.8; }
+                    LineTo { x: 9.5; y: 3.5; }
+                    LineTo { x: 12.5; y: 3.5; }
+                    LineTo { x: 12.5; y: 4.8; }
+                }
+                Rectangle {
+                    x: 4.5px;
+                    y: 5px;
+                    width: 13px;
+                    height: 1.4px;
+                    border-radius: 0.5px;
+                    background: trash-btn.trash-color;
+                }
+                Path {
+                    width: 22px;
+                    height: 22px;
+                    viewbox-width: 22;
+                    viewbox-height: 22;
+                    stroke: trash-btn.trash-color;
+                    stroke-width: 1.2px;
+                    stroke-line-join: round;
+                    stroke-line-cap: round;
+                    MoveTo { x: 6; y: 6.5; }
+                    LineTo { x: 6.5; y: 16.5; }
+                    LineTo { x: 15.5; y: 16.5; }
+                    LineTo { x: 16; y: 6.5; }
+                }
+                Rectangle {
+                    x: 9px;
+                    y: 8px;
+                    width: 1.1px;
+                    height: 6px;
+                    background: trash-btn.trash-color;
+                }
+                Rectangle {
+                    x: 11.9px;
+                    y: 8px;
+                    width: 1.1px;
+                    height: 6px;
+                    background: trash-btn.trash-color;
                 }
             }
         }
@@ -263,7 +251,7 @@ export component DropdownMenuWindow inherits Window {
             x: 0;
             y: 44px;
             width: root.card-width;
-            height: root.card-height - 44px - 44px;
+            height: 204px;
             clip: true;
 
             if root.notes.length == 0 : Rectangle {
@@ -273,8 +261,8 @@ export component DropdownMenuWindow inherits Window {
                     width: 100%;
                     height: 100%;
                     text: "No other notes yet";
-                    font-family: "Gelasio";
-                    font-size: 13px;
+                    font-family: "Shadows Into Light";
+                    font-size: 15px;
                     color: #8B919A;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -288,12 +276,12 @@ export component DropdownMenuWindow inherits Window {
                     height: 52px;
 
                     item-btn := Rectangle {
-                        x: 8px;
-                        y: 2px;
-                        width: parent.width - 16px;
-                        height: 48px;
+                        x: 10px;
+                        y: 1px;
+                        width: parent.width - 20px;
+                        height: 50px;
                         border-radius: 8px;
-                        background: item-touch.pressed ? #E4E4E2 : (item-touch.has-hover ? #F4F4F2 : transparent);
+                        background: item-touch.pressed ? #ECECE8 : (item-touch.has-hover ? #F6F6F4 : transparent);
 
                         item-touch := TouchArea {
                             width: 100%;
@@ -305,24 +293,24 @@ export component DropdownMenuWindow inherits Window {
                         }
 
                         VerticalLayout {
-                            x: 10px;
-                            y: 5px;
-                            width: parent.width - 20px;
-                            height: parent.height - 10px;
-                            spacing: 2px;
+                            x: 8px;
+                            y: 3px;
+                            width: parent.width - 16px;
+                            height: parent.height - 6px;
+                            spacing: 1px;
                             alignment: center;
 
                             HorizontalLayout {
                                 spacing: 6px;
-                                height: 18px;
+                                height: 21px;
 
                                 if item.has-tape : Rectangle {
-                                    width: 28px;
-                                    height: 18px;
+                                    width: 24px;
+                                    height: 21px;
                                     Image {
                                         source: @image-url("assets/tape-pink-flat.png");
-                                        width: 28px;
-                                        height: 10px;
+                                        width: 24px;
+                                        height: 8px;
                                         y: (parent.height - self.height) / 2;
                                         image-fit: contain;
                                     }
@@ -331,8 +319,8 @@ export component DropdownMenuWindow inherits Window {
                                 Text {
                                     text: item.title;
                                     font-family: "Shadows Into Light";
-                                    font-size: 15px;
-                                    font-weight: 600;
+                                    font-size: 18px;
+                                    font-weight: 400;
                                     color: #2B2F36;
                                     overflow: elide;
                                     vertical-alignment: center;
@@ -341,9 +329,12 @@ export component DropdownMenuWindow inherits Window {
 
                             Text {
                                 text: item.preview != "" ? (item.timestamp != "" ? (item.preview + " " + item.timestamp) : item.preview) : item.timestamp;
-                                font-size: 11px;
-                                color: #8B919A;
+                                font-family: "Shadows Into Light";
+                                font-size: 14px;
+                                font-weight: 400;
+                                color: #7E8691;
                                 overflow: elide;
+                                vertical-alignment: center;
                             }
                         }
                     }
@@ -353,66 +344,68 @@ export component DropdownMenuWindow inherits Window {
 
         // --- Dotted Divider Line ---
         divider := Rectangle {
-            x: 16px;
-            y: root.card-height - 44px;
-            width: root.card-width - 32px;
+            x: 18px;
+            y: root.card-height - 62px;
+            width: root.card-width - 36px;
             height: 2px;
 
-            for i in 36: Rectangle {
+            for i in 34: Rectangle {
                 x: i * 6.5px;
                 y: 0px;
                 width: 2px;
-                height: 2px;
-                border-radius: 1px;
-                background: #D8DADC;
+                height: 1.5px;
+                border-radius: 0.75px;
+                background: #E0E2E5;
             }
         }
 
         // --- Bottom Action Bar ---
         action-bar := HorizontalLayout {
-            x: 10px;
-            y: root.card-height - 38px;
-            width: root.card-width - 20px;
-            height: 30px;
-            spacing: 2px;
+            x: 14px;
+            y: root.card-height - 56px;
+            width: root.card-width - 28px;
+            height: 48px;
             alignment: space-between;
 
             // + New
             btn-new := BottomActionButton {
-                width: 66px;
+                width: 70px;
                 clicked => {
                     root.new_note();
                 }
 
-                HorizontalLayout {
+                VerticalLayout {
+                    width: 100%;
+                    height: 100%;
                     alignment: center;
-                    spacing: 4px;
+                    spacing: 2px;
 
                     // Plus icon
                     Rectangle {
-                        width: 12px;
-                        height: 100%;
-
+                        height: 14px;
                         Path {
+                            x: (parent.width - 12px) / 2;
+                            y: 1px;
                             width: 12px;
-                            height: 30px;
+                            height: 12px;
                             viewbox-width: 12;
-                            viewbox-height: 30;
+                            viewbox-height: 12;
                             stroke: #2B2F36;
-                            stroke-width: 1.5px;
+                            stroke-width: 1.4px;
                             stroke-line-cap: round;
-                            MoveTo { x: 2; y: 15; }
-                            LineTo { x: 10; y: 15; }
-                            MoveTo { x: 6; y: 11; }
-                            LineTo { x: 6; y: 19; }
+                            MoveTo { x: 1; y: 6; }
+                            LineTo { x: 11; y: 6; }
+                            MoveTo { x: 6; y: 1; }
+                            LineTo { x: 6; y: 11; }
                         }
                     }
 
                     Text {
                         text: "New";
-                        font-size: 12px;
-                        font-weight: 500;
+                        font-family: "Shadows Into Light";
+                        font-size: 15px;
                         color: #2B2F36;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                 }
@@ -420,53 +413,41 @@ export component DropdownMenuWindow inherits Window {
 
             // := All notes
             btn-all := BottomActionButton {
-                width: 86px;
+                width: 76px;
 
-                HorizontalLayout {
+                VerticalLayout {
+                    width: 100%;
+                    height: 100%;
                     alignment: center;
-                    spacing: 5px;
+                    spacing: 2px;
 
                     // List icon
                     Rectangle {
-                        width: 12px;
-                        height: 100%;
-
-                        Path {
-                            width: 12px;
-                            height: 30px;
-                            viewbox-width: 12;
-                            viewbox-height: 30;
-                            stroke: #2B2F36;
-                            stroke-width: 1.4px;
-                            stroke-line-cap: round;
-                            MoveTo { x: 5; y: 12; }
-                            LineTo { x: 11; y: 12; }
-                            MoveTo { x: 5; y: 17; }
-                            LineTo { x: 11; y: 17; }
-                        }
-                        Rectangle {
-                            x: 1px;
-                            y: 11px;
+                        height: 14px;
+                        for row[idx] in [2.5, 6.5, 10.5]: Rectangle {
+                            x: (parent.width - 14px) / 2;
+                            y: row * 1px;
                             width: 2px;
                             height: 2px;
                             border-radius: 1px;
                             background: #2B2F36;
                         }
-                        Rectangle {
-                            x: 1px;
-                            y: 16px;
-                            width: 2px;
-                            height: 2px;
-                            border-radius: 1px;
+                        for row[idx] in [2.5, 6.5, 10.5]: Rectangle {
+                            x: (parent.width - 14px) / 2 + 4px;
+                            y: (row + 0.5) * 1px;
+                            width: 9px;
+                            height: 1.2px;
+                            border-radius: 0.6px;
                             background: #2B2F36;
                         }
                     }
 
                     Text {
                         text: "All notes";
-                        font-size: 12px;
-                        font-weight: 500;
+                        font-family: "Shadows Into Light";
+                        font-size: 15px;
                         color: #2B2F36;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                 }
@@ -474,53 +455,32 @@ export component DropdownMenuWindow inherits Window {
 
             // Sliders Settings
             btn-settings := BottomActionButton {
-                width: 84px;
+                width: 76px;
 
-                HorizontalLayout {
+                VerticalLayout {
+                    width: 100%;
+                    height: 100%;
                     alignment: center;
-                    spacing: 5px;
+                    spacing: 2px;
 
                     // Sliders icon
                     Rectangle {
-                        width: 12px;
-                        height: 100%;
-
-                        Path {
-                            width: 12px;
-                            height: 30px;
-                            viewbox-width: 12;
-                            viewbox-height: 30;
-                            stroke: #2B2F36;
-                            stroke-width: 1.3px;
-                            stroke-line-cap: round;
-                            MoveTo { x: 1; y: 12.5; }
-                            LineTo { x: 11; y: 12.5; }
-                            MoveTo { x: 1; y: 17.5; }
-                            LineTo { x: 11; y: 17.5; }
-                        }
-                        Rectangle {
-                            x: 3px;
-                            y: 10.5px;
-                            width: 2px;
-                            height: 4px;
-                            border-radius: 0.8px;
-                            background: #2B2F36;
-                        }
-                        Rectangle {
-                            x: 7px;
-                            y: 15.5px;
-                            width: 2px;
-                            height: 4px;
-                            border-radius: 0.8px;
-                            background: #2B2F36;
-                        }
+                        height: 14px;
+                        property <length> ox: (parent.width - 14px) / 2;
+                        Rectangle { x: ox; y: 3px; width: 14px; height: 1.2px; border-radius: 0.6px; background: #2B2F36; }
+                        Rectangle { x: ox; y: 7px; width: 14px; height: 1.2px; border-radius: 0.6px; background: #2B2F36; }
+                        Rectangle { x: ox; y: 11px; width: 14px; height: 1.2px; border-radius: 0.6px; background: #2B2F36; }
+                        Rectangle { x: ox + 9px; y: 1.5px; width: 2px; height: 4.2px; border-radius: 0.6px; background: #2B2F36; }
+                        Rectangle { x: ox + 3px; y: 5.5px; width: 2px; height: 4.2px; border-radius: 0.6px; background: #2B2F36; }
+                        Rectangle { x: ox + 8px; y: 9.5px; width: 2px; height: 4.2px; border-radius: 0.6px; background: #2B2F36; }
                     }
 
                     Text {
                         text: "Settings";
-                        font-size: 12px;
-                        font-weight: 500;
+                        font-family: "Shadows Into Light";
+                        font-size: 15px;
                         color: #2B2F36;
+                        horizontal-alignment: center;
                         vertical-alignment: center;
                     }
                 }

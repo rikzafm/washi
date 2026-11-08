@@ -276,15 +276,15 @@ export component MenuButton inherits Rectangle {
         w: 2 * root.hw;
         h: 2 * root.hh;
         r: ToolbarMetrics.menu-button-radius / 1px;
-        fill: hit.pressed ? #E0E0DE : (root.highlighted ? ToolbarMetrics.button-fill : transparent);
+        fill: hit.pressed ? #E0E0DE : (root.highlighted ? #EAEAE8 : transparent);
     }
 
     // Three horizontal dots:
-    for offset in [-5.5, 0.0, 5.5]: Dot {
+    for offset in [-5.0, 0.0, 5.0]: Dot {
         f: root.f;
         du: root.du + offset;
         dv: root.dv;
-        d: 3.5px;
+        d: 3px;
         background: root.highlighted ? root.ink : root.muted;
     }
 

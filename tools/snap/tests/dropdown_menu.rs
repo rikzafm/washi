@@ -232,11 +232,12 @@ fn dropdown_window_geometry_positioning_and_rendering() {
     assert_eq!(size, (300.0, 352.0));
 
     // Check dropdown window position relative to note's menu button
-    let (bx, by, bw, bh) = h.menu_button_rect(0);
+    let (bx, by, _bw, bh) = h.menu_button_rect(0);
     let (win_x, win_y) = h.dropdown_position().expect("dropdown position");
 
     // The card sits at (win_x + shadow_margin, win_y + shadow_margin).
-    // In our positioning logic, card right aligns with button right: card_x + card_width = btn_screen_x + bw
+    // In our positioning logic matching mockup:
+    // card left starts ~14px to left of button: card_x = btn_screen_x - 14.0
     // And card top is below button by gap: card_y = btn_screen_y + bh + gap
     let note_geom = h.note_geometry(0);
     let btn_screen_x = note_geom.x as f32 + bx;
@@ -246,7 +247,7 @@ fn dropdown_window_geometry_positioning_and_rendering() {
     let card_x = win_x + metrics.shadow_margin;
     let card_y = win_y + metrics.shadow_margin;
 
-    assert!(((card_x + metrics.card_width) - (btn_screen_x + bw)).abs() <= 1.0, "card right matches button right with 0px overhang (subpixel precision)");
+    assert!((card_x - (btn_screen_x - 14.0)).abs() <= 2.0, "card left is offset ~14px from button left");
     assert!((card_y - (btn_screen_y + bh + metrics.gap)).abs() <= 2.0, "card top is gap below button");
 
     // Verify software rendering of dropdown window

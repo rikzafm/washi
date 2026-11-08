@@ -9,7 +9,7 @@ use crate::platform::NoteId;
 use slint::ComponentHandle;
 use std::rc::Rc;
 
-/// Format a relative timestamp like `· today`, `· yesterday`, or `· Oct 14`.
+/// Format a relative timestamp like `· today`, `· yesterday`, or `· last week`.
 pub fn format_relative_timestamp(updated_at_ms: i64, now_ms: i64) -> String {
     use chrono::{Local, TimeZone};
     let updated = match Local.timestamp_millis_opt(updated_at_ms).single() {
@@ -23,13 +23,14 @@ pub fn format_relative_timestamp(updated_at_ms: i64, now_ms: i64) -> String {
 
     let updated_date = updated.date_naive();
     let now_date = now.date_naive();
+    let diff_days = (now_date - updated_date).num_days();
 
-    if updated_date == now_date {
+    if diff_days <= 0 {
         "· today".to_string()
-    } else if now_date > updated_date && (now_date - updated_date).num_days() == 1 {
+    } else if diff_days == 1 {
         "· yesterday".to_string()
-    } else if updated_date > now_date {
-        "· today".to_string()
+    } else if diff_days >= 7 && diff_days < 14 {
+        "· last week".to_string()
     } else {
         format!("· {}", updated.format("%b %-d"))
     }
@@ -102,16 +103,17 @@ impl Default for DropdownMetrics {
 
 /// Calculate the top-left (x, y) coordinates of the dropdown window in logical screen coordinates.
 ///
-/// Anchors the card's right edge to the button's right edge, and places it immediately below
-/// the button (`button.bottom() + gap`). If it overflows the bottom of the work area, flips above
-/// the button. Clamps horizontally and vertically within the work area if provided.
+/// Anchors the card's top-left near the button (offset slightly left by ~14px so the button
+/// sits neatly above the "JUMP TO" header), and places it immediately below the button (`button.bottom() + gap`).
+/// If it overflows the bottom of the work area, flips above the button.
+/// Clamps horizontally and vertically within the work area if provided.
 /// The resulting position is offset by `shadow_margin` so the card aligns with the trigger.
 pub fn calculate_dropdown_position(
     button_rect: Rect,
     metrics: &DropdownMetrics,
     work_area: Option<Rect>,
 ) -> (f32, f32) {
-    let mut card_x = button_rect.right() - metrics.card_width;
+    let mut card_x = button_rect.x - 14.0;
     let mut card_y = button_rect.bottom() + metrics.gap;
 
     if let Some(wa) = work_area {
@@ -267,54 +269,55 @@ mod tests {
     use std::cell::Cell;
 
     #[test]
-    fn normal_positioning_anchors_below_and_right_aligned() {
+    fn normal_positioning_anchors_below_and_near_button_left() {
         let metrics = DropdownMetrics::default();
-        let button = Rect::new(500.0, 100.0, 28.0, 24.0);
+        let button = Rect::new(500.0, 100.0, 36.0, 26.0);
         let work_area = Some(Rect::new(0.0, 0.0, 1920.0, 1080.0));
 
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
-        // button.right() = 528.0
-        // card_x = 528.0 - 268.0 = 260.0
-        // card_y = 100.0 + 24.0 + 4.0 = 128.0
-        // win_x = card_x - 16.0 = 244.0
-        // win_y = card_y - 16.0 = 112.0
-        assert_eq!((win_x, win_y), (244.0, 112.0));
+        // button.x = 500.0
+        // card_x = 500.0 - 14.0 = 486.0
+        // card_y = 100.0 + 26.0 + 4.0 = 130.0
+        // win_x = 486.0 - 16.0 = 470.0
+        // win_y = 130.0 - 16.0 = 114.0
+        assert_eq!((win_x, win_y), (470.0, 114.0));
     }
 
     #[test]
     fn flips_above_when_overflowing_bottom() {
         let metrics = DropdownMetrics::default();
-        let button = Rect::new(500.0, 900.0, 28.0, 24.0);
+        let button = Rect::new(500.0, 900.0, 36.0, 26.0);
         let work_area = Some(Rect::new(0.0, 0.0, 1920.0, 1080.0));
 
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
-        // Candidate below: 900 + 24 + 4 + 320 = 1248 > 1080.
+        // Candidate below: 900 + 26 + 4 + 320 = 1250 > 1080.
         // Candidate above: 900 - 320 - 4 = 576.0 (>= 0).
-        // win_x = 244.0
+        // win_x = 470.0
         // win_y = 576.0 - 16.0 = 560.0
-        assert_eq!((win_x, win_y), (244.0, 560.0));
+        assert_eq!((win_x, win_y), (470.0, 560.0));
     }
 
     #[test]
     fn clamps_to_work_area_left_edge() {
         let metrics = DropdownMetrics::default();
-        let button = Rect::new(100.0, 100.0, 28.0, 24.0);
+        let button = Rect::new(5.0, 100.0, 36.0, 26.0);
         let work_area = Some(Rect::new(0.0, 0.0, 1920.0, 1080.0));
 
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
-        // card_right = 128.0 -> card_x = 128 - 268 = -140 < 0. Clamped to 0.
+        // card_x = 5 - 14 = -9 < 0. Clamped to 0.
         // win_x = 0 - 16.0 = -16.0
-        // win_y = 112.0
-        assert_eq!((win_x, win_y), (-16.0, 112.0));
+        // win_y = 100 + 26 + 4 - 16 = 114.0
+        assert_eq!((win_x, win_y), (-16.0, 114.0));
     }
 
     #[test]
     fn clamps_to_work_area_right_edge() {
         let metrics = DropdownMetrics::default();
-        let button = Rect::new(850.0, 100.0, 28.0, 24.0);
+        let button = Rect::new(700.0, 100.0, 36.0, 26.0);
         let work_area = Some(Rect::new(0.0, 0.0, 800.0, 600.0));
 
         let (win_x, _win_y) = calculate_dropdown_position(button, &metrics, work_area);
+        // card_x would be 700 - 14 = 686. 686 + 268 = 954 > 800.
         // card_x clamped to 800 - 268 = 532.
         // win_x = 532 - 16 = 516.0
         assert_eq!(win_x, 516.0);
@@ -323,12 +326,13 @@ mod tests {
     #[test]
     fn no_work_area_calculates_without_clamping() {
         let metrics = DropdownMetrics::default();
-        let button = Rect::new(100.0, 900.0, 28.0, 24.0);
+        let button = Rect::new(10.0, 900.0, 36.0, 26.0);
 
         let (win_x, win_y) = calculate_dropdown_position(button, &metrics, None);
-        // card_x = 128 - 268 = -140
-        // win_x = -140 - 16 = -156.0
-        assert_eq!((win_x, win_y), (-156.0, 912.0));
+        // card_x = 10 - 14 = -4.0
+        // win_x = -4.0 - 16.0 = -20.0
+        // win_y = 900 + 26 + 4 - 16 = 914.0
+        assert_eq!((win_x, win_y), (-20.0, 914.0));
     }
 
     #[test]
