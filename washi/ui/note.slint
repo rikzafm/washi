@@ -136,10 +136,20 @@ export component NoteWindow inherits Window {
     callback delete-note();
     /// The toolbar's image button was clicked.
     callback insert-image();
+    /// Ctrl+C: copy image block to clipboard.
+    callback copy-image(int) -> bool;
+    /// Ctrl+X: cut image block to clipboard.
+    callback cut-image(int) -> bool;
     /// Ctrl+V: true when the note took it because the clipboard held a picture.
     callback paste-image() -> bool;
     /// The selection across blocks as plain lines, to copy it.
     callback range-text() -> string;
+    /// Copy the range (rich HTML and plain text).
+    callback copy-range() -> bool;
+    /// Cut the range (rich HTML and plain text).
+    callback cut-range() -> bool;
+    /// Paste rich content into the range.
+    callback paste-range() -> bool;
     /// Replace the selection across blocks by this text.
     callback range-replace(string);
     /// A key over a selection across blocks (its text, Shift held): 0 not taken, 1 taken without a
@@ -262,7 +272,12 @@ export component NoteWindow inherits Window {
                     right-click(x, y) => { root.context-menu(x, y); }
                     pointer-moved => { root.pointer-moved(); }
                     paste-image => { return root.paste-image(); }
+                    copy-image(i) => { return root.copy-image(i); }
+                    cut-image(i) => { return root.cut-image(i); }
                     range-text => { return root.range-text(); }
+                    copy-range => { return root.copy-range(); }
+                    cut-range => { return root.cut-range(); }
+                    paste-range => { return root.paste-range(); }
                     range-replace(t) => { root.picker-open = false; root.range-replace(t); }
                     range-key(k, s) => { return root.range-key(k, s); }
                     block-edited(i, t, c) => { root.picker-open = false; root.block-edited(i, t, c); }

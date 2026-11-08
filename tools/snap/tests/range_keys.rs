@@ -222,3 +222,69 @@ fn a_range_edit_right_after_unsnapshotted_typing_undoes_alone_then_the_typing() 
     h.press_ctrl(0, 'z');
     assert_eq!(h.note_text(0), TEXT, "then the typing");
 }
+
+#[test]
+fn ctrl_c_copies_rich_html_and_pasting_preserves_formatting() {
+    let mut h = note(TEXT);
+    let (from, to) = (word(&h, "paragraph", 0, false), word(&h, "third", 0, true));
+    drag(&mut h, from, to);
+    assert_eq!(h.selection(0), ((1, 6), (3, 5)));
+    h.press_ctrl(0, 'b');
+    assert_eq!(h.note_text(0), "# Title\nfirst **paragraph here**\n**second one**\n**third** paragraph words");
+
+    // Copy range with bold formatting
+    h.press_ctrl(0, 'c');
+    let html = h.clipboard_html().expect("HTML payload in clipboard");
+    assert!(html.contains("<b>paragraph here</b>"), "html should contain bold tags: {html}");
+    assert!(html.contains("<b>second one</b>"), "html should contain bold tags: {html}");
+    assert_eq!(h.clipboard_text().as_deref(), Some("paragraph here\nsecond one\nthird"));
+
+    // Select the entire note and paste rich content over it
+    h.press_ctrl(0, 'a');
+    h.press_ctrl(0, 'v');
+    assert_eq!(h.note_text(0), "# **paragraph here**\n**second one**\n**third**");
+
+    // Undo restores the original note
+    h.press_ctrl(0, 'z');
+    assert_eq!(h.note_text(0), "# Title\nfirst **paragraph here**\n**second one**\n**third** paragraph words");
+}
+
+#[test]
+fn ctrl_c_and_ctrl_x_on_image_selection_and_undo() {
+    let px = washi::images::Rgba { width: 80, height: 80, data: vec![200, 30, 60, 255].repeat(6400) };
+    let path = std::env::temp_dir().join("snap_test_image_range_cut.png");
+    std::fs::write(&path, washi::images::encode_png(&px).unwrap()).unwrap();
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "Trip");
+    h.choose_picture(&path);
+    h.click_image_button(0);
+    h.wait_for_images();
+    h.advance(ms(600));
+    assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+
+    let (w, _, px_rendered) = h.render(0);
+    let red: Vec<usize> = px_rendered.iter().enumerate().filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12).map(|(i, _)| i).collect();
+    let (top, bottom) = (red.first().unwrap() / w as usize, red.last().unwrap() / w as usize);
+    let x = (red[0] % w as usize) as f32 + 40.0;
+    let y = (top + (bottom - top) / 2) as f32;
+
+    h.click(0, 5.0, 5.0);
+    h.advance(ms(400));
+    h.click(0, x, y);
+    h.advance(ms(400));
+    assert_eq!(h.selection(0), ((1, 0), (1, 0)));
+
+    // Ctrl+C copies the image
+    h.press_ctrl(0, 'c');
+    let img = h.clipboard_image().expect("image on clipboard");
+    assert_eq!((img.width, img.height), (80, 80));
+
+    // Ctrl+X cuts the image
+    h.press_ctrl(0, 'x');
+    assert_eq!(h.block_kinds(0), ["title", "body"]);
+
+    // Ctrl+Z undoes the cut and restores the image
+    h.press_ctrl(0, 'z');
+    assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+}

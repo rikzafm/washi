@@ -19,6 +19,8 @@ pub enum ViewerEvent {
     Close,
     StartMove,
     StartResize(ResizeEdge),
+    /// Ctrl+C was pressed to copy the picture.
+    Copy,
 }
 
 // The chrome around the picture, logical px; the same numbers as `ViewerMetrics` and
@@ -111,6 +113,10 @@ impl ImageViewer {
                     on_event(ViewerEvent::StartResize(edge));
                 }
             });
+        }
+        {
+            let on_event = on_event.clone();
+            ui.on_copy_picture(move || on_event(ViewerEvent::Copy));
         }
         {
             let on_event = on_event.clone();

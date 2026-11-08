@@ -90,6 +90,10 @@ export component BlockView inherits Rectangle {
     in property <int> img-h: 0;
     in property <int> img-pct: 100;
     in property <int> img-align: 0;
+    /// Ctrl+C: copy picture to clipboard.
+    callback copy-image() -> bool;
+    /// Ctrl+X: cut picture to clipboard and remove it from the note.
+    callback cut-image() -> bool;
     /// Ctrl+V: true when the note took it (the clipboard held a picture).
     callback paste-image() -> bool;
     /// Ctrl+A: the note selects everything (a range from the start to the end).
@@ -164,10 +168,18 @@ export component BlockView inherits Rectangle {
     preferred-height: root.gap-before + (root.kind == BlockKind.image ? root.image-height : input.preferred-height);
 
     // A selected picture has no text field: this takes the keyboard focus instead, so Backspace and
-    // Delete remove the picture and the arrows leave it.
+    // Delete remove the picture, Ctrl+C / Ctrl+X copy/cut it, and the arrows leave it.
     image-focus := FocusScope {
         enabled: root.kind == BlockKind.image;
         key-pressed(e) => {
+            if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta && !e.modifiers.shift) {
+                if (e.text == "c" || e.text == "\u{3}") {
+                    return root.copy-image() ? accept : reject;
+                }
+                if (e.text == "x" || e.text == "\u{18}") {
+                    return root.cut-image() ? accept : reject;
+                }
+            }
             if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta) { return reject; }
             if (e.text == Key.Backspace || e.text == Key.Delete || e.text == Key.UpArrow || e.text == Key.DownArrow
                 || e.text == Key.LeftArrow || e.text == Key.RightArrow) {

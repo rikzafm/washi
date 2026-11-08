@@ -1082,6 +1082,117 @@ impl Document {
         self.insert_text(s.block, from, from, text)
     }
 
+    /// Replace `range` with parsed rich blocks (formatting, colors, lists, and images).
+    pub fn replace_range_rich(
+        &mut self,
+        range: Range,
+        parsed: Vec<crate::clipboard_html::ParsedBlock>,
+        add_image: &mut dyn FnMut(crate::images::Rgba) -> Option<i64>,
+    ) -> Caret {
+        use crate::clipboard_html::ParsedBlock;
+        if parsed.is_empty() {
+            return self.replace_range(range, "");
+        }
+        let (s, e) = self.ordered_in(range);
+        let caret = if s.block != e.block || s.offset != e.offset {
+            self.replace_range(range, "")
+        } else {
+            s
+        };
+
+        let block_idx = caret.block.min(self.blocks.len().saturating_sub(1));
+        let offset = if self.blocks[block_idx].is_text() {
+            floor_boundary(&self.blocks[block_idx].text, caret.offset)
+        } else {
+            0
+        };
+
+        let mut b = self.blocks[block_idx].clone();
+        let tail_text = if b.is_text() { b.text.split_off(offset) } else { String::new() };
+        let tail_marks = if b.is_text() { b.marks.split_off(offset) } else { Vec::new() };
+        let tail_paints = if b.is_text() { b.paints.split_off(offset) } else { Vec::new() };
+
+        let mut new_blocks: Vec<Block> = Vec::new();
+        let mut cur_block: Option<Block> = Some(b);
+
+        for (i, p) in parsed.into_iter().enumerate() {
+            match p {
+                ParsedBlock::Title { text, marks, paints } => {
+                    if i == 0 && cur_block.as_ref().is_some_and(|b| b.is_text()) {
+                        let b = cur_block.as_mut().unwrap();
+                        b.text.push_str(&text);
+                        b.marks.extend(marks);
+                        b.paints.extend(paints);
+                    } else {
+                        if let Some(prev) = cur_block.take() {
+                            new_blocks.push(prev);
+                        }
+                        cur_block = Some(Block { kind: Kind::Title, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left });
+                    }
+                }
+                ParsedBlock::Heading { text, marks, paints } => {
+                    if i == 0 && cur_block.as_ref().is_some_and(|b| b.is_text()) {
+                        let b = cur_block.as_mut().unwrap();
+                        b.text.push_str(&text);
+                        b.marks.extend(marks);
+                        b.paints.extend(paints);
+                    } else {
+                        if let Some(prev) = cur_block.take() {
+                            new_blocks.push(prev);
+                        }
+                        cur_block = Some(Block { kind: Kind::Heading, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left });
+                    }
+                }
+                ParsedBlock::ListItem { text, marks, paints } => {
+                    if i == 0 && cur_block.as_ref().is_some_and(|b| b.is_text()) {
+                        let b = cur_block.as_mut().unwrap();
+                        b.text.push_str(&text);
+                        b.marks.extend(marks);
+                        b.paints.extend(paints);
+                    } else {
+                        if let Some(prev) = cur_block.take() {
+                            new_blocks.push(prev);
+                        }
+                        cur_block = Some(Block { kind: Kind::ListItem, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left });
+                    }
+                }
+                ParsedBlock::Body { text, marks, paints } => {
+                    if i == 0 && cur_block.as_ref().is_some_and(|b| b.is_text()) {
+                        let b = cur_block.as_mut().unwrap();
+                        b.text.push_str(&text);
+                        b.marks.extend(marks);
+                        b.paints.extend(paints);
+                    } else {
+                        if let Some(prev) = cur_block.take() {
+                            new_blocks.push(prev);
+                        }
+                        cur_block = Some(Block { kind: Kind::Body, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left });
+                    }
+                }
+                ParsedBlock::Image { rgba } => {
+                    if let Some(prev) = cur_block.take() {
+                        new_blocks.push(prev);
+                    }
+                    if let Some(id) = add_image(rgba) {
+                        new_blocks.push(Block::image(id));
+                    }
+                }
+            }
+        }
+
+        let mut final_block = cur_block.unwrap_or_else(|| Block::new(Kind::Body, ""));
+        let caret_offset = final_block.text.len();
+        final_block.text.push_str(&tail_text);
+        final_block.marks.extend(tail_marks);
+        final_block.paints.extend(tail_paints);
+        new_blocks.push(final_block);
+
+        let final_count = new_blocks.len();
+        self.blocks.splice(block_idx..=block_idx, new_blocks);
+        let res_block = block_idx + final_count - 1;
+        Caret { block: res_block, offset: caret_offset }
+    }
+
     /// The nearest block with a text field before `block`.
     pub fn prev_text_block(&self, block: usize) -> Option<usize> {
         (0..block.min(self.blocks.len())).rev().find(|&i| self.blocks[i].is_text())
@@ -2005,5 +2116,40 @@ ta");
         assert_eq!((PALETTE[0].name, PALETTE[0].ink, PALETTE[0].marker), ("Default", 0x2B2F36, None));
         assert_eq!((PALETTE[6].name, PALETTE[6].ink, PALETTE[6].marker), ("Blue", 0x3A6D96, Some(0xD3E5EF)));
         assert_eq!(PALETTE[9].marker, Some(0xFFE2DD));
+    }
+
+    #[test]
+    fn replace_range_rich_inserts_formatting_and_images() {
+        use crate::clipboard_html::ParsedBlock;
+        let mut d = doc(&[(Kind::Title, "Title"), (Kind::Body, "Hello world")]);
+        let parsed = vec![
+            ParsedBlock::Body {
+                text: " beautiful".into(),
+                marks: vec![Style::BOLD; 10],
+                paints: vec![Paint { ink: 6, marker: 0 }; 10],
+            },
+            ParsedBlock::Image {
+                rgba: crate::images::Rgba { width: 10, height: 10, data: vec![0; 400] },
+            },
+            ParsedBlock::ListItem {
+                text: "item 1".into(),
+                marks: vec![Style::NONE; 6],
+                paints: vec![Paint::default(); 6],
+            },
+        ];
+        let mut img_count = 0;
+        let mut add_img = |_| {
+            img_count += 1;
+            Some(img_count)
+        };
+        // Paste into "Hello| world" (offset 5)
+        let caret = d.replace_range_rich(Range { anchor: Caret { block: 1, offset: 5 }, focus: Caret { block: 1, offset: 5 } }, parsed, &mut add_img);
+        assert_eq!(img_count, 1);
+        assert_eq!(d.blocks()[1].text, "Hello beautiful");
+        assert!(d.blocks()[1].marks[5..15].iter().all(|m| m.contains(Style::BOLD)));
+        assert_eq!(d.blocks()[2].kind, Kind::Image);
+        assert_eq!(d.blocks()[3].kind, Kind::ListItem);
+        assert_eq!(d.blocks()[3].text, "item 1 world");
+        assert_eq!(caret, Caret { block: 3, offset: 6 });
     }
 }

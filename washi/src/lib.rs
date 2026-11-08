@@ -2,6 +2,7 @@
 //! drives the same `App` on a stand-in platform.
 
 pub mod app;
+pub mod clipboard_html;
 pub mod document;
 pub mod history;
 pub mod icon;

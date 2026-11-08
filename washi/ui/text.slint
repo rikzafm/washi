@@ -102,6 +102,10 @@ export component TextLayer inherits Rectangle {
     /// The overlay takes every pointer event, so what the paper listens to is forwarded.
     callback right-click(length, length);
     callback pointer-moved();
+    /// Ctrl+C on an image block: true when taken.
+    callback copy-image(int) -> bool;
+    /// Ctrl+X on an image block: true when taken.
+    callback cut-image(int) -> bool;
     /// Ctrl+V in a field: true when the note took it (a picture on the clipboard).
     callback paste-image() -> bool;
     /// The wash of the note's selection (Rust): one level box per line the selection touches.
@@ -114,6 +118,12 @@ export component TextLayer inherits Rectangle {
     callback select-all();
     /// The selection across blocks as plain lines (Rust), for copying.
     callback range-text() -> string;
+    /// Copy the selection (rich HTML and plain text): true when handled.
+    callback copy-range() -> bool;
+    /// Cut the selection (rich HTML and plain text): true when handled.
+    callback cut-range() -> bool;
+    /// Paste rich content into the selection: true when handled.
+    callback paste-range() -> bool;
     /// Replace the selection across blocks by this text (typing, pasting, cutting).
     callback range-replace(string);
     /// A key over a selection across blocks, as its text and whether Shift is held (Rust): 1 taken
@@ -249,20 +259,31 @@ export component TextLayer inherits Rectangle {
             shift-y: root.shift-y;
             img-pct: b.img-pct;
             img-align: b.img-align;
+            copy-image => { return root.copy-image(i); }
+            cut-image => { return root.cut-image(i); }
             paste-image => { return root.paste-image(); }
             pitch-scale: root.pitch-scale;
             select-all => { root.select-all(); }
             range-key(e) => {
                 if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta && !e.modifiers.shift) {
                     if (e.text == "a" || e.text == "\u{1}") { root.select-all(); return true; }
-                    if (e.text == "c" || e.text == "\u{3}" || e.text == "x" || e.text == "\u{18}") {
+                    if (e.text == "c" || e.text == "\u{3}") {
+                        if (root.copy-range()) { return true; }
                         clipboard.text = root.range-text();
                         clipboard.select-all();
                         clipboard.copy();
-                        if (e.text == "x" || e.text == "\u{18}") { root.range-replace(""); }
+                        return true;
+                    }
+                    if (e.text == "x" || e.text == "\u{18}") {
+                        if (root.cut-range()) { return true; }
+                        clipboard.text = root.range-text();
+                        clipboard.select-all();
+                        clipboard.copy();
+                        root.range-replace("");
                         return true;
                     }
                     if (e.text == "v" || e.text == "\u{16}") {
+                        if (root.paste-range()) { return true; }
                         clipboard.text = "";
                         clipboard.paste();
                         root.range-replace(clipboard.text);

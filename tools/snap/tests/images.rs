@@ -324,7 +324,103 @@ fn typing_below_a_tall_picture_works_and_the_note_scrolls_to_it() {
     h.wait_for_images();
     // the 291 px square pushes the paragraph below it past the bottom of the text area
     h.type_text(0, "below");
-    assert_eq!(h.note_text(0), "# Trip
-![](img:1)
-below");
+    assert_eq!(h.note_text(0), "# Trip\n![](img:1)\nbelow");
+}
+
+fn ms(n: u64) -> std::time::Duration {
+    std::time::Duration::from_millis(n)
+}
+
+fn select_image(h: &mut Harness) -> (f32, f32) {
+    let (w, _, px) = h.render(0);
+    let red: Vec<usize> = px
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| (p.r as i32 - RED[0] as i32).abs() <= 12 && (p.g as i32 - RED[1] as i32).abs() <= 12 && (p.b as i32 - RED[2] as i32).abs() <= 12)
+        .map(|(i, _)| i)
+        .collect();
+    let (top, bottom) = (red.first().unwrap() / w as usize, red.last().unwrap() / w as usize);
+    let x = (red[0] % w as usize) as f32 + 40.0;
+    let y = (top + (bottom - top) / 2) as f32;
+    h.click(0, 5.0, 5.0);
+    h.advance(ms(400));
+    h.click(0, x, y);
+    h.advance(ms(400));
+    assert_eq!(h.selection(0), ((1, 0), (1, 0)));
+    (x, y)
+}
+
+#[test]
+fn ctrl_c_on_selected_image_copies_picture_to_clipboard() {
+    let mut h = note_with_title();
+    let img = flat(100, 100, RED);
+    h.copy_picture(img.clone());
+    h.press_ctrl(0, 'v');
+    h.wait_for_images();
+    h.advance(ms(600));
+
+    // Clear clipboard so we know the copy put it there
+    *h.clipboard.image.borrow_mut() = None;
+
+    select_image(&mut h);
+
+    h.press_ctrl(0, 'c');
+    let on_clip = h.clipboard_image().expect("image on clipboard");
+    assert_eq!((on_clip.width, on_clip.height), (img.width, img.height));
+    assert_eq!(on_clip.data, img.data);
+    assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+}
+
+#[test]
+fn ctrl_x_on_selected_image_cuts_picture_and_undo_restores_it() {
+    let mut h = note_with_title();
+    let img = flat(80, 80, RED);
+    h.copy_picture(img.clone());
+    h.press_ctrl(0, 'v');
+    h.wait_for_images();
+    h.advance(ms(600));
+
+    *h.clipboard.image.borrow_mut() = None;
+
+    select_image(&mut h);
+
+    h.press_ctrl(0, 'x');
+    let on_clip = h.clipboard_image().expect("image on clipboard");
+    assert_eq!((on_clip.width, on_clip.height), (img.width, img.height));
+    assert_eq!(on_clip.data, img.data);
+    assert_eq!(h.block_kinds(0), ["title", "body"]);
+
+    // Ctrl+Z undoes the cut and restores the image block
+    h.press_ctrl(0, 'z');
+    assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+}
+
+#[test]
+fn right_click_menu_offers_cut_and_copy_image() {
+    let mut h = note_with_title();
+    let img = flat(60, 60, RED);
+    h.copy_picture(img.clone());
+    h.press_ctrl(0, 'v');
+    h.wait_for_images();
+    h.advance(ms(600));
+
+    let (x, y) = select_image(&mut h);
+
+    // Right click on image without choosing an item: check menu items
+    h.right_click_at(0, x, y, None);
+    let labels: Vec<String> = h.last_menu().into_iter().map(|i| i.label).collect();
+    assert!(labels.contains(&"Cut image".to_string()));
+    assert!(labels.contains(&"Copy image".to_string()));
+
+    // Copy via context menu
+    *h.clipboard.image.borrow_mut() = None;
+    h.right_click_at(0, x, y, Some(&["Copy image"]));
+    assert!(h.clipboard_image().is_some());
+    assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+
+    // Cut via context menu
+    *h.clipboard.image.borrow_mut() = None;
+    h.right_click_at(0, x, y, Some(&["Cut image"]));
+    assert!(h.clipboard_image().is_some());
+    assert_eq!(h.block_kinds(0), ["title", "body"]);
 }

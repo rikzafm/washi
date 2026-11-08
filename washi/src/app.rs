@@ -95,8 +95,10 @@ const MENU_DELETE: u32 = 4;
 const MENU_TOP: u32 = 5;
 const MENU_STARTUP: u32 = 6;
 const MENU_EXPORT: u32 = 7;
-/// The menu of a picture: delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
+/// The menu of a picture: cut it, copy it, delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
 /// or show it `n` percent wide (`MENU_IMAGE_SIZE + n`).
+const MENU_IMAGE_CUT: u32 = 18;
+const MENU_IMAGE_COPY: u32 = 19;
 const MENU_IMAGE_DELETE: u32 = 20;
 const MENU_IMAGE_ALIGN: u32 = 21;
 const MENU_IMAGE_SIZE: u32 = 200;
@@ -176,8 +178,18 @@ impl App {
         });
         let weak = Rc::downgrade(&self.0);
         let paste_image: Rc<dyn Fn(NoteId) -> bool> = Rc::new(move |id| weak.upgrade().is_some_and(|inner| App(inner).paste_image(id)));
-        let note = Note::open(row.id, &row.content, self.0.db.clone(), self.0.env.clock.clone(), row.geometry, row.always_on_top, on_event, paste_image)
-            .map_err(StartError::Ui)?;
+        let note = Note::open(
+            row.id,
+            &row.content,
+            self.0.db.clone(),
+            self.0.env.clock.clone(),
+            row.geometry,
+            row.always_on_top,
+            on_event,
+            paste_image,
+            self.0.env.clipboard.clone(),
+        )
+        .map_err(StartError::Ui)?;
         if row.geometry.is_some() {
             // a note saved on a monitor that is gone comes back on the main screen
             note.keep_on_screen(&self.0.env.window_control.work_areas());
@@ -222,12 +234,19 @@ impl App {
     /// Show the picture of `block` of note `id` in a window of its own.
     fn open_viewer(&self, id: NoteId, block: usize) {
         let Some((picture, size)) = self.with_note(id, |n| n.picture_at(block)).flatten() else { return };
+        let rgba = self.with_note(id, |n| n.image_rgba(block)).flatten();
         let caption = self.saved_text(id).and_then(|t| note_title(&t)).unwrap_or_else(|| "Picture".to_string());
         let number = self.0.next_viewer.get();
         self.0.next_viewer.set(number + 1);
         let weak = Rc::downgrade(&self.0);
         let on_event: Rc<dyn Fn(ViewerEvent)> = Rc::new(move |ev| {
             if let Some(inner) = weak.upgrade() {
+                if ev == ViewerEvent::Copy {
+                    if let Some(ref img) = rgba {
+                        let _ = inner.env.clipboard.set_image(img);
+                    }
+                    return;
+                }
                 App(inner).viewer_event(number, ev);
             }
         });
@@ -245,6 +264,7 @@ impl App {
             ViewerEvent::Close => self.0.viewers.borrow_mut().retain(|(n, _)| *n != number),
             ViewerEvent::StartMove => self.0.env.window_control.begin_move(0, viewer.hwnd()),
             ViewerEvent::StartResize(edge) => self.0.env.window_control.begin_resize(0, viewer.hwnd(), edge),
+            ViewerEvent::Copy => {}
         }
     }
 
@@ -579,6 +599,8 @@ impl App {
             let aligns = [(Align::Left, "Left"), (Align::Center, "Center"), (Align::Right, "Right")];
             let align_items = aligns.iter().enumerate().map(|(i, &(a, label))| toggle(MENU_IMAGE_ALIGN + i as u32, label, a == align)).collect();
             let size_items = IMAGE_SIZES.iter().map(|&s| toggle(MENU_IMAGE_SIZE + s as u32, &format!("{s}%"), s == pct)).collect();
+            items.push(item(MENU_IMAGE_CUT, "Cut image", true, vec![]));
+            items.push(item(MENU_IMAGE_COPY, "Copy image", true, vec![]));
             items.push(item(MENU_IMAGE_DELETE, "Delete image", true, vec![]));
             items.push(item(0, "Align image", true, align_items));
             items.push(item(0, "Resize image", true, size_items));
@@ -594,6 +616,12 @@ impl App {
         ]);
         let picture = image;
         match self.0.env.menu.show(&items, at) {
+            Some(MENU_IMAGE_CUT) if picture.is_some() => {
+                self.with_note(id, |n| n.cut_image(picture.unwrap()));
+            }
+            Some(MENU_IMAGE_COPY) if picture.is_some() => {
+                self.with_note(id, |n| n.copy_image(picture.unwrap()));
+            }
             Some(MENU_IMAGE_DELETE) if picture.is_some() => {
                 self.with_note(id, |n| n.delete_image(picture.unwrap()));
             }
