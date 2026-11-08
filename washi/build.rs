@@ -13,6 +13,11 @@ fn main() {
         println!("cargo:rerun-if-changed=src/icon.rs");
         println!("cargo:rustc-link-arg-bins={}", res.display());
     }
+    // The vendored OpenSSL ships without its debug database; the linker's warning about that
+    // (LNK4099, hundreds of lines per build) is noise.
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg=/IGNORE:4099");
+    }
     // Embed the PerMonitorV2 manifest into washi.exe only (the linker merges it; no rc.exe needed).
     let manifest = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("app.manifest");
     println!("cargo:rerun-if-changed=app.manifest");

@@ -1,7 +1,9 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
+use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
 use crate::images::{self, ImageError, Source, Stored};
-use crate::note_window::{note_title, Note, NoteEvent};
+use crate::image_viewer::{ImageViewer, ViewerEvent};
+use crate::note_window::{app_icon, note_title, Note, NoteEvent};
 use crate::platform::*;
 use crate::suspend::{SuspendController, SuspendHost};
 use crate::storage::{keystore, Db, DbError, Geometry, KeyStoreError, NoteRow};
@@ -65,6 +67,9 @@ struct Inner {
     trim_timer: slint::Timer,
     /// Set by the real app (`watch_window_state`); the test harness never trims.
     trim_enabled: Cell<bool>,
+    /// Open picture viewers (double click on a picture), by the number each got when it opened.
+    viewers: RefCell<Vec<(u64, Rc<ImageViewer>)>>,
+    next_viewer: Cell<u64>,
 }
 
 /// A picture on its way into a note.
@@ -90,6 +95,12 @@ const MENU_DELETE: u32 = 4;
 const MENU_TOP: u32 = 5;
 const MENU_STARTUP: u32 = 6;
 const MENU_EXPORT: u32 = 7;
+/// The menu of a picture: delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
+/// or show it `n` percent wide (`MENU_IMAGE_SIZE + n`).
+const MENU_IMAGE_DELETE: u32 = 20;
+const MENU_IMAGE_ALIGN: u32 = 21;
+const MENU_IMAGE_SIZE: u32 = 200;
+const IMAGE_SIZES: [u8; 4] = [25, 50, 75, 100];
 /// Closed notes in the "Open note" submenu get `MENU_OPEN_BASE + position`.
 const MENU_OPEN_BASE: u32 = 1000;
 
@@ -137,7 +148,7 @@ impl App {
             rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
-        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, imports: RefCell::new(Vec::new()), import_timer: slint::Timer::default(), attach_timer: slint::Timer::default(), trim_timer: slint::Timer::default(), trim_enabled: Cell::new(false) });
+        let inner = Rc::new(Inner { env, db, notes: RefCell::new(Vec::new()), quit: Cell::new(false), suspend, imports: RefCell::new(Vec::new()), import_timer: slint::Timer::default(), attach_timer: slint::Timer::default(), trim_timer: slint::Timer::default(), trim_enabled: Cell::new(false), viewers: RefCell::new(Vec::new()), next_viewer: Cell::new(0) });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
         // Windows ending the session (shutdown, restart, sign-out): save everything before returning
@@ -194,7 +205,8 @@ impl App {
             NoteEvent::New => self.new_note_from(id),
             NoteEvent::Delete => self.delete_note(id),
             NoteEvent::InsertImage => self.insert_image_from_file(id),
-            NoteEvent::ContextMenu { at } => self.show_menu(id, at),
+            NoteEvent::OpenImage(block) => self.open_viewer(id, block),
+            NoteEvent::ContextMenu { at, image } => self.show_menu(id, at, image),
             NoteEvent::PointerMoved => self.0.suspend.poke(),
             NoteEvent::StartMove => {
                 let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
@@ -204,6 +216,35 @@ impl App {
                 let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
                 self.0.env.window_control.begin_resize(id, hwnd, edge);
             }
+        }
+    }
+
+    /// Show the picture of `block` of note `id` in a window of its own.
+    fn open_viewer(&self, id: NoteId, block: usize) {
+        let Some((picture, size)) = self.with_note(id, |n| n.picture_at(block)).flatten() else { return };
+        let caption = self.saved_text(id).and_then(|t| note_title(&t)).unwrap_or_else(|| "Picture".to_string());
+        let number = self.0.next_viewer.get();
+        self.0.next_viewer.set(number + 1);
+        let weak = Rc::downgrade(&self.0);
+        let on_event: Rc<dyn Fn(ViewerEvent)> = Rc::new(move |ev| {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).viewer_event(number, ev);
+            }
+        });
+        let max = self.0.env.window_control.work_areas().first().map(|r| (r.w as f32, r.h as f32));
+        match ImageViewer::open(picture, size, &caption, max, app_icon(), on_event) {
+            Ok(viewer) => self.0.viewers.borrow_mut().push((number, Rc::new(viewer))),
+            Err(e) => eprintln!("washi: could not open the picture viewer: {e}"),
+        }
+    }
+
+    fn viewer_event(&self, number: u64, ev: ViewerEvent) {
+        let viewer = self.0.viewers.borrow().iter().find(|(n, _)| *n == number).map(|(_, v)| v.clone());
+        let Some(viewer) = viewer else { return };
+        match ev {
+            ViewerEvent::Close => self.0.viewers.borrow_mut().retain(|(n, _)| *n != number),
+            ViewerEvent::StartMove => self.0.env.window_control.begin_move(0, viewer.hwnd()),
+            ViewerEvent::StartResize(edge) => self.0.env.window_control.begin_resize(0, viewer.hwnd(), edge),
         }
     }
 
@@ -516,7 +557,7 @@ impl App {
         }
     }
 
-    fn show_menu(&self, id: NoteId, at: (i32, i32)) {
+    fn show_menu(&self, id: NoteId, at: (i32, i32), image: Option<usize>) {
         let closed = self.0.db.closed_notes().unwrap_or_default();
         let item = |id, label: &str, enabled, children| MenuItem {
             id,
@@ -532,7 +573,17 @@ impl App {
             .enumerate()
             .map(|(i, c)| item(MENU_OPEN_BASE + i as u32, &title_of(&c.preview), true, vec![]))
             .collect();
-        let items = [
+        let mut items = vec![];
+        // right click on a picture: its own items come first
+        if let Some((pct, align)) = image.and_then(|b| self.with_note(id, |n| n.image_state(b))?) {
+            let aligns = [(Align::Left, "Left"), (Align::Center, "Center"), (Align::Right, "Right")];
+            let align_items = aligns.iter().enumerate().map(|(i, &(a, label))| toggle(MENU_IMAGE_ALIGN + i as u32, label, a == align)).collect();
+            let size_items = IMAGE_SIZES.iter().map(|&s| toggle(MENU_IMAGE_SIZE + s as u32, &format!("{s}%"), s == pct)).collect();
+            items.push(item(MENU_IMAGE_DELETE, "Delete image", true, vec![]));
+            items.push(item(0, "Align image", true, align_items));
+            items.push(item(0, "Resize image", true, size_items));
+        }
+        items.extend([
             item(MENU_NEW, "New note", true, vec![]),
             item(MENU_OPEN, "Open note", !open_children.is_empty(), open_children),
             item(MENU_CLOSE, "Close", true, vec![]),
@@ -540,8 +591,19 @@ impl App {
             toggle(MENU_TOP, "Always on top", pinned),
             toggle(MENU_STARTUP, "Start with Windows", self.0.env.startup.is_enabled()),
             item(MENU_EXPORT, "Export as Markdown\u{2026}", true, vec![]),
-        ];
+        ]);
+        let picture = image;
         match self.0.env.menu.show(&items, at) {
+            Some(MENU_IMAGE_DELETE) if picture.is_some() => {
+                self.with_note(id, |n| n.delete_image(picture.unwrap()));
+            }
+            Some(c @ MENU_IMAGE_ALIGN..=23) if picture.is_some() => {
+                let align = [Align::Left, Align::Center, Align::Right][(c - MENU_IMAGE_ALIGN) as usize];
+                self.with_note(id, |n| n.set_image_align(picture.unwrap(), align));
+            }
+            Some(c) if (MENU_IMAGE_SIZE + IMAGE_PCT_MIN as u32..=MENU_IMAGE_SIZE + IMAGE_PCT_MAX as u32).contains(&c) && picture.is_some() => {
+                self.with_note(id, |n| n.set_image_pct(picture.unwrap(), (c - MENU_IMAGE_SIZE) as u8));
+            }
             Some(MENU_NEW) => self.new_note_from(id),
             Some(MENU_CLOSE) => self.close_note(id),
             Some(MENU_DELETE) => self.delete_note(id),

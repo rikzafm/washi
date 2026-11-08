@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{floor_boundary, Block, Caret, Document, Kind, Range, Style as Flags};
+use crate::document::{floor_boundary, Align, Block, Caret, Document, Kind, Range, Style as Flags, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
 use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
@@ -106,7 +106,7 @@ pub fn window_title(content: &str) -> String {
     note_title(content).unwrap_or_else(|| "Washi".into())
 }
 
-fn app_icon() -> slint::Image {
+pub fn app_icon() -> slint::Image {
     const SIZE: u32 = 48;
     let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(SIZE, SIZE);
     for (dst, src) in buf.make_mut_bytes().chunks_mut(4).zip(crate::icon::rgba(SIZE).chunks(4)) {
@@ -121,7 +121,8 @@ pub enum NoteEvent {
     /// The user closed the window itself (taskbar, Alt+F4).
     WindowClosed,
     /// Right click; `at` is in screen pixels.
-    ContextMenu { at: (i32, i32) },
+    /// `image` is the picture block under the pointer, if any.
+    ContextMenu { at: (i32, i32), image: Option<usize> },
     /// The mouse moved over the note (wakes a suspended app).
     PointerMoved,
     /// The pink tape or top margin was pressed: drag the window.
@@ -133,9 +134,14 @@ pub enum NoteEvent {
     Delete,
     /// The toolbar's image button: the app asks for a picture to add.
     InsertImage,
+    /// A double click on the picture of this block: the app shows it in a window of its own.
+    OpenImage(usize),
 }
 
-const START: Caret = Caret { block: 0, offset: 0 };
+/// Side of a picture's resize grip, logical px.
+const GRIP: f64 = 10.0;
+
+const START: Caret =Caret { block: 0, offset: 0 };
 
 /// Two presses count as a double (triple) click when they come this soon after each other...
 const MULTI_CLICK: Duration = Duration::from_millis(500);
@@ -172,6 +178,12 @@ struct Doc {
     rules: Rc<VecModel<RuleData>>,
     /// The wash of the note-level selection, one level box per line it touches.
     sel_rects: Rc<VecModel<SelRect>>,
+    /// A selected picture's frame and resize grip (none, or both).
+    handles: Rc<VecModel<SelRect>>,
+    /// Where the last right click on the text was (its layer's frame), until the menu takes it.
+    right_click: Cell<Option<(f32, f32)>>,
+    /// A grip drag in progress: the picture's block, and the document before the drag.
+    grip: RefCell<Option<(usize, Document)>>,
     /// The note-level range that `sel_rects` washes (a selection across blocks), if any.
     range: Cell<Option<Range>>,
     /// The selection: where it started and where the caret is now (the same caret: nothing
@@ -208,6 +220,9 @@ impl Doc {
             runs: Rc::new(VecModel::default()),
             rules: Rc::new(VecModel::default()),
             sel_rects: Rc::new(VecModel::default()),
+            handles: Rc::new(VecModel::default()),
+            right_click: Cell::new(None),
+            grip: RefCell::new(None),
             range: Cell::new(None),
             selection: Cell::new(Range { anchor: START, focus: START }),
             pointer: Cell::new(Pointer::default()),
@@ -221,7 +236,82 @@ impl Doc {
     /// A block as the window shows it.
     fn block_data(&self, b: &Block) -> BlockData {
         let (img_w, img_h) = self.images.size(b).unwrap_or((0, 0));
-        BlockData { img: self.images.pixels(b), img_w: img_w as i32, img_h: img_h as i32, ..block_data(b) }
+        BlockData { img: self.images.pixels(b), img_turned: self.images.turned(b), img_w: img_w as i32, img_h: img_h as i32, ..block_data(b) }
+    }
+
+    /// The picture block selected as a whole (a caret on it), if any.
+    fn selected_image(&self, doc: &Document) -> Option<usize> {
+        let r = self.selection.get();
+        (r.anchor == r.focus && doc.blocks().get(r.focus.block).is_some_and(|b| b.kind == Kind::Image)).then_some(r.focus.block)
+    }
+
+    /// The resize grip of a picture drawn in `r`: the corner opposite its anchored edge.
+    fn grip_rect(b: &Block, r: textflow::Rect) -> textflow::Rect {
+        let x = if b.align == Align::Right { r.x } else { r.x + r.width - GRIP };
+        textflow::Rect { x, y: r.y + r.height - GRIP, width: GRIP, height: GRIP }
+    }
+
+    /// Show the frame and grip of the selected picture (or none).
+    fn fill_handles(&self, doc: &Document, tokens: &Tokens) {
+        let rows = self
+            .selected_image(doc)
+            .and_then(|i| {
+                let r = textflow::image_rect(doc.blocks(), i, self.paper.get().0, tokens, &|b| self.images.size(b))?;
+                Some([r, Self::grip_rect(&doc.blocks()[i], r)])
+            })
+            .map(|rs| rs.map(|r| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 }).to_vec())
+            .unwrap_or_default();
+        self.handles.set_vec(rows);
+    }
+
+    /// A press at `at` on the selected picture's grip starts a resize: true when it did.
+    fn grab_grip(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
+        let doc = self.doc.borrow();
+        let Some(i) = self.selected_image(&doc) else { return false };
+        let Some(r) = textflow::image_rect(doc.blocks(), i, self.paper.get().0, &Self::tokens(ui), &|b| self.images.size(b)) else { return false };
+        let g = Self::grip_rect(&doc.blocks()[i], r);
+        let slop = 6.0;
+        let (x, y) = (at.0 as f64, at.1 as f64);
+        if x < g.x - slop || x > g.x + g.width + slop || y < g.y - slop || y > g.y + g.height + slop {
+            return false;
+        }
+        *self.grip.borrow_mut() = Some((i, doc.clone()));
+        true
+    }
+
+    /// The pointer moved to `at` with a grip held: the picture takes the width that puts its grip
+    /// there. `None` when no grip is held; else whether the document changed.
+    fn grip_drag(&self, ui: &NoteWindow, at: (f32, f32)) -> Option<bool> {
+        let block = self.grip.borrow().as_ref()?.0;
+        let t = Self::tokens(ui);
+        let avail = self.paper.get().0 - t.inset_left - t.inset_right;
+        let x = at.0 as f64;
+        let mut doc = self.doc.borrow_mut();
+        let w = match doc.blocks().get(block)?.align {
+            Align::Left => x - t.inset_left,
+            Align::Center => 2.0 * (x - (t.inset_left + avail / 2.0)),
+            Align::Right => t.inset_left + avail - x,
+        };
+        let pct = (w / avail * 100.0).round().clamp(IMAGE_PCT_MIN as f64, IMAGE_PCT_MAX as f64) as u8;
+        Some(doc.set_image_pct(block, pct))
+    }
+
+    /// The button is up: a grip drag ends (true) and is one undo step.
+    fn release_grip(&self) -> bool {
+        let Some((_, before)) = self.grip.borrow_mut().take() else { return false };
+        if *self.doc.borrow() != before {
+            self.structural(before);
+        }
+        true
+    }
+
+    /// The picture under `at` (the text layer's frame), if any.
+    fn image_at(&self, ui: &NoteWindow, at: (f32, f32)) -> Option<usize> {
+        let block = self.hit(ui, at).block;
+        let doc = self.doc.borrow();
+        let r = textflow::image_rect(doc.blocks(), block, self.paper.get().0, &Self::tokens(ui), &|b| self.images.size(b))?;
+        let (x, y) = (at.0 as f64, at.1 as f64);
+        (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height).then_some(block)
     }
 
     /// Replace everything (opening a note, or text set from outside).
@@ -349,6 +439,7 @@ impl Doc {
         self.sel_rects.set_vec(
             rects.iter().map(|r| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 }).collect::<Vec<_>>(),
         );
+        self.fill_handles(doc, tokens);
     }
 
     /// Ctrl+A: the selection becomes the range from the start of the note to its end.
@@ -707,6 +798,8 @@ impl Doc {
         ui.set_fmt_underline(style.contains(Flags::UNDERLINE));
         ui.set_fmt_strike(style.contains(Flags::STRIKE));
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
+        // a picture selected as a whole shows its frame and grip
+        self.fill_handles(&doc, &Self::tokens(ui));
     }
 
     /// The caret moved to `offset` of block `block`, the selection's other end at `anchor`. A style
@@ -890,6 +983,7 @@ fn same_row(a: &BlockData, b: &BlockData) -> bool {
         && a.text == b.text
         && a.bold == b.bold
         && (a.img_w, a.img_h) == (b.img_w, b.img_h)
+        && (a.img_pct, a.img_align) == (b.img_pct, b.img_align)
         && a.img.size() == b.img.size()
         && (a.img.size().width == 0 || a.img == b.img)
 }
@@ -903,7 +997,23 @@ fn block_data(b: &Block) -> BlockData {
         Kind::Image => BlockKind::Image,
     };
     // the words are drawn by the note; the field's face only matters while an input method composes
-    BlockData { kind, text: b.text.as_str().into(), bold: b.kind == Kind::Heading, italic: false, img: Default::default(), img_w: 0, img_h: 0 }
+    let img_align = match b.align {
+        Align::Left => 0,
+        Align::Center => 1,
+        Align::Right => 2,
+    };
+    BlockData {
+        kind,
+        text: b.text.as_str().into(),
+        bold: b.kind == Kind::Heading,
+        italic: false,
+        img: Default::default(),
+        img_turned: Default::default(),
+        img_w: 0,
+        img_h: 0,
+        img_pct: b.image_pct as i32,
+        img_align,
+    }
 }
 
 pub struct Note {
@@ -939,6 +1049,7 @@ impl Note {
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
         ui.set_rules(slint::ModelRc::from(doc.rules.clone()));
         ui.set_sel_rects(slint::ModelRc::from(doc.sel_rects.clone()));
+        ui.set_image_handles(slint::ModelRc::from(doc.handles.clone()));
         doc.relayout(&ui);
         doc.show_formats(&ui);
         ui.set_text(doc.text().as_str().into());
@@ -1097,28 +1208,53 @@ impl Note {
             });
         }
         {
-            let (on_event, weak) = (on_event.clone(), ui.as_weak());
+            let doc = doc.clone();
+            ui.on_text_right_click(move |x, y| doc.right_click.set(Some((x, y))));
+        }
+        {
+            let (on_event, weak, doc) = (on_event.clone(), ui.as_weak(), doc.clone());
             ui.on_context_menu(move |x, y| {
                 let Some(ui) = weak.upgrade() else { return };
                 let w = ui.window();
                 let scale = w.scale_factor();
                 let origin = w.position();
                 let at = (origin.x + (x * scale) as i32, origin.y + (y * scale) as i32);
-                on_event(id, NoteEvent::ContextMenu { at });
+                // a right click on a picture selects it, and its menu gets the picture's items
+                let image = doc.right_click.take().and_then(|p| doc.image_at(&ui, p));
+                if let Some(block) = image {
+                    let c = Caret { block, offset: 0 };
+                    doc.set_selection(&ui, Range { anchor: c, focus: c });
+                }
+                on_event(id, NoteEvent::ContextMenu { at, image });
             });
         }
         {
-            let (doc, weak, clock) = (doc.clone(), ui.as_weak(), autosave.clock.clone());
+            let (doc, weak, clock, on_event) = (doc.clone(), ui.as_weak(), autosave.clock.clone(), on_event.clone());
             ui.on_pointer_down(move |x, y, shift| {
                 if let Some(ui) = weak.upgrade() {
+                    if doc.grab_grip(&ui, (x, y)) {
+                        return;
+                    }
                     doc.pointer_down(&ui, (x, y), shift, clock.monotonic());
+                    // a double click on a picture opens it in its own window
+                    if doc.pointer.get().clicks == 2 {
+                        if let Some(block) = doc.image_at(&ui, (x, y)) {
+                            on_event(id, NoteEvent::OpenImage(block));
+                        }
+                    }
                 }
             });
         }
         {
-            let (doc, weak, scroll) = (doc.clone(), ui.as_weak(), autoscroll.clone());
+            let (changed, doc, weak, scroll) = (changed.clone(), doc.clone(), ui.as_weak(), autoscroll.clone());
             ui.on_pointer_drag(move |x, y| {
                 let Some(ui) = weak.upgrade() else { return };
+                if let Some(resized) = doc.grip_drag(&ui, (x, y)) {
+                    if resized {
+                        changed(None);
+                    }
+                    return;
+                }
                 if doc.drag_to(&ui, (x, y)) {
                     if !scroll.running() {
                         let (doc, weak, timer) = (doc.clone(), weak.clone(), Rc::downgrade(&scroll));
@@ -1139,6 +1275,7 @@ impl Note {
         {
             let (doc, scroll) = (doc.clone(), autoscroll.clone());
             ui.on_pointer_up(move || {
+                doc.release_grip();
                 doc.pointer_up();
                 scroll.stop();
             });
@@ -1187,6 +1324,35 @@ impl Note {
         let at = self.doc.doc.borrow_mut().insert_image(after, image_id);
         (self.changed)(Some(Caret { block: at + 1, offset: 0 }));
         Ok(())
+    }
+
+    /// The width (percent) and place of the picture at `block`, for its menu.
+    pub fn image_state(&self, block: usize) -> Option<(u8, Align)> {
+        self.doc.doc.borrow().blocks().get(block).filter(|b| b.kind == Kind::Image).map(|b| (b.image_pct, b.align))
+    }
+
+    /// Apply `edit` to the document as one undo step; `edit` returns whether it changed anything
+    /// and the caret to place (none: keep the selection).
+    fn edit_image(&self, edit: impl FnOnce(&mut Document) -> Option<Option<Caret>>) {
+        let before = self.doc.doc.borrow().clone();
+        let Some(caret) = edit(&mut self.doc.doc.borrow_mut()) else { return };
+        self.doc.structural(before);
+        (self.changed)(caret);
+    }
+
+    /// Show the picture at `block` `pct` percent wide.
+    pub fn set_image_pct(&self, block: usize, pct: u8) {
+        self.edit_image(|d| d.set_image_pct(block, pct).then_some(None));
+    }
+
+    /// Place the picture at `block`.
+    pub fn set_image_align(&self, block: usize, align: Align) {
+        self.edit_image(|d| d.set_image_align(block, align).then_some(None));
+    }
+
+    /// Remove the picture at `block` from the note (its stored copy goes when the note closes).
+    pub fn delete_image(&self, block: usize) {
+        self.edit_image(|d| d.delete_image(block).map(Some));
     }
 
     /// Bytes of decoded pictures this note holds right now.
@@ -1254,6 +1420,16 @@ impl Note {
 
     pub fn ui(&self) -> &NoteWindow {
         &self.ui
+    }
+
+    /// The decoded picture of block `block` and its stored size, for a window of its own
+    /// (`None` for a block that is not a picture, or while the pixels are freed).
+    pub fn picture_at(&self, block: usize) -> Option<(slint::Image, (u32, u32))> {
+        let doc = self.doc.doc.borrow();
+        let block = doc.blocks().get(block)?;
+        let size = self.doc.images.size(block)?;
+        let pixels = self.doc.images.pixels(block);
+        (pixels.size().width > 0).then_some((pixels, size))
     }
 
     /// Where the window is and how big, in logical pixels.

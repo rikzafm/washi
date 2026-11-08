@@ -1,11 +1,14 @@
 use crate::platform::{NoteId, ResizeEdge, ScreenRect, WindowControl};
-use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
-use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, ScreenToClient, HDC, HMONITOR, MONITORINFO};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetTopWindow, GetWindow, PostMessageW, GW_HWNDNEXT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
-    HTTOPRIGHT, WM_NCLBUTTONDOWN,
+    HTTOPRIGHT, WM_LBUTTONUP, WM_NCDESTROY, WM_NCLBUTTONDOWN,
 };
+
+const DRAG_SUBCLASS_ID: usize = 0x5744_5247; // "WDRG"
 
 /// `MONITORINFOF_PRIMARY`
 const MONITORINFOF_PRIMARY: u32 = 1;
@@ -32,13 +35,39 @@ fn hit_test_code(edge: ResizeEdge) -> u32 {
 fn start_native_drag(hwnd: Option<isize>, hit: u32) {
     let Some(hwnd) = hwnd else { return };
     // SAFETY: plain calls on a window of this thread. The message is posted (not sent), so the
-    // modal loop starts after Slint's callback has returned.
+    // modal loop starts after Slint's callback has returned. Installing the subclass again on the
+    // same window only replaces its (unused) reference data.
     unsafe {
+        SetWindowSubclass(hwnd as HWND, Some(drag_subclass_proc), DRAG_SUBCLASS_ID, 0);
         let mut at = POINT { x: 0, y: 0 };
         GetCursorPos(&mut at);
         ReleaseCapture();
         let lparam = (((at.y as u32) & 0xFFFF) << 16 | ((at.x as u32) & 0xFFFF)) as LPARAM;
         PostMessageW(hwnd as HWND, WM_NCLBUTTONDOWN, hit as usize, lparam);
+    }
+}
+
+/// On every window that hands a press to Windows (notes and picture viewers alike). Windows' move
+/// or size loop runs inside the WM_NCLBUTTONDOWN call and swallows the button-up, so neither winit
+/// nor Slint ever learns the button was released: the grip keeps the pointer grab and eats every
+/// later click (each one starting another move or resize). Once the loop is over, post the missing
+/// button-up.
+unsafe extern "system" fn drag_subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    match msg {
+        WM_NCLBUTTONDOWN if wparam == HTCAPTION as usize || (HTLEFT as usize..=HTBOTTOMRIGHT as usize).contains(&wparam) => {
+            let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+            let mut at = POINT { x: 0, y: 0 };
+            GetCursorPos(&mut at);
+            ScreenToClient(hwnd, &mut at);
+            let client = (((at.y as u32) & 0xFFFF) << 16 | ((at.x as u32) & 0xFFFF)) as LPARAM;
+            PostMessageW(hwnd, WM_LBUTTONUP, 0, client);
+            result
+        }
+        WM_NCDESTROY => {
+            RemoveWindowSubclass(hwnd, Some(drag_subclass_proc), DRAG_SUBCLASS_ID);
+            DefSubclassProc(hwnd, msg, wparam, lparam)
+        }
+        _ => DefSubclassProc(hwnd, msg, wparam, lparam),
     }
 }
 

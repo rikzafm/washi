@@ -209,6 +209,27 @@ fn pieces(word: &str, max: f64, m: &Measure) -> Vec<String> {
     out
 }
 
+/// One line of text (the regular face) at `size` px cut into pieces of at most `max` width, as
+/// (text, start x, width): each piece is drawn level on the tilted baseline, like the note's words.
+pub fn line_pieces(text: &str, size: f64, max: f64) -> Vec<(String, f64, f64)> {
+    let m = Measure::new(false, false, size);
+    let mut at = 0.0;
+    pieces(text, max, &m)
+        .into_iter()
+        .map(|p| {
+            let w = m.width(&p);
+            let out = (p, at, w);
+            at += w;
+            out
+        })
+        .collect()
+}
+
+/// The width of one line of text (the regular face) at `size` px.
+pub fn line_width(text: &str, size: f64) -> f64 {
+    Measure::new(false, false, size).width(text)
+}
+
 /// The stretches of `start..end` of a block drawn in one face (bold and italic the same).
 fn face_runs(b: &Block, start: usize, end: usize) -> Vec<(usize, usize)> {
     let face = |i: usize| b.shown_at(i).bits() & (Flags::BOLD.bits() | Flags::ITALIC.bits());
@@ -335,7 +356,7 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
             top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
         }
         if b.kind == Kind::Image {
-            top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
+            top += image_size(b).map_or(st.pitch, |px| b.image_box(avail, px).2);
             continue;
         }
         let m = Measure::new(false, false, st.size);
@@ -414,7 +435,7 @@ pub fn extent_with_images(blocks: &[Block], paper_w: f64, t: &Tokens, image_size
         }
         tops.push(top);
         if b.kind == Kind::Image {
-            top += image_size(b).map_or(st.pitch, |px| image_height(avail, px));
+            top += image_size(b).map_or(st.pitch, |px| b.image_box(avail, px).2);
             continue;
         }
         let m = Measure::new(false, false, st.size);
@@ -485,8 +506,8 @@ pub fn selection_rects(blocks: &[Block], range: Range, paper_w: f64, t: &Tokens,
         let b = &blocks[bi];
         let st = t.style(b.kind);
         if b.kind == Kind::Image {
-            let height = image_size(b).map_or(st.pitch, |px| image_height(avail, px));
-            out.push(Rect { x: t.inset_left, y: tops[bi], width: avail, height, });
+            let (x, width, height) = image_size(b).map_or((0.0, avail, st.pitch), |px| b.image_box(avail, px));
+            out.push(Rect { x: t.inset_left + x, y: tops[bi], width, height });
             continue;
         }
         let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
@@ -514,6 +535,15 @@ pub fn selection_rects(blocks: &[Block], range: Range, paper_w: f64, t: &Tokens,
         }
     }
     out
+}
+
+/// Where the picture of block `block` is drawn (level paper frame); `None` when it is no picture.
+pub fn image_rect(blocks: &[Block], block: usize, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Option<Rect> {
+    let b = blocks.get(block).filter(|b| b.kind == Kind::Image)?;
+    let avail = paper_w - t.inset_left - t.inset_right;
+    let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+    let (x, width, height) = image_size(b).map_or((0.0, avail, t.style(b.kind).pitch), |px| b.image_box(avail, px));
+    Some(Rect { x: t.inset_left + x, y: tops[block], width, height })
 }
 
 #[cfg(test)]

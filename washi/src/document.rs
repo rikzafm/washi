@@ -65,6 +65,19 @@ impl Style {
     }
 }
 
+/// Where a picture narrower than the text area sits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Align {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// How wide a picture is shown, in percent of the text area (the height follows the aspect ratio).
+pub const IMAGE_PCT_MIN: u8 = 10;
+pub const IMAGE_PCT_MAX: u8 = 100;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
     pub kind: Kind,
@@ -74,16 +87,33 @@ pub struct Block {
     pub marks: Vec<Style>,
     /// The stored image of an `Image` block.
     pub image_id: Option<i64>,
+    /// An image's shown width, percent of the text area (`IMAGE_PCT_MIN..=IMAGE_PCT_MAX`).
+    pub image_pct: u8,
+    /// An image's place in the text area.
+    pub align: Align,
 }
 
 impl Block {
     pub fn new(kind: Kind, text: &str) -> Block {
         let text = one_line(text);
-        Block { kind, marks: vec![Style::NONE; text.len()], text, image_id: None }
+        Block { kind, marks: vec![Style::NONE; text.len()], text, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
     }
 
     pub fn image(id: i64) -> Block {
-        Block { kind: Kind::Image, text: String::new(), marks: vec![], image_id: Some(id) }
+        Block { kind: Kind::Image, text: String::new(), marks: vec![], image_id: Some(id), image_pct: IMAGE_PCT_MAX, align: Align::Left }
+    }
+
+    /// The box of an image `avail` wide whose pixels are `px`: its x offset from the text area's
+    /// left edge, its width and its height.
+    pub fn image_box(&self, avail: f64, px: (u32, u32)) -> (f64, f64, f64) {
+        let width = avail * self.image_pct as f64 / 100.0;
+        let height = if px.0 == 0 { 0.0 } else { width * px.1 as f64 / px.0 as f64 };
+        let x = match self.align {
+            Align::Left => 0.0,
+            Align::Center => (avail - width) / 2.0,
+            Align::Right => avail - width,
+        };
+        (x, width, height)
     }
 
     /// The whole text in one style.
@@ -288,14 +318,14 @@ fn read_inline(s: &str) -> Option<(String, Vec<Style>)> {
         cur = cur.with(flag, on);
         rest = &rest[len..];
     }
-    let b = Block { kind: Kind::Body, text, marks, image_id: None };
+    let b = Block { image_pct: IMAGE_PCT_MAX, align: Align::Left, kind: Kind::Body, text, marks, image_id: None };
     (write_inline(&b) == s).then_some((b.text, b.marks))
 }
 
 /// A block of `kind` from the stored rest of its line (after the kind's marker).
 fn read_block(kind: Kind, rest: &str) -> Block {
     match read_inline(rest) {
-        Some((text, marks)) => Block { kind, text, marks, image_id: None },
+        Some((text, marks)) => Block { kind, text, marks, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left },
         None => {
             let (style, text) = unwrap_inline(rest);
             Block::new(kind, &text).with_style(style)
@@ -303,8 +333,20 @@ fn read_block(kind: Kind, rest: &str) -> Block {
     }
 }
 
-fn image_id(line: &str) -> Option<i64> {
-    line.strip_prefix("![](img:")?.strip_suffix(')')?.parse().ok()
+/// `![](img:ID)`, or `![](img:ID,PCT,l|c|r)` for a picture that is resized or aligned.
+fn image_line(line: &str) -> Option<Block> {
+    let inner = line.strip_prefix("![](img:")?.strip_suffix(')')?;
+    let mut parts = inner.split(',');
+    let mut b = Block::image(parts.next()?.parse().ok()?);
+    if let Some(pct) = parts.next().and_then(|p| p.parse::<u8>().ok()) {
+        b.image_pct = pct.clamp(IMAGE_PCT_MIN, IMAGE_PCT_MAX);
+    }
+    b.align = match parts.next() {
+        Some("c") => Align::Center,
+        Some("r") => Align::Right,
+        _ => Align::Left,
+    };
+    Some(b)
 }
 
 /// Where the text of `old` was replaced to make `new`, the caret now at `cursor` in `new` (if
@@ -379,6 +421,8 @@ impl Document {
                 b.marks.clear();
             } else {
                 b.image_id = None;
+                b.image_pct = IMAGE_PCT_MAX;
+                b.align = Align::Left;
                 b.normalize_marks();
             }
         }
@@ -428,7 +472,16 @@ impl Document {
                 Kind::ListItem => out.push_str("- "),
                 Kind::Body => {}
                 Kind::Image => {
-                    out.push_str(&format!("![](img:{})", b.image_id.unwrap_or(0)));
+                    out.push_str(&format!("![](img:{}", b.image_id.unwrap_or(0)));
+                    if b.image_pct != IMAGE_PCT_MAX || b.align != Align::Left {
+                        let a = match b.align {
+                            Align::Left => 'l',
+                            Align::Center => 'c',
+                            Align::Right => 'r',
+                        };
+                        out.push_str(&format!(",{},{a}", b.image_pct.clamp(IMAGE_PCT_MIN, IMAGE_PCT_MAX)));
+                    }
+                    out.push(')');
                     continue;
                 }
             }
@@ -525,7 +578,7 @@ impl Document {
         }
         let kind = match b.text.get(..2)? {
             "# " => Kind::Heading,
-            "- " => Kind::ListItem,
+            "- " | "* " => Kind::ListItem,
             _ => return None,
         };
         if old.starts_with(&b.text[..2]) {
@@ -662,6 +715,46 @@ impl Document {
         true
     }
 
+    /// Show the picture at `block` `pct` percent wide (clamped). False when it is no picture or nothing changes.
+    pub fn set_image_pct(&mut self, block: usize, pct: u8) -> bool {
+        let pct = pct.clamp(IMAGE_PCT_MIN, IMAGE_PCT_MAX);
+        match self.blocks.get_mut(block) {
+            Some(b) if b.kind == Kind::Image && b.image_pct != pct => {
+                b.image_pct = pct;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Place the picture at `block`. False when it is no picture or nothing changes.
+    pub fn set_image_align(&mut self, block: usize, align: Align) -> bool {
+        match self.blocks.get_mut(block) {
+            Some(b) if b.kind == Kind::Image && b.align != align => {
+                b.align = align;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Remove the picture at `block`; the caret goes to the block that takes its place (always a
+    /// text block: an image never ends the note). `None` when `block` is no picture.
+    pub fn delete_image(&mut self, block: usize) -> Option<Caret> {
+        if self.blocks.get(block)?.kind != Kind::Image {
+            return None;
+        }
+        self.blocks.remove(block);
+        if block >= self.blocks.len() {
+            self.blocks.push(Block::new(Kind::Body, ""));
+        }
+        let at = (block..self.blocks.len()).find(|&i| self.blocks[i].is_text()).unwrap_or_else(|| {
+            self.blocks.push(Block::new(Kind::Body, ""));
+            self.blocks.len() - 1
+        });
+        Some(Caret { block: at, offset: 0 })
+    }
+
     /// Insert an image block after `block`; an image never ends the note, a body line follows.
     /// Returns the image's index.
     pub fn insert_image(&mut self, block: usize, id: i64) -> usize {
@@ -779,7 +872,7 @@ impl Document {
 /// The block that follows `prev` when Enter is pressed in it, holding `text` styled `marks`.
 fn following(prev: &Block, text: String, marks: Vec<Style>) -> Block {
     let kind = if prev.kind == Kind::ListItem { Kind::ListItem } else { Kind::Body };
-    Block { kind, text, marks, image_id: None }
+    Block { kind, text, marks, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
 }
 
 pub(crate) fn floor_boundary(s: &str, mut i: usize) -> usize {
@@ -796,8 +889,8 @@ fn parse_line(index: usize, line: &str) -> Block {
         let rest = line.strip_prefix("# ").or_else(|| line.strip_prefix("## ")).unwrap_or(line);
         return read_block(Kind::Title, rest);
     }
-    if let Some(id) = image_id(line) {
-        return Block::image(id);
+    if let Some(b) = image_line(line) {
+        return b;
     }
     let (kind, rest) = if let Some(r) = line.strip_prefix("## ").or_else(|| line.strip_prefix("# ")) {
         (Kind::Heading, r)
@@ -833,6 +926,9 @@ mod tests {
         let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "- milk")]);
         assert_eq!(d.auto_format(1, "-milk", 2), Some(Caret { block: 1, offset: 0 }));
         assert_eq!((d.blocks()[1].kind, d.blocks()[1].text.as_str()), (Kind::ListItem, "milk"));
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "* eggs")]);
+        assert_eq!(d.auto_format(1, "*eggs", 2), Some(Caret { block: 1, offset: 0 }));
+        assert_eq!((d.blocks()[1].kind, d.blocks()[1].text.as_str()), (Kind::ListItem, "eggs"));
     }
 
     #[test]
@@ -1278,6 +1374,47 @@ mod tests {
     }
 
     // ---- navigation helpers ----
+
+    #[test]
+    fn a_picture_remembers_its_size_and_place_in_the_stored_text() {
+        let mut d = doc(&[(Kind::Title, "t")]);
+        d.insert_image(0, 5);
+        assert_eq!(d.to_text(), "# t\n![](img:5)\n");
+        assert!(d.set_image_pct(1, 40));
+        assert!(!d.set_image_pct(1, 40), "nothing changes");
+        assert!(d.set_image_align(1, Align::Right));
+        assert!(!d.set_image_align(0, Align::Right), "the title is no picture");
+        assert_eq!(d.to_text(), "# t\n![](img:5,40,r)\n");
+        let back = Document::parse(&d.to_text());
+        assert_eq!((back.blocks()[1].image_pct, back.blocks()[1].align), (40, Align::Right));
+        assert!(d.set_image_pct(1, 1));
+        assert_eq!(d.blocks()[1].image_pct, IMAGE_PCT_MIN, "clamped");
+        assert_eq!(Document::parse("# t\n![](img:5,500,c)").blocks()[1].image_pct, IMAGE_PCT_MAX);
+        assert_eq!(Document::parse("# t\n![](img:5,x,y)").blocks()[1].image_pct, IMAGE_PCT_MAX);
+    }
+
+    #[test]
+    fn the_box_of_a_picture_follows_its_width_and_place() {
+        let mut b = Block::image(1);
+        assert_eq!(b.image_box(200.0, (100, 50)), (0.0, 200.0, 100.0));
+        b.image_pct = 50;
+        b.align = Align::Center;
+        assert_eq!(b.image_box(200.0, (100, 50)), (50.0, 100.0, 50.0));
+        b.align = Align::Right;
+        assert_eq!(b.image_box(200.0, (100, 50)), (100.0, 100.0, 50.0));
+    }
+
+    #[test]
+    fn deleting_a_picture_leaves_a_text_block_for_the_caret() {
+        let mut d = doc(&[(Kind::Title, "t")]);
+        d.insert_image(0, 9);
+        assert_eq!(d.delete_image(1), Some(Caret { block: 1, offset: 0 }));
+        assert_eq!(kinds(&d), [Kind::Title, Kind::Body]);
+        assert_eq!(d.delete_image(0), None, "the title is no picture");
+        let mut e = Document::from_blocks(vec![Block::new(Kind::Title, "t"), Block::image(1)]);
+        assert_eq!(e.delete_image(1), Some(Caret { block: 1, offset: 0 }));
+        assert_eq!(kinds(&e), [Kind::Title, Kind::Body]);
+    }
 
     #[test]
     fn neighbors_skip_images() {

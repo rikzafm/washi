@@ -52,6 +52,10 @@ export component TextLayer inherits Rectangle {
     callback paste-image() -> bool;
     /// The wash of the note's selection (Rust): one level box per line the selection touches.
     in property <[SelRect]> sel-rects;
+    /// The selected picture's frame (first) and resize grip (second), level.
+    in property <[SelRect]> image-handles;
+    /// A right click, in this layer's frame (sent just before `right-click`).
+    callback layer-right-click(length, length);
     /// Ctrl+A: the note selects everything.
     callback select-all();
     /// The selection across blocks as plain lines (Rust), for copying.
@@ -160,8 +164,16 @@ export component TextLayer inherits Rectangle {
             text: b.text;
             bold: b.bold;
             img: b.img;
+            img-turned: b.img-turned;
             img-w: b.img-w;
             img-h: b.img-h;
+            tilt-scale: root.tilt-scale;
+            paper-w: root.paper-w;
+            paper-h: root.paper-h;
+            shift-x: root.shift-x;
+            shift-y: root.shift-y;
+            img-pct: b.img-pct;
+            img-align: b.img-align;
             paste-image => { return root.paste-image(); }
             pitch-scale: root.pitch-scale;
             select-all => { root.select-all(); }
@@ -212,6 +224,18 @@ export component TextLayer inherits Rectangle {
         }
     }
 
+    // a selected picture: its frame, and the grip that resizes it
+    for h[i] in root.image-handles: Rectangle {
+        x: h.x;
+        y: h.y;
+        width: h.width;
+        height: h.height;
+        background: i == 0 ? transparent : Theme.ink;
+        border-width: i == 0 ? 1px : 0px;
+        border-color: Theme.ink;
+        border-radius: i == 0 ? 0px : 2px;
+    }
+
     // The note owns the pointer: transparent, over the fields (which no longer see the mouse).
     TouchArea {
         x: 0;
@@ -227,6 +251,7 @@ export component TextLayer inherits Rectangle {
                 root.pointer-up();
             }
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+                root.layer-right-click(self.mouse-x, self.mouse-y);
                 root.right-click(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
             }
         }

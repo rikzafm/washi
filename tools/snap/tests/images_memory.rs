@@ -69,7 +69,8 @@ fn suspending_gives_the_decoded_pictures_back() {
     }
     h.advance(Duration::from_millis(600));
     let decoded = h.decoded_image_bytes();
-    assert!(decoded >= 3 * 900_000 && decoded <= 3 * 1_100_000, "{decoded} bytes decoded for 3 pictures");
+    // each about 1 MB, plus as much again for its copy turned by the text's tilt
+    assert!(decoded >= 3 * 1_800_000 && decoded <= 3 * 2_250_000, "{decoded} bytes decoded for 3 pictures");
 
     let awake = private_bytes();
     for n in 0..3 {
@@ -79,6 +80,6 @@ fn suspending_gives_the_decoded_pictures_back() {
     assert!(h.is_suspended());
     let suspended = private_bytes();
     let given_back = awake.saturating_sub(suspended);
-    // the 3 decoded pictures are about 3 MB; allow for the allocator and other threads moving some of it
+    // the 3 decoded pictures (and their turned copies) are about 6 MB; allow for the allocator and other threads moving some of it
     assert!(given_back >= 3 * 512 * 1024, "suspending gave back {given_back} bytes (decoded: {decoded})");
 }

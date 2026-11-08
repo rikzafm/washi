@@ -16,8 +16,14 @@ export struct BlockData {
     /// An image block: the picture (empty while the note is suspended) and its size in pixels,
     /// which sets the block's height (the text-area width times the aspect ratio).
     img: image,
+    /// The same picture turned by the text's tilt (Rust: the software renderer cannot turn one),
+    /// on a canvas a little larger than the picture; shown at rest.
+    img-turned: image,
     img-w: int,
     img-h: int,
+    /// An image's shown width in percent of the text area, and its place: 0 left, 1 center, 2 right.
+    img-pct: int,
+    img-align: int,
     italic: bool,
 }
 
@@ -66,8 +72,12 @@ export component BlockView inherits Rectangle {
     in property <bool> bold: false;
     in property <image> img;
     changed img => { }
+    in property <image> img-turned;
+    changed img-turned => { }
     in property <int> img-w: 0;
     in property <int> img-h: 0;
+    in property <int> img-pct: 100;
+    in property <int> img-align: 0;
     /// Ctrl+V: true when the note took it (the clipboard held a picture).
     callback paste-image() -> bool;
     /// Ctrl+A: the note selects everything (a range from the start to the end).
@@ -137,7 +147,8 @@ export component BlockView inherits Rectangle {
         }
     }
 
-    property <length> image-height: root.img-w > 0 ? root.width * root.img-h / root.img-w : 0px;
+    property <length> image-width: root.width * root.img-pct / 100;
+    property <length> image-height: root.img-w > 0 ? root.image-width * root.img-h / root.img-w : 0px;
     preferred-height: root.gap-before + (root.kind == BlockKind.image ? root.image-height : input.preferred-height);
 
     // A selected picture has no text field: this takes the keyboard focus instead, so Backspace and
@@ -154,16 +165,44 @@ export component BlockView inherits Rectangle {
         }
     }
 
-    if root.kind == BlockKind.image: Image {
-        x: 0;
-        y: root.gap-before;
-        width: parent.width;
+    /// How much of the paper's tilt a picture still carries (1 at rest, 0 while editing), and what
+    /// it needs to turn about the paper's center like the words do (see text.slint).
+    in property <float> tilt-scale: 0;
+    in property <length> paper-w: 0px;
+    in property <length> paper-h: 0px;
+    in property <length> shift-x: 0px;
+    in property <length> shift-y: 0px;
+    property <length> image-x: root.img-align == 0 ? 0px : root.img-align == 1 ? (root.width - root.image-width) / 2 : root.width - root.image-width;
+    // the picture's center in the text layer, and how far the paper's tilt moves it
+    property <length> center-x: Theme.text-inset-left + root.image-x + root.image-width / 2 - root.paper-w / 2;
+    property <length> center-y: Theme.text-inset-top + root.y + root.gap-before + root.image-height / 2 - root.paper-h / 2;
+    property <length> tilt-dx: root.center-x * (Theme.text-tilt.cos() - 1) - root.center-y * Theme.text-tilt.sin();
+    property <length> tilt-dy: root.center-x * Theme.text-tilt.sin() + root.center-y * (Theme.text-tilt.cos() - 1);
+
+    // Level while editing (like the words); at rest the turned copy, its center where the paper's
+    // tilt puts the picture's center. They swap halfway through the settle.
+    property <bool> turned: root.tilt-scale > 0.5 && root.img-turned.width > 0;
+    if root.kind == BlockKind.image && !root.turned: Image {
+        x: root.image-x + (root.tilt-dx + root.shift-x) * root.tilt-scale;
+        y: root.gap-before + (root.tilt-dy + root.shift-y) * root.tilt-scale;
+        width: root.image-width;
         height: root.image-height;
         source: root.img;
         image-fit: fill;
         // Evaluated as soon as it changes (the event loop runs change handlers right after the
         // timer that suspended the app), so freed pixels are let go at once, not at the next redraw,
         // which a minimized window never gets.
+        changed source => { }
+    }
+    if root.kind == BlockKind.image && root.turned: Image {
+        // logical px per picture pixel, the same for the turned copy
+        property <float> k: root.img-w > 0 ? root.image-width / 1px / root.img-w : 0;
+        width: root.img-turned.width * self.k * 1px;
+        height: root.img-turned.height * self.k * 1px;
+        x: root.image-x + (root.image-width - self.width) / 2 + (root.tilt-dx + root.shift-x) * root.tilt-scale;
+        y: root.gap-before + (root.image-height - self.height) / 2 + (root.tilt-dy + root.shift-y) * root.tilt-scale;
+        source: root.img-turned;
+        image-fit: fill;
         changed source => { }
     }
 

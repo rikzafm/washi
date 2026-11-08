@@ -5,15 +5,13 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
-use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, GW_HWNDPREV,
-    PostMessageW, HTBOTTOMRIGHT, HTCAPTION, HTLEFT, WM_ACTIVATE, WM_ACTIVATEAPP, WM_ENDSESSION, WM_LBUTTONUP, WM_MOVE,
-    WM_NCDESTROY, WM_NCLBUTTONDOWN, WM_PAINT, WM_QUERYENDSESSION, WM_SIZE,
+    GetForegroundWindow, GetWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, GW_HWNDPREV,
+    WM_ACTIVATE, WM_ACTIVATEAPP, WM_ENDSESSION, WM_MOVE, WM_NCDESTROY, WM_PAINT, WM_QUERYENDSESSION, WM_SIZE,
 };
 
 const SUBCLASS_ID: usize = 0x5741_5348; // "WASH"
@@ -88,19 +86,6 @@ unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lp
             }
         }
         WM_PAINT => post(SignalEvent::Paint(note as NoteId)),
-        // A tape or edge grip handed the pressed button to Windows (window_control.rs). Windows'
-        // move or size loop runs inside this call and swallows the button-up, so neither winit nor
-        // Slint ever learns the button was released: the grip keeps the pointer grab and eats
-        // every later click, selection and wheel. Once the loop is over, post the missing button-up.
-        WM_NCLBUTTONDOWN if wparam == HTCAPTION as usize || (HTLEFT as usize..=HTBOTTOMRIGHT as usize).contains(&wparam) => {
-            let result = DefSubclassProc(hwnd, msg, wparam, lparam);
-            let mut at = POINT { x: 0, y: 0 };
-            GetCursorPos(&mut at);
-            ScreenToClient(hwnd, &mut at);
-            let client = (((at.y as u32) & 0xFFFF) << 16 | ((at.x as u32) & 0xFFFF)) as LPARAM;
-            PostMessageW(hwnd, WM_LBUTTONUP, 0, client);
-            return result;
-        }
         WM_NCDESTROY => {
             RemoveWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID);
         }

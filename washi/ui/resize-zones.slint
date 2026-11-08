@@ -20,7 +20,7 @@ export global ResizeZoneMetrics {
 // A zone is a TouchArea, so it takes the pointer events of what lies under it. The note's own
 // TouchArea shows the toolbar and the context menu, so a zone hands on the right button and
 // pointer moves instead of swallowing them.
-component Zone inherits TouchArea {
+export component Zone inherits TouchArea {
     in property <int> direction;
     callback start(int);
     callback right-click(length, length);
@@ -35,7 +35,7 @@ component Zone inherits TouchArea {
 }
 
 // An area that drags the whole note.
-component MoveArea inherits TouchArea {
+export component MoveArea inherits TouchArea {
     callback start();
     callback right-click(length, length);
     callback pointer-over();

@@ -5,6 +5,7 @@ pub mod app;
 pub mod document;
 pub mod history;
 pub mod icon;
+pub mod image_viewer;
 pub mod images;
 pub mod export;
 pub mod note_images;

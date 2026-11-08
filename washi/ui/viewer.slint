@@ -1,0 +1,363 @@
+// The picture viewer: a second, resizable paper window that shows one picture of a note at its
+// stored size (design B2: one flat pink tape on the top edge, the note's own handwriting for the
+// caption, bare line icons like the formatting toolbar). Opened by a double click on a picture.
+//
+// The paper, its shadow and its 1.5 deg tilt are the note's (paper.slint). The software renderer
+// cannot rotate text, so the caption and the icons stay level and sit at tilted positions.
+import { PaperTheme } from "paper-theme.slint";
+import { Paper, PaperGeometry } from "paper.slint";
+import { Theme } from "theme.slint";
+import { Zone, MoveArea, ResizeZoneMetrics } from "resize-zones.slint";
+
+// Chrome around the picture, in the paper's frame. Keep in step with `image_viewer.rs`.
+global ViewerMetrics {
+    out property <length> pad-x: 22px;
+    out property <length> pad-top: 32px;
+    out property <length> band: 62px;
+    out property <length> pad-bottom: 10px;
+    out property <length> button: 44px;
+    out property <color> icon: #7B879B;
+    out property <color> icon-hover: #6E7D9624;
+    out property <color> stage: #F3F0E8;
+}
+
+// A bare line icon (24 px grid scaled to 20) that gets a faint wash under the pointer.
+component IconButton inherits Rectangle {
+    in property <string> icon-path;
+    in property <string> label;
+    callback clicked();
+    width: ViewerMetrics.button;
+    height: ViewerMetrics.button;
+    border-radius: 6px;
+    background: touch.has-hover ? ViewerMetrics.icon-hover : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    Path {
+        width: 20px;
+        height: 20px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        commands: root.icon-path;
+        stroke: ViewerMetrics.icon;
+        stroke-width: 1.7px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// One piece of a line of text: its text, how far it starts from the line's start, and its width.
+export struct CaptionPiece {
+    text: string,
+    dx: length,
+    width: length,
+}
+
+export component ImageViewerWindow inherits Window {
+    in property <image> picture;
+    in property <int> picture-w;
+    in property <int> picture-h;
+    /// The picture turned by the paper's tilt (Rust does that): its size, a little more than the picture's.
+    in property <int> picture-rw;
+    in property <int> picture-rh;
+    in property <string> caption: "Picture";
+    /// The caption and the size line cut into short pieces (see `image_viewer.rs`), and how wide
+    /// the size line is (the zoom follows it).
+    in property <[CaptionPiece]> title-pieces;
+    in property <[CaptionPiece]> info-pieces;
+    in property <length> info-width;
+    in property <image> app-icon;
+    title: root.caption;
+    icon: root.app-icon;
+    no-frame: true;
+    background: transparent;
+    min-width: 360px + 2 * PaperTheme.margin;
+    min-height: 280px + 2 * PaperTheme.margin;
+    preferred-width: 480px + 2 * PaperTheme.margin;
+    preferred-height: 400px + 2 * PaperTheme.margin;
+
+    /// The user pressed the tape or the caption: the platform drags the window.
+    callback start-move();
+    /// The user pressed a resize zone (0 north, then clockwise: see resize-zones.slint).
+    callback start-resize(int);
+    callback close-viewer();
+
+    // true: the whole picture fits the window (never enlarged past 100%); false: `zoom` rules
+    in-out property <bool> fit: true;
+    in-out property <float> zoom: 1;
+    in-out property <length> pan-x: 0px;
+    in-out property <length> pan-y: 0px;
+
+    property <length> pw: root.width - 2 * PaperTheme.margin;
+    property <length> ph: root.height - 2 * PaperTheme.margin;
+    property <length> area-w: max(1px, root.pw - 2 * ViewerMetrics.pad-x);
+    property <length> area-h: max(1px, root.ph - ViewerMetrics.pad-top - ViewerMetrics.band - ViewerMetrics.pad-bottom);
+    property <float> fit-scale: root.picture-w > 0 && root.picture-h > 0
+        ? Math.min(1, Math.min(root.area-w / (root.picture-w * 1px), root.area-h / (root.picture-h * 1px)))
+        : 1;
+    property <float> scale: root.fit ? root.fit-scale : root.zoom;
+    property <length> disp-w: root.picture-w * 1px * root.scale;
+    property <length> disp-h: root.picture-h * 1px * root.scale;
+    // how far the picture runs past the stage on each side (0 when it fits)
+    property <length> over-x: max(0px, (root.disp-w - root.area-w) / 2);
+    property <length> over-y: max(0px, (root.disp-h - root.area-h) / 2);
+    // How far a drag may move the picture from the middle. Fitted, only what runs past the stage;
+    // zoomed, a picture smaller than the stage also slides until its edge meets the stage's.
+    property <length> max-pan-x: root.fit ? root.over-x : abs(root.disp-w - root.area-w) / 2;
+    property <length> max-pan-y: root.fit ? root.over-y : abs(root.disp-h - root.area-h) / 2;
+
+    // points of the paper's frame (from its center, along its axes) in window px
+    property <length> cx: root.width / 2;
+    property <length> cy: root.height / 2;
+    property <length> stage-v: ViewerMetrics.pad-top + root.area-h / 2 - root.ph / 2;
+    property <length> band-v: root.ph / 2 - ViewerMetrics.pad-bottom - ViewerMetrics.band / 2;
+    property <length> left-u: -root.pw / 2 + ViewerMetrics.pad-x;
+    property <length> right-u: root.pw / 2 - 18px;
+    // how far the caption may run: up to the zoom-out button
+    property <length> caption-room: root.pw - 2 * ViewerMetrics.pad-x - 4 * ViewerMetrics.button - 24px;
+
+    function zoom-by(f: float) {
+        root.zoom = Math.max(0.1, Math.min(8, root.scale * f));
+        root.fit = false;
+    }
+    function show-fit() {
+        root.fit = true;
+        root.pan-x = 0px;
+        root.pan-y = 0px;
+    }
+
+    Paper { width: root.width; height: root.height; }
+
+    // Keys: Esc closes, + and - zoom, 0 fits.
+    FocusScope {
+        width: root.width;
+        height: root.height;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) { root.close-viewer(); return accept; }
+            if (e.text == "+" || e.text == "=") { root.zoom-by(1.25); return accept; }
+            if (e.text == "-") { root.zoom-by(0.8); return accept; }
+            if (e.text == "0") { root.show-fit(); return accept; }
+            reject
+        }
+    }
+
+    // The picture: a level stage at the paper's tilted spot; the picture turns with the paper.
+    Rectangle {
+        property <length> grow: (root.over-x == 0px && root.over-y == 0px) ? 10px : 0px;
+        x: PaperGeometry.x(root.cx, root.cy, 0px, root.stage-v) - root.area-w / 2 - self.grow;
+        y: PaperGeometry.y(root.cx, root.cy, 0px, root.stage-v) - root.area-h / 2 - self.grow;
+        width: root.area-w + 2 * self.grow;
+        height: root.area-h + 2 * self.grow;
+        clip: true;
+        Image {
+            source: root.picture;
+            width: root.picture-rw * 1px * root.scale;
+            height: root.picture-rh * 1px * root.scale;
+            x: (parent.width - self.width) / 2 + Math.clamp(root.pan-x, -root.max-pan-x, root.max-pan-x);
+            y: (parent.height - self.height) / 2 + Math.clamp(root.pan-y, -root.max-pan-y, root.max-pan-y);
+            image-fit: fill;
+        }
+        pan := TouchArea {
+            property <length> base-x;
+            property <length> base-y;
+            mouse-cursor: (root.max-pan-x > 0px || root.max-pan-y > 0px) ? MouseCursor.move : MouseCursor.default;
+            changed pressed => {
+                if (self.pressed) {
+                    self.base-x = Math.clamp(root.pan-x, -root.max-pan-x, root.max-pan-x);
+                    self.base-y = Math.clamp(root.pan-y, -root.max-pan-y, root.max-pan-y);
+                }
+            }
+            moved => {
+                if (self.pressed) {
+                    root.pan-x = self.base-x + self.mouse-x - self.pressed-x;
+                    root.pan-y = self.base-y + self.mouse-y - self.pressed-y;
+                }
+            }
+            scroll-event(e) => {
+                if (e.delta-y > 0) { root.zoom-by(1.25); } else if (e.delta-y < 0) { root.zoom-by(0.8); }
+                accept
+            }
+        }
+    }
+
+    // Caption: the note's title in its handwriting, and the size and zoom beneath it. Like the
+    // note's words, every piece is level text on the tilted baseline (Rust cuts the lines into
+    // pieces). A piece that does not fit before the buttons is left out.
+    for p in root.title-pieces: Text {
+        x: PaperGeometry.x(root.cx, root.cy, root.left-u + 4px + p.dx, root.band-v - 28px);
+        y: PaperGeometry.y(root.cx, root.cy, root.left-u + 4px + p.dx, root.band-v - 28px);
+        visible: p.dx + p.width <= root.caption-room;
+        text: p.text;
+        wrap: no-wrap;
+        font-family: Theme.handwriting;
+        font-size: 33px;
+        color: Theme.ink;
+    }
+    for p in root.info-pieces: Text {
+        x: PaperGeometry.x(root.cx, root.cy, root.left-u + 4px + p.dx, root.band-v + 10px);
+        y: PaperGeometry.y(root.cx, root.cy, root.left-u + 4px + p.dx, root.band-v + 10px);
+        text: p.text;
+        wrap: no-wrap;
+        font-family: Theme.handwriting;
+        font-size: 20px;
+        color: #7F8797;
+    }
+    Text {
+        x: PaperGeometry.x(root.cx, root.cy, root.left-u + 4px + root.info-width, root.band-v + 10px);
+        y: PaperGeometry.y(root.cx, root.cy, root.left-u + 4px + root.info-width, root.band-v + 10px);
+        text: "\{Math.round(root.scale * 100)}%";
+        wrap: no-wrap;
+        font-family: Theme.handwriting;
+        font-size: 20px;
+        color: #7F8797;
+    }
+
+    // Buttons, right to left: close, fit, zoom in, zoom out.
+    IconButton {
+        x: PaperGeometry.x(root.cx, root.cy, root.right-u - 22px, root.band-v) - self.width / 2;
+        y: PaperGeometry.y(root.cx, root.cy, root.right-u - 22px, root.band-v) - self.height / 2;
+        label: "Close";
+        icon-path: "M 4 4 L 16 16 M 16 4 L 4 16";
+        clicked => { root.close-viewer(); }
+    }
+    IconButton {
+        x: PaperGeometry.x(root.cx, root.cy, root.right-u - 22px - 46px, root.band-v) - self.width / 2;
+        y: PaperGeometry.y(root.cx, root.cy, root.right-u - 22px - 46px, root.band-v) - self.height / 2;
+        label: "Fit to window";
+        icon-path: "M 3 7.5 L 3 3 L 7.5 3 M 12.5 3 L 17 3 L 17 7.5 M 17 12.5 L 17 17 L 12.5 17 M 7.5 17 L 3 17 L 3 12.5";
+        clicked => { root.show-fit(); }
+    }
+    IconButton {
+        x: PaperGeometry.x(root.cx, root.cy, root.right-u - 22px - 92px, root.band-v) - self.width / 2;
+        y: PaperGeometry.y(root.cx, root.cy, root.right-u - 22px - 92px, root.band-v) - self.height / 2;
+        label: "Zoom in";
+        icon-path: "M 14.6 9 A 5.6 5.6 0 1 1 3.4 9 A 5.6 5.6 0 1 1 14.6 9 M 13.2 13.2 L 17.5 17.5 M 6.4 9 L 11.6 9 M 9 6.4 L 9 11.6";
+        clicked => { root.zoom-by(1.25); }
+    }
+    IconButton {
+        x: PaperGeometry.x(root.cx, root.cy, root.right-u - 22px - 138px, root.band-v) - self.width / 2;
+        y: PaperGeometry.y(root.cx, root.cy, root.right-u - 22px - 138px, root.band-v) - self.height / 2;
+        label: "Zoom out";
+        icon-path: "M 14.6 9 A 5.6 5.6 0 1 1 3.4 9 A 5.6 5.6 0 1 1 14.6 9 M 13.2 13.2 L 17.5 17.5 M 6.4 9 L 11.6 9";
+        clicked => { root.zoom-by(0.8); }
+    }
+
+    // The one flat pink tape across the top edge.
+    tape := Image {
+        source: @image-url("assets/tape-pink-flat.png");
+        width: self.source.width / PaperTheme.tape-image-scale * 1px;
+        height: self.source.height / PaperTheme.tape-image-scale * 1px;
+        x: PaperGeometry.x(root.cx, root.cy, 0px, -root.ph / 2 + 4px) - self.width / 2;
+        y: PaperGeometry.y(root.cx, root.cy, 0px, -root.ph / 2 + 4px) - self.height / 2;
+    }
+
+    // The resize grip's mark, bottom right.
+    Path {
+        width: 22px;
+        height: 22px;
+        x: PaperGeometry.x(root.cx, root.cy, root.pw / 2 - 15px, root.ph / 2 - 15px) - self.width / 2;
+        y: PaperGeometry.y(root.cx, root.cy, root.pw / 2 - 15px, root.ph / 2 - 15px) - self.height / 2;
+        viewbox-width: 22;
+        viewbox-height: 22;
+        commands: "M 20 8 L 8 20 M 20 14 L 14 20 M 20 2 L 2 20";
+        stroke: #B9B3A6;
+        stroke-width: 1.4px;
+    }
+
+    // Grips (nothing drawn): eight resize zones on the paper's edges and corners, and the tape and
+    // the caption move the window. Above everything else, so a drag always finds them.
+    property <length> l: PaperTheme.margin;
+    property <length> t: PaperTheme.margin;
+    property <length> r: root.width - PaperTheme.margin;
+    property <length> b: root.height - PaperTheme.margin;
+    // Wider than the note's grips: nothing on the viewer's edges needs the pointer, and the
+    // window has no frame to aim for.
+    property <length> th: 2 * ResizeZoneMetrics.thickness;
+    property <length> c: 2 * ResizeZoneMetrics.corner;
+
+    MoveArea {
+        x: root.l + ViewerMetrics.pad-x;
+        y: PaperGeometry.y(root.cx, root.cy, 0px, root.band-v - 30px);
+        width: root.pw - 2 * ViewerMetrics.pad-x - 4 * ViewerMetrics.button - 24px;
+        height: 60px;
+        start => { root.start-move(); }
+    }
+    MoveArea {
+        x: tape.x;
+        y: tape.y;
+        width: tape.width;
+        height: tape.height;
+        start => { root.start-move(); }
+    }
+    // north, in two pieces: the tape between them stays one grip for moving
+    Zone {
+        direction: 0;
+        x: root.l + root.c / 2; y: root.t - root.th / 2; width: max(0px, tape.x - self.x); height: root.th;
+        mouse-cursor: ns-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone {
+        direction: 0;
+        x: tape.x + tape.width; y: root.t - root.th / 2; width: max(0px, root.r - root.c / 2 - self.x); height: root.th;
+        mouse-cursor: ns-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // east
+        direction: 2;
+        x: root.r - root.th / 2; y: root.t + root.c / 2; width: root.th; height: root.b - root.t - root.c;
+        mouse-cursor: ew-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // south
+        direction: 4;
+        x: root.l + root.c / 2; y: root.b - root.th / 2; width: root.r - root.l - root.c; height: root.th;
+        mouse-cursor: ns-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // west
+        direction: 6;
+        x: root.l - root.th / 2; y: root.t + root.c / 2; width: root.th; height: root.b - root.t - root.c;
+        mouse-cursor: ew-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // north-west
+        direction: 7;
+        x: root.l - root.c / 2; y: root.t - root.c / 2; width: root.c; height: root.c;
+        mouse-cursor: nwse-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // north-east
+        direction: 1;
+        x: root.r - root.c / 2; y: root.t - root.c / 2; width: root.c; height: root.c;
+        mouse-cursor: nesw-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // south-east
+        direction: 3;
+        x: root.r - root.c / 2; y: root.b - root.c / 2; width: root.c; height: root.c;
+        mouse-cursor: nwse-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // the drawn grip, bottom right
+        direction: 3;
+        width: 24px;
+        height: 24px;
+        x: PaperGeometry.x(root.cx, root.cy, root.pw / 2 - 12px, root.ph / 2 - 12px) - self.width / 2;
+        y: PaperGeometry.y(root.cx, root.cy, root.pw / 2 - 12px, root.ph / 2 - 12px) - self.height / 2;
+        mouse-cursor: nwse-resize;
+        start(d) => { root.start-resize(d); }
+    }
+    Zone { // south-west
+        direction: 5;
+        x: root.l - root.c / 2; y: root.b - root.c / 2; width: root.c; height: root.c;
+        mouse-cursor: nesw-resize;
+        start(d) => { root.start-resize(d); }
+    }
+}

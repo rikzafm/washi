@@ -239,9 +239,10 @@ fn decoded_pictures_exist_only_while_shown_and_not_suspended() {
         h.type_text(n, "note");
         note_with_photo(&mut h, n, dir.path(), &format!("p{n}.png"));
     }
-    // each picture is at most 582 x 453 px once stored: about 1 MB decoded
+    // each picture is at most 582 x 453 px once stored: about 1 MB decoded, plus as much again
+    // for its copy turned by the text's tilt (shown at rest)
     let awake = h.decoded_image_bytes();
-    assert!(awake > 0 && awake <= 3 * 1_100_000, "{awake} bytes decoded for 3 pictures");
+    assert!(awake > 0 && awake <= 3 * 2_250_000, "{awake} bytes decoded for 3 pictures");
 
     for n in 0..3 {
         h.render(n);

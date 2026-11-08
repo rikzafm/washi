@@ -6,6 +6,7 @@ import { TextLayer } from "text.slint";
 
 export { BlockData, BlockKind, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
+export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 import { Toolbar, ToolbarMetrics } from "toolbar.slint";
 import { WindowHandles } from "resize-zones.slint";
 import { ScrollBar, ScrollMetrics } from "scroll.slint";
@@ -35,6 +36,10 @@ export component NoteWindow inherits Window {
     in property <[RuleData]> rules;
     /// The wash of the selection (Rust): a level box for each line it touches.
     in property <[SelRect]> sel-rects;
+    /// A selected picture's frame and its resize grip (Rust): two level boxes, or none.
+    in property <[SelRect]> image-handles;
+    /// A right click on the text, in the text layer's frame (sent just before `context-menu`).
+    callback text-right-click(length, length);
     /// Ctrl+A: Rust sets the selection to the whole note.
     callback select-all();
     /// The formats of the selection, or of what is typed at the caret (the toolbar buttons' active state).
@@ -196,6 +201,8 @@ export component NoteWindow inherits Window {
                     runs: root.runs;
                     rules: root.rules;
                     sel-rects: root.sel-rects;
+                    image-handles: root.image-handles;
+                    layer-right-click(x, y) => { root.text-right-click(x, y); }
                     select-all => { root.select-all(); }
                     focus-entered(i) => { root.focus-entered(i); }
                     suspended: root.suspended;
