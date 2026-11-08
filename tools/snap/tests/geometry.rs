@@ -31,8 +31,8 @@ const CY: f32 = 235.0;
 
 /// On the pink tape (its center is about 37 px right of and 6 px below the paper's top-left).
 const TAPE: (f32, f32) = (80.0, 48.0);
-/// In the top margin, right of the tape.
-const TOP_MARGIN: (f32, f32) = (250.0, 56.0);
+/// On the blue tape (bottom-right).
+const BLUE_TAPE: (f32, f32) = (363.0, 421.0);
 /// In the middle of the text area.
 const TEXT: (f32, f32) = (150.0, 180.0);
 /// On the first toolbar button.
@@ -46,8 +46,8 @@ fn new_notes_open_at_the_default_paper_size() {
 }
 
 #[test]
-fn dragging_the_pink_tape_or_top_margin_moves_the_window() {
-    for from in [TAPE, TOP_MARGIN] {
+fn dragging_the_pink_tape_or_blue_tape_moves_the_window() {
+    for from in [TAPE, BLUE_TAPE] {
         let mut h = note();
         let grabbed = h.drag(0, from, (30.0, 20.0));
         assert_eq!(grabbed, Some(WindowCommand::Move(h.note_id(0))), "from {from:?}");
@@ -225,11 +225,12 @@ fn geometry_survives_a_restart_even_before_the_debounce_fires() {
 #[test]
 fn closed_note_reopens_at_its_moved_geometry() {
     let mut h = note();
+    h.type_text(0, "moved note");
     h.drag(0, TAPE, (200.0, 100.0));
     h.right_click(0, Some(&["New note"]));
     assert_eq!(h.open_note_count(), 2);
     h.close_note(0);
-    h.right_click(0, Some(&["Open note", "(empty note)"]));
+    h.right_click(0, Some(&["Open note", "moved note"]));
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.window_position(1), (200, 100));
 }

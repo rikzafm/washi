@@ -222,6 +222,28 @@ fn restart_reopens_exactly_the_notes_that_were_open() {
 }
 
 #[test]
+fn start_after_everything_was_closed_gives_one_empty_note() {
+    // When an empty note is closed causing quit, restarting opens a fresh blank note
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.press_ctrl(0, 'w');
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.note_text(0), "", "restarting opens a fresh blank note");
+
+    // When a non-empty note is closed and Washi quits, restarting should now restore that non-empty note
+    h.type_text(0, "closed for the night");
+    h.press_ctrl(0, 'w');
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.note_text(0), "# closed for the night", "restores the non-empty note");
+}
+
+#[test]
 fn closing_single_non_empty_note_quits_and_restarts_with_that_note() {
     let mut h = Harness::new();
     h.start().unwrap();
@@ -247,7 +269,7 @@ fn closing_empty_note_to_exit_restarts_with_one_empty_note() {
 }
 
 #[test]
-fn closing_multiple_notes_in_rapid_succession_restores_all_on_restart() {
+fn closing_multiple_notes_in_quick_succession_reopens_all_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "first note");
@@ -271,7 +293,7 @@ fn closing_multiple_notes_in_rapid_succession_restores_all_on_restart() {
 }
 
 #[test]
-fn closing_note_after_exit_window_restores_only_last_note() {
+fn closing_a_note_then_waiting_over_30s_keeps_it_closed_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note A");
@@ -295,7 +317,7 @@ fn closing_note_after_exit_window_restores_only_last_note() {
 }
 
 #[test]
-fn deleting_last_note_leaves_it_deleted_and_restores_previous_candidates() {
+fn closing_a_note_then_deleting_the_last_note_restores_the_closed_note() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note A");
@@ -316,6 +338,48 @@ fn deleting_last_note_leaves_it_deleted_and_restores_previous_candidates() {
     assert_eq!(h.open_note_count(), 1);
     assert_eq!(h.note_id(0), id_a);
     assert_eq!(h.note_text(0), "# note A");
+}
+
+#[test]
+fn closing_empty_and_non_empty_notes_reopens_only_non_empty_notes_on_restart() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "not empty note");
+    h.right_click(0, Some(&["New note"]));
+    // Note 1 is empty
+    assert_eq!(h.open_note_count(), 2);
+    let id0 = h.note_id(0);
+
+    h.close_note(1); // empty note closed
+    h.advance(Duration::from_secs(5));
+    h.close_note(0); // non-empty note closed, app quits
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.note_id(0), id0);
+    assert_eq!(h.note_text(0), "# not empty note");
+}
+
+#[test]
+fn closing_non_empty_then_empty_note_reopens_only_non_empty_notes_on_restart() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.type_text(0, "not empty note");
+    h.right_click(0, Some(&["New note"]));
+    // Note 1 is empty
+    assert_eq!(h.open_note_count(), 2);
+    let id0 = h.note_id(0);
+
+    h.close_note(0); // non-empty note closed
+    h.advance(Duration::from_secs(5));
+    h.close_note(0); // empty note closed (was index 1, now index 0), app quits
+    assert!(h.has_quit());
+
+    h.restart().unwrap();
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.note_id(0), id0);
+    assert_eq!(h.note_text(0), "# not empty note");
 }
 
 #[test]
