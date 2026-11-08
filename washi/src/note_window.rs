@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{floor_boundary, Block, Caret, Document, Kind, Range, Style as Flags};
+use crate::document::{floor_boundary, Block, Caret, Document, Kind, Range, Style as Flags, PALETTE};
 use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
@@ -172,6 +172,11 @@ struct Doc {
     rules: Rc<VecModel<RuleData>>,
     /// The wash of the note-level selection, one level box per line it touches.
     sel_rects: Rc<VecModel<SelRect>>,
+    /// The markers behind colored text as last laid out, what they are drawn from, and the boxes of
+    /// the wash that meet them.
+    markers: RefCell<Vec<textflow::Marker>>,
+    marker_data: Rc<VecModel<MarkerData>>,
+    marker_wash: Rc<VecModel<SelRect>>,
     /// The note-level range that `sel_rects` washes (a selection across blocks), if any.
     range: Cell<Option<Range>>,
     /// The selection: where it started and where the caret is now (the same caret: nothing
@@ -197,6 +202,20 @@ pub const HISTORY_PAUSE: Duration = Duration::from_millis(500);
 const UNDO_KEY: &str = "\u{1a}";
 const REDO_KEY: &str = "\u{19}";
 
+fn rgb(c: u32) -> slint::Color {
+    slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
+}
+
+/// The text color of palette entry `i` (the default ink for 0 and for an index past the table).
+pub fn ink_color(i: u8) -> slint::Color {
+    rgb(PALETTE.get(i as usize).unwrap_or(&PALETTE[0]).ink)
+}
+
+/// The marker color of palette entry `i` (see-through for none).
+pub fn marker_color(i: u8) -> slint::Color {
+    PALETTE.get(i as usize).and_then(|s| s.marker).map_or(slint::Color::from_argb_u8(0, 0, 0, 0), rgb)
+}
+
 /// The shown text of an empty note.
 pub const HINT: &str = "Note Something....";
 
@@ -208,6 +227,9 @@ impl Doc {
             runs: Rc::new(VecModel::default()),
             rules: Rc::new(VecModel::default()),
             sel_rects: Rc::new(VecModel::default()),
+            markers: RefCell::new(vec![]),
+            marker_data: Rc::new(VecModel::default()),
+            marker_wash: Rc::new(VecModel::default()),
             range: Cell::new(None),
             selection: Cell::new(Range { anchor: START, focus: START }),
             pointer: Cell::new(Pointer::default()),
@@ -307,7 +329,7 @@ impl Doc {
         ui.set_pitch_scale(ui.window().scale_factor());
         let tokens = Self::tokens(ui);
         let doc = self.doc.borrow();
-        let (mut runs, rules) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
+        let (mut runs, rules, markers) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
         ui.set_content_height(textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b)).1 as f32);
         self.rules.set_vec(
             rules
@@ -315,6 +337,19 @@ impl Doc {
                 .map(|r| RuleData { block: r.block as i32, x: r.x as f32, y: r.y as f32, dx: r.dx as f32, dy: r.dy as f32, width: r.width as f32, height: r.height as f32 })
                 .collect::<Vec<_>>(),
         );
+        self.marker_data.set_vec(
+            markers
+                .iter()
+                .map(|m| MarkerData {
+                    x: m.x as f32,
+                    y: m.y as f32,
+                    width: m.width as f32,
+                    height: m.height as f32,
+                    color: marker_color(m.marker),
+                })
+                .collect::<Vec<_>>(),
+        );
+        *self.markers.borrow_mut() = markers;
         self.fill_sel_rects(&doc, &tokens);
         let hint = doc.is_empty();
         if hint {
@@ -334,6 +369,7 @@ impl Doc {
                     pitch: r.pitch as f32,
                     bold: r.bold,
                     italic: r.italic,
+                    ink: ink_color(r.ink),
                     hint,
                 })
                 .collect::<Vec<_>>(),
@@ -346,9 +382,9 @@ impl Doc {
             Some(range) if !doc.is_empty() => textflow::selection_rects(doc.blocks(), range, self.paper.get().0, tokens, &|b| self.images.size(b)),
             _ => vec![],
         };
-        self.sel_rects.set_vec(
-            rects.iter().map(|r| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 }).collect::<Vec<_>>(),
-        );
+        let rect = |r: &textflow::Rect| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 };
+        self.sel_rects.set_vec(rects.iter().map(rect).collect::<Vec<_>>());
+        self.marker_wash.set_vec(textflow::marker_wash(&self.markers.borrow(), &rects).iter().map(rect).collect::<Vec<_>>());
     }
 
     /// Ctrl+A: the selection becomes the range from the start of the note to its end.
@@ -362,6 +398,7 @@ impl Doc {
     fn end_range(&self, ui: &NoteWindow) {
         self.range.set(None);
         self.sel_rects.set_vec(vec![]);
+        self.marker_wash.set_vec(vec![]);
         ui.set_wash(true);
     }
 
@@ -382,6 +419,7 @@ impl Doc {
         } else {
             self.range.set(None);
             self.sel_rects.set_vec(vec![]);
+            self.marker_wash.set_vec(vec![]);
             self.focus_with(ui, range.focus, Some(range.anchor.offset));
         }
         self.typing.set(None);
@@ -939,6 +977,8 @@ impl Note {
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
         ui.set_rules(slint::ModelRc::from(doc.rules.clone()));
         ui.set_sel_rects(slint::ModelRc::from(doc.sel_rects.clone()));
+        ui.set_markers(slint::ModelRc::from(doc.marker_data.clone()));
+        ui.set_marker_wash(slint::ModelRc::from(doc.marker_wash.clone()));
         doc.relayout(&ui);
         doc.show_formats(&ui);
         ui.set_text(doc.text().as_str().into());

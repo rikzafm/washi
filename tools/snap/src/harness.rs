@@ -631,6 +631,22 @@ impl Harness {
             .unwrap()
     }
 
+    /// The ink of each resting word, as `0xRRGGBB`, in the order of [`Harness::text_runs`].
+    pub fn run_inks(&self, note: usize) -> Vec<u32> {
+        use slint::Model;
+        let rgb = |c: slint::Color| (c.red() as u32) << 16 | (c.green() as u32) << 8 | c.blue() as u32;
+        self.app().with_note(self.id(note), |n| n.ui().get_runs().iter().map(|r| rgb(r.ink)).collect()).unwrap()
+    }
+
+    /// The markers behind the text: `(x, y, width, height, 0xRRGGBB)`, level, in the paper's frame.
+    pub fn markers(&self, note: usize) -> Vec<(f32, f32, f32, f32, u32)> {
+        use slint::Model;
+        let rgb = |c: slint::Color| (c.red() as u32) << 16 | (c.green() as u32) << 8 | c.blue() as u32;
+        self.app()
+            .with_note(self.id(note), |n| n.ui().get_markers().iter().map(|m| (m.x, m.y, m.width, m.height, rgb(m.color))).collect())
+            .unwrap()
+    }
+
     /// The boxes of the selection wash `(x, y, width, height)`, level, in the paper's frame.
     pub fn sel_rects(&self, note: usize) -> Vec<(f32, f32, f32, f32)> {
         use slint::Model;

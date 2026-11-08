@@ -87,6 +87,13 @@ mod tests {
     }
 
     #[test]
+    fn colors_are_exported_as_the_note_stores_them() {
+        // the export is the note's text format, not a rendering: ink and marker keep their markers
+        let content = "# Trip\nsee <c=blue>blue</c> and <m=yellow>marked</m> and <c=red><m=green>both</c></m>";
+        assert_eq!(markdown(content, &mut |_| None), format!("{content}\n"));
+    }
+
+    #[test]
     fn a_missing_picture_is_left_out_and_names_with_spaces_are_escaped() {
         let content = "# T\n![](img:1)\n![](img:2)\nend";
         let md = markdown(content, &mut |id| (id == 2).then(|| "my note-image-1.png".to_string()));
