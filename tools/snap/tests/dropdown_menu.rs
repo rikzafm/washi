@@ -66,3 +66,72 @@ fn dropdown_new_note_dismisses_and_creates_new_note() {
     assert!(!h.is_dropdown_open());
     assert_eq!(h.open_note_count(), 2);
 }
+
+#[test]
+fn dropdown_populates_notes_list_excluding_active_note() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.right_click(0, Some(&["New note"]));
+    assert_eq!(h.open_note_count(), 2);
+
+    let id1 = h.note_id(1);
+
+    h.set_note_text(1, "Second Note Title\nPreview line for note 1");
+
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+
+    let items = h.dropdown_notes();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, id1 as i32);
+    assert_eq!(items[0].title.as_str(), "Second Note Title");
+    assert_eq!(items[0].preview.as_str(), "Preview line for note 1");
+    assert_eq!(items[0].timestamp.as_str(), "· today");
+}
+
+#[test]
+fn dropdown_select_open_note_raises_to_front_and_dismisses() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.right_click(0, Some(&["New note"]));
+    let id1 = h.note_id(1);
+
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+
+    h.control.log.borrow_mut().clear();
+
+    h.invoke_dropdown_select_note(id1);
+
+    assert!(!h.is_dropdown_open());
+
+    let logs = h.control.log.borrow().clone();
+    assert!(logs.contains(&snap::WindowCommand::BringToFront(id1)));
+}
+
+#[test]
+fn dropdown_select_closed_note_reopens_and_dismisses() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.right_click(0, Some(&["New note"]));
+    assert_eq!(h.open_note_count(), 2);
+    let id1 = h.note_id(1);
+    h.set_note_text(1, "Closed Note\nWill be reopened");
+
+    h.right_click(1, Some(&["Close"]));
+    assert_eq!(h.open_note_count(), 1);
+
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+
+    let items = h.dropdown_notes();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, id1 as i32);
+    assert_eq!(items[0].title.as_str(), "Closed Note");
+
+    h.invoke_dropdown_select_note(id1);
+
+    assert!(!h.is_dropdown_open());
+    assert_eq!(h.open_note_count(), 2);
+    assert_eq!(h.note_id(1), id1);
+}

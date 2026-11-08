@@ -29,6 +29,7 @@ slint = { version = "1.18", default-features = false, features = [
 ] }
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl"] }
 zeroize = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 base64 = "0.23"
 # Line-break opportunities (UAX #14), as Slint's text layout uses (already in the tree through Slint).
 unicode-linebreak = "0.1"

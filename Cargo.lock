@@ -4728,6 +4728,7 @@ name = "washi"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chrono",
  "jpeg-encoder",
  "png 0.17.16",
  "raw-window-handle",

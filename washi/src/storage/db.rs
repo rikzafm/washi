@@ -262,4 +262,63 @@ impl Db {
         self.conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
         Ok(())
     }
+
+    /// Other notes ordered by most recently updated first, excluding `exclude_id`.
+    pub fn recent_notes(&self, exclude_id: NoteId) -> Result<Vec<RecentNote>, DbError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, content, tape_style, updated_at FROM notes WHERE id != ?1 ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = stmt
+            .query_map([exclude_id], |r| {
+                Ok(RecentNote {
+                    id: r.get(0)?,
+                    content: r.get(1)?,
+                    tape_style: r.get(2)?,
+                    updated_at: r.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentNote {
+    pub id: NoteId,
+    pub content: String,
+    pub tape_style: i64,
+    pub updated_at: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> (tempfile::TempDir, Db) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 1000).unwrap();
+        (dir, db)
+    }
+
+    #[test]
+    fn recent_notes_excludes_active_and_orders_by_updated_at_desc() {
+        let (_dir, db) = test_db();
+        let id1 = db.create_note(1000).unwrap();
+        db.save_content(id1, "Note 1", 1000).unwrap();
+
+        let id2 = db.create_note(2000).unwrap();
+        db.save_content(id2, "Note 2", 2000).unwrap();
+
+        let id3 = db.create_note(3000).unwrap();
+        db.save_content(id3, "Note 3", 3000).unwrap();
+
+        let recent = db.recent_notes(id2).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].id, id3);
+        assert_eq!(recent[0].content, "Note 3");
+        assert_eq!(recent[0].updated_at, 3000);
+        assert_eq!(recent[1].id, id1);
+        assert_eq!(recent[1].content, "Note 1");
+        assert_eq!(recent[1].updated_at, 1000);
+    }
 }

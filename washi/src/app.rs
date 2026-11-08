@@ -1,7 +1,7 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
-use crate::dropdown::{calculate_dropdown_position, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
+use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
 use crate::images::{self, ImageError, Source, Stored};
 use crate::image_viewer::{ImageViewer, ViewerEvent};
 use crate::note_window::{app_icon, note_title, Note, NoteEvent};
@@ -356,6 +356,26 @@ impl App {
         }
     }
 
+    /// The list of notes in the currently open dropdown menu.
+    pub fn dropdown_notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
+        use slint::Model;
+        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
+        if let Some(ui) = ui {
+            let model = ui.get_notes();
+            model.iter().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Invoke the select note callback on the active dropdown (for testing).
+    pub fn invoke_dropdown_select_note(&self, id: NoteId) {
+        let ui = self.0.dropdown.borrow().as_ref().and_then(|d| d.ui().as_weak().upgrade());
+        if let Some(ui) = ui {
+            ui.invoke_select_note(id as i32);
+        }
+    }
+
     /// Dismiss the open dropdown menu and reset the parent note's button state.
     pub fn dismiss_dropdown(&self) {
         let menu = self.0.dropdown.borrow_mut().take();
@@ -379,6 +399,10 @@ impl App {
 
     /// Open the dropdown menu for note `id`.
     pub fn open_dropdown(&self, id: NoteId) {
+        for n in self.0.notes.borrow().iter() {
+            n.flush_text();
+        }
+
         let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
         let Some(note) = note else { return };
 
@@ -413,8 +437,36 @@ impl App {
 
         match DropdownMenu::open(id, pos, on_dismiss) {
             Ok(menu) => {
+                let recent = self.0.db.recent_notes(id).unwrap_or_default();
+                let now_ms = self.0.env.clock.unix_millis();
+                let items: Vec<crate::note_window::DropdownNoteItem> = recent
+                    .into_iter()
+                    .map(|r| {
+                        let content = self.with_note(r.id, |n| n.text()).unwrap_or(r.content);
+                        let (title, preview) = extract_title_and_preview(&content);
+                        let timestamp = format_relative_timestamp(r.updated_at, now_ms);
+                        crate::note_window::DropdownNoteItem {
+                            id: r.id as i32,
+                            title: title.into(),
+                            preview: preview.into(),
+                            timestamp: timestamp.into(),
+                            has_tape: r.tape_style > 0,
+                        }
+                    })
+                    .collect();
+                menu.ui().set_notes(slint::ModelRc::from(Rc::new(slint::VecModel::from(items))));
+
                 let pinned = note.always_on_top();
                 menu.set_pinned(pinned);
+
+                let weak = Rc::downgrade(&self.0);
+                menu.ui().on_select_note(move |selected_id| {
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App(inner);
+                        app.dismiss_dropdown();
+                        app.activate_note(selected_id as NoteId);
+                    }
+                });
 
                 let weak = Rc::downgrade(&self.0);
                 menu.ui().on_toggle_pin(move || {
@@ -684,6 +736,18 @@ impl App {
             if let Err(e) = self.open_row(&row) {
                 self.0.env.dialogs.error(&e.to_string());
             }
+        }
+    }
+
+    /// Raise an open note to front or reopen it if closed.
+    pub fn activate_note(&self, id: NoteId) {
+        let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
+        if let Some(note) = note {
+            let _ = note.ui().show();
+            let hwnd = note.hwnd();
+            self.0.env.window_control.bring_to_front(id, hwnd);
+        } else {
+            self.reopen_note(id);
         }
     }
 

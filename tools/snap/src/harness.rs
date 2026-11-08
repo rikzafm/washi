@@ -506,6 +506,7 @@ impl Harness {
                         bottom = (bottom + dy).max(top + min.height as i32);
                     }
                 }
+                WindowCommand::BringToFront(_) => return None,
             }
             w.os_place(
                 slint::PhysicalPosition::new(left, top),
@@ -890,6 +891,16 @@ impl Harness {
         if let Some(app) = &self.app {
             app.invoke_dropdown_new_note();
         }
+    }
+
+    pub fn invoke_dropdown_select_note(&mut self, id: NoteId) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_select_note(id);
+        }
+    }
+
+    pub fn dropdown_notes(&self) -> Vec<washi::note_window::DropdownNoteItem> {
+        self.app.as_ref().map(|a| a.dropdown_notes()).unwrap_or_default()
     }
 
     pub(crate) fn path(&self, name: &str) -> PathBuf {
