@@ -221,6 +221,14 @@ pub trait ImageClipboard {
     fn html(&self) -> Option<String>;
     /// Plain text from the clipboard, if any.
     fn text(&self) -> Option<String>;
+    /// Whether an image is available on the clipboard.
+    fn has_image(&self) -> bool {
+        self.image().is_some()
+    }
+    /// Whether text (plain or rich HTML) is available on the clipboard.
+    fn has_text(&self) -> bool {
+        self.text().is_some() || self.html().is_some()
+    }
 }
 
 /// Message boxes and file pickers.

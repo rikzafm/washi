@@ -192,6 +192,17 @@ impl ImageClipboard for Win32Clipboard {
             text
         }
     }
+
+    fn has_image(&self) -> bool {
+        unsafe { IsClipboardFormatAvailable(CF_DIB) != 0 }
+    }
+
+    fn has_text(&self) -> bool {
+        unsafe {
+            IsClipboardFormatAvailable(CF_UNICODETEXT) != 0
+                || (cf_html() != 0 && IsClipboardFormatAvailable(cf_html()) != 0)
+        }
+    }
 }
 
 fn le16(b: &[u8], at: usize) -> Option<u16> {

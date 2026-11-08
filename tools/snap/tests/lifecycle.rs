@@ -20,6 +20,10 @@ fn labels(items: &[washi::platform::MenuItem]) -> Vec<String> {
     items.iter().map(|i| i.label.clone()).collect()
 }
 
+fn menu_item<'a>(items: &'a [washi::platform::MenuItem], label: &str) -> &'a washi::platform::MenuItem {
+    items.iter().find(|i| i.label == label).unwrap_or_else(|| panic!("no menu item {label}"))
+}
+
 #[test]
 fn right_click_anywhere_opens_the_menu() {
     let mut h = Harness::new();
@@ -30,8 +34,10 @@ fn right_click_anywhere_opens_the_menu() {
     }
     assert_eq!(h.menu.shown.borrow().len(), 3);
     let items = h.last_menu();
-    assert_eq!(labels(&items), ["New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows", "Export as Markdown\u{2026}"]);
-    assert!(!items[1].enabled, "no closed notes yet, so nothing to open");
+    assert_eq!(labels(&items), ["Paste", "Paste image", "New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows", "Export as Markdown\u{2026}"]);
+    assert!(!menu_item(&items, "Paste").enabled, "no clipboard content yet");
+    assert!(!menu_item(&items, "Paste image").enabled, "no image on clipboard");
+    assert!(!menu_item(&items, "Open note").enabled, "no closed notes yet, so nothing to open");
 }
 
 #[test]
@@ -107,7 +113,7 @@ fn closed_notes_are_listed_by_title_newest_first() {
 
     h.right_click(0, None);
     let items = h.last_menu();
-    let open = &items[1];
+    let open = menu_item(&items, "Open note");
     assert!(open.enabled);
     let titles = labels(&open.children);
     assert_eq!(titles.len(), 3);
@@ -131,7 +137,7 @@ fn choosing_a_closed_note_reopens_it_at_its_saved_size() {
 
     // It is open again, so it is no longer listed.
     h.right_click(0, None);
-    assert!(!h.last_menu()[1].enabled);
+    assert!(!menu_item(&h.last_menu(), "Open note").enabled);
 }
 
 #[test]
@@ -160,7 +166,7 @@ fn delete_removes_the_note_for_good_when_confirmed() {
 
     // Not listed as a closed note either.
     h.right_click(0, None);
-    assert!(!h.last_menu()[1].enabled);
+    assert!(!menu_item(&h.last_menu(), "Open note").enabled);
 
     // The write-ahead log was emptied, so no trace of the note lingers in it.
     let (db, wal) = h.raw_db_bytes();
@@ -218,7 +224,7 @@ fn restart_reopens_exactly_the_notes_that_were_open() {
     assert_eq!(h.note_text(0), "# alpha");
     assert_eq!(h.note_text(1), "# gamma");
     h.right_click(0, None);
-    assert_eq!(labels(&h.last_menu()[1].children), ["beta"]);
+    assert_eq!(labels(&menu_item(&h.last_menu(), "Open note").children), ["beta"]);
 }
 
 #[test]
@@ -233,7 +239,7 @@ fn start_after_everything_was_closed_gives_one_empty_note() {
     assert_eq!(h.open_note_count(), 1);
     assert_eq!(h.note_text(0), "", "a fresh empty note, not the closed one");
     h.right_click(0, None);
-    assert_eq!(labels(&h.last_menu()[1].children), ["closed for the night"]);
+    assert_eq!(labels(&menu_item(&h.last_menu(), "Open note").children), ["closed for the night"]);
 }
 
 fn contains(hay: &[u8], needle: &[u8]) -> bool {

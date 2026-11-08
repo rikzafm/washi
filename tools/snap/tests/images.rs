@@ -424,3 +424,40 @@ fn right_click_menu_offers_cut_and_copy_image() {
     assert!(h.clipboard_image().is_some());
     assert_eq!(h.block_kinds(0), ["title", "body"]);
 }
+
+#[test]
+fn right_click_menu_offers_paste_and_paste_image() {
+    let mut h = note_with_title();
+
+    // 1. With empty clipboard, both are disabled
+    h.right_click(0, None);
+    let menu = h.last_menu();
+    let paste_item = menu.iter().find(|i| i.label == "Paste").expect("Paste item");
+    let paste_img_item = menu.iter().find(|i| i.label == "Paste image").expect("Paste image item");
+    assert!(!paste_item.enabled, "Paste should be disabled when clipboard is empty");
+    assert!(!paste_img_item.enabled, "Paste image should be disabled when clipboard is empty");
+
+    // 2. With image on clipboard, both are enabled, and Paste image inserts the image
+    let img = flat(60, 60, RED);
+    h.copy_picture(img);
+    h.right_click(0, None);
+    let menu = h.last_menu();
+    assert!(menu.iter().find(|i| i.label == "Paste").unwrap().enabled);
+    assert!(menu.iter().find(|i| i.label == "Paste image").unwrap().enabled);
+
+    h.right_click(0, Some(&["Paste image"]));
+    h.wait_for_images();
+    h.advance(ms(400));
+    assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
+
+    // 3. With text on clipboard, Paste is enabled, Paste image is disabled
+    *h.clipboard.image.borrow_mut() = None;
+    *h.clipboard.text.borrow_mut() = Some("appended text".to_string());
+    h.right_click(0, None);
+    let menu = h.last_menu();
+    assert!(menu.iter().find(|i| i.label == "Paste").unwrap().enabled);
+    assert!(!menu.iter().find(|i| i.label == "Paste image").unwrap().enabled);
+
+    h.right_click(0, Some(&["Paste"]));
+    assert_eq!(h.note_text(0), "# Trip\n![](img:1)\nappended text");
+}

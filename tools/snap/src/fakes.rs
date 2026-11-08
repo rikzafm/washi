@@ -212,6 +212,14 @@ impl ImageClipboard for FakeClipboard {
     fn text(&self) -> Option<String> {
         self.text.borrow().clone()
     }
+
+    fn has_image(&self) -> bool {
+        self.image.borrow().is_some()
+    }
+
+    fn has_text(&self) -> bool {
+        self.text.borrow().is_some() || self.html.borrow().is_some()
+    }
 }
 
 /// What the platform was asked to do with a note's window.

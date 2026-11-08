@@ -95,6 +95,8 @@ const MENU_DELETE: u32 = 4;
 const MENU_TOP: u32 = 5;
 const MENU_STARTUP: u32 = 6;
 const MENU_EXPORT: u32 = 7;
+const MENU_PASTE: u32 = 8;
+const MENU_PASTE_IMAGE: u32 = 9;
 /// The menu of a picture: cut it, copy it, delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
 /// or show it `n` percent wide (`MENU_IMAGE_SIZE + n`).
 const MENU_IMAGE_CUT: u32 = 18;
@@ -593,6 +595,8 @@ impl App {
             .enumerate()
             .map(|(i, c)| item(MENU_OPEN_BASE + i as u32, &title_of(&c.preview), true, vec![]))
             .collect();
+        let has_image = self.0.env.clipboard.has_image();
+        let has_paste = has_image || self.0.env.clipboard.has_text();
         let mut items = vec![];
         // right click on a picture: its own items come first
         if let Some((pct, align)) = image.and_then(|b| self.with_note(id, |n| n.image_state(b))?) {
@@ -606,6 +610,8 @@ impl App {
             items.push(item(0, "Resize image", true, size_items));
         }
         items.extend([
+            item(MENU_PASTE, "Paste", has_paste, vec![]),
+            item(MENU_PASTE_IMAGE, "Paste image", has_image, vec![]),
             item(MENU_NEW, "New note", true, vec![]),
             item(MENU_OPEN, "Open note", !open_children.is_empty(), open_children),
             item(MENU_CLOSE, "Close", true, vec![]),
@@ -631,6 +637,12 @@ impl App {
             }
             Some(c) if (MENU_IMAGE_SIZE + IMAGE_PCT_MIN as u32..=MENU_IMAGE_SIZE + IMAGE_PCT_MAX as u32).contains(&c) && picture.is_some() => {
                 self.with_note(id, |n| n.set_image_pct(picture.unwrap(), (c - MENU_IMAGE_SIZE) as u8));
+            }
+            Some(MENU_PASTE) => {
+                self.with_note(id, |n| n.paste());
+            }
+            Some(MENU_PASTE_IMAGE) => {
+                self.with_note(id, |n| n.paste_image());
             }
             Some(MENU_NEW) => self.new_note_from(id),
             Some(MENU_CLOSE) => self.close_note(id),

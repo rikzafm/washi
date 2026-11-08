@@ -1171,6 +1171,7 @@ pub struct Note {
     /// Everything that changes the text ends here (see `open`).
     changed: Rc<dyn Fn(Option<Caret>)>,
     clipboard: Rc<dyn ImageClipboard>,
+    paste_image: Rc<dyn Fn(NoteId) -> bool>,
 }
 
 impl Note {
@@ -1543,11 +1544,12 @@ impl Note {
         };
 
         ui.on_paste_range(paste_clipboard_fn.clone());
+        let on_paste_img = paste_image.clone();
         ui.on_paste_image(move || {
             if paste_clipboard_fn() {
                 return true;
             }
-            paste_image(id)
+            on_paste_img(id)
         });
         {
             let doc = doc.clone();
@@ -1583,7 +1585,7 @@ impl Note {
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), changed, clipboard })
+        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), changed, clipboard, paste_image })
     }
 
     /// Where an image added now goes: after the block that has the caret (or last had it).
@@ -1656,6 +1658,94 @@ impl Note {
         } else {
             false
         }
+    }
+
+    /// Paste rich content or an image directly from the clipboard.
+    fn paste_rich_or_image(&self) -> bool {
+        use crate::clipboard_html::ParsedBlock;
+        if let Some(html) = self.clipboard.html() {
+            let parsed = crate::clipboard_html::from_html(&html);
+            let is_plain_single_body = parsed.len() == 1
+                && matches!(&parsed[0], ParsedBlock::Body { marks, paints, .. } if marks.iter().all(|m| *m == Flags::NONE) && paints.iter().all(|p| *p == Paint::default()));
+            if !parsed.is_empty() && !is_plain_single_body {
+                let before = self.doc.doc.borrow().clone();
+                let range = self.doc.selection.get();
+                let db = self.autosave.db.clone();
+                let images = &self.doc.images;
+                let id = self.id;
+                let mut add_image = |rgba: Rgba| -> Option<i64> {
+                    let (w, h) = (rgba.width, rgba.height);
+                    let png = crate::images::encode_png(&rgba).ok()?;
+                    let image_id = db.add_image(id, "image/png", w, h, &png).ok()?;
+                    let pixels = Some(crate::note_images::to_slint(&rgba));
+                    images.add(image_id, (w, h), pixels);
+                    Some(image_id)
+                };
+                let caret = self.doc.doc.borrow_mut().replace_range_rich(range, parsed, &mut add_image);
+                self.doc.structural(before);
+                (self.changed)(Some(caret));
+                return true;
+            }
+        }
+        if let Some(rgba) = self.clipboard.image() {
+            let after = {
+                let last = self.doc.doc.borrow().len().saturating_sub(1);
+                let range = self.doc.selection.get();
+                range.focus.block.min(last)
+            };
+            let (w, h) = (rgba.width, rgba.height);
+            if let Ok(png) = crate::images::encode_png(&rgba) {
+                if let Ok(image_id) = self.autosave.db.add_image(self.id, "image/png", w, h, &png) {
+                    let pixels = Some(crate::note_images::to_slint(&rgba));
+                    self.doc.images.add(image_id, (w, h), pixels);
+                    let before = self.doc.doc.borrow().clone();
+                    let at = self.doc.doc.borrow_mut().insert_image(after, image_id);
+                    self.doc.structural(before);
+                    (self.changed)(Some(Caret { block: at + 1, offset: 0 }));
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Paste at the current caret / selection (rich HTML, text, or image).
+    pub fn paste(&self) -> bool {
+        if self.paste_rich_or_image() {
+            return true;
+        }
+        if let Some(text) = self.clipboard.text() {
+            if !text.is_empty() {
+                let caret = self.doc.replace_range(&text);
+                (self.changed)(Some(caret));
+                return true;
+            }
+        }
+        (self.paste_image)(self.id)
+    }
+
+    /// Paste specifically an image from clipboard at the current insertion position.
+    pub fn paste_image(&self) -> bool {
+        if let Some(rgba) = self.clipboard.image() {
+            let after = {
+                let last = self.doc.doc.borrow().len().saturating_sub(1);
+                let range = self.doc.selection.get();
+                range.focus.block.min(last)
+            };
+            let (w, h) = (rgba.width, rgba.height);
+            if let Ok(png) = crate::images::encode_png(&rgba) {
+                if let Ok(image_id) = self.autosave.db.add_image(self.id, "image/png", w, h, &png) {
+                    let pixels = Some(crate::note_images::to_slint(&rgba));
+                    self.doc.images.add(image_id, (w, h), pixels);
+                    let before = self.doc.doc.borrow().clone();
+                    let at = self.doc.doc.borrow_mut().insert_image(after, image_id);
+                    self.doc.structural(before);
+                    (self.changed)(Some(Caret { block: at + 1, offset: 0 }));
+                    return true;
+                }
+            }
+        }
+        (self.paste_image)(self.id)
     }
 
     /// Bytes of decoded pictures this note holds right now.
