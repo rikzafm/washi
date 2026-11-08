@@ -3,7 +3,7 @@
 use crate::platform::{Clock, NoteId, ResizeEdge, ScreenRect};
 use crate::storage::{Db, Geometry};
 use slint::{CloseRequestResponse, ComponentHandle, Timer, TimerMode};
-use crate::document::{floor_boundary, Block, Caret, Document, Kind, Range, Style as Flags, PALETTE};
+use crate::document::{floor_boundary, Block, Caret, Document, Kind, Paint, Range, Style as Flags, PALETTE};
 use crate::history::History;
 use crate::images::Stored;
 use crate::note_images::NoteImages;
@@ -187,6 +187,8 @@ struct Doc {
     /// A format button pressed with nothing selected, outside a word: the style the next text
     /// typed at that caret takes. Gone once the caret moves elsewhere.
     typing: Cell<Option<(Caret, Flags)>>,
+    /// A color picked with nothing selected: the paint the next text typed at that caret takes.
+    typing_paint: Cell<Option<(Caret, Paint)>>,
     /// The paper's size in logical px (window minus margins), for the stepped layout.
     paper: Cell<(f64, f64)>,
     /// Sizes and decoded pixels of the note's pictures.
@@ -234,6 +236,7 @@ impl Doc {
             selection: Cell::new(Range { anchor: START, focus: START }),
             pointer: Cell::new(Pointer::default()),
             typing: Cell::new(None),
+            typing_paint: Cell::new(None),
             paper: Cell::new((363.0, 433.0)),
             history: RefCell::new(History::new(Document::new())),
             images,
@@ -272,6 +275,7 @@ impl Doc {
     /// or `None` when there is no such snapshot.
     fn step(&self, redo: bool) -> Option<Caret> {
         self.typing.set(None);
+        self.typing_paint.set(None);
         self.checkpoint();
         let target = {
             let mut h = self.history.borrow_mut();
@@ -423,6 +427,7 @@ impl Doc {
             self.focus_with(ui, range.focus, Some(range.anchor.offset));
         }
         self.typing.set(None);
+        self.typing_paint.set(None);
         self.show_formats(ui);
     }
 
@@ -649,6 +654,7 @@ impl Doc {
         let before = self.doc.borrow().clone();
         let caret = self.doc.borrow_mut().replace_range(range, text);
         self.typing.set(None);
+        self.typing_paint.set(None);
         self.structural(before);
         caret
     }
@@ -677,6 +683,42 @@ impl Doc {
             Some((c, style)) if c == (Caret { block: i, offset: cursor }) => style,
             _ => self.doc.borrow().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
         }
+    }
+
+    /// The paint the next text typed at the caret takes: one a picked color asked for there, or
+    /// that of the text before it.
+    fn typing_paint(&self) -> Paint {
+        let i = self.caret_block();
+        let cursor = self.selection.get().focus.offset;
+        match self.typing_paint.get() {
+            Some((c, paint)) if c == (Caret { block: i, offset: cursor }) => paint,
+            _ => self.doc.borrow().blocks().get(i).map_or(Paint::default(), |b| b.paint_for_insert(cursor)),
+        }
+    }
+
+    /// A swatch picked (or Clear, which picks 0 for both): set the ink and/or the marker of the
+    /// selection as one undo step; with a collapsed caret, of the text typed next. True when the
+    /// document changed.
+    fn pick(&self, ink: Option<u8>, marker: Option<u8>) -> bool {
+        let sel = self.clamp(self.selection.get());
+        if sel.anchor == sel.focus {
+            let mut paint = self.typing_paint();
+            paint.ink = ink.unwrap_or(paint.ink).min(PALETTE.len() as u8 - 1);
+            paint.marker = marker.unwrap_or(paint.marker).min(PALETTE.len() as u8 - 1);
+            self.typing_paint.set(Some((sel.focus, paint)));
+            return false;
+        }
+        let before = self.doc.borrow().clone();
+        let done = {
+            let mut doc = self.doc.borrow_mut();
+            let a = ink.is_some_and(|i| doc.set_ink_range(sel, i));
+            let b = marker.is_some_and(|m| doc.set_marker_range(sel, m));
+            a | b
+        };
+        if done {
+            self.structural(before);
+        }
+        done
     }
 
     /// Toolbar button or shortcut `what` (0 bold, 1 italic, 2 underline, 3 strike) on the selected
@@ -745,6 +787,18 @@ impl Doc {
         ui.set_fmt_underline(style.contains(Flags::UNDERLINE));
         ui.set_fmt_strike(style.contains(Flags::STRIKE));
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
+        let sel = self.selection.get();
+        let (ink, marker) = if b.is_none() {
+            (Some(0), Some(0))
+        } else if sel.anchor != sel.focus {
+            (doc.common_ink_range(sel), doc.common_marker_range(sel))
+        } else {
+            drop(doc);
+            let p = self.typing_paint();
+            (Some(p.ink), Some(p.marker))
+        };
+        ui.set_fmt_ink(ink.map_or(-1, i32::from));
+        ui.set_fmt_marker(marker.map_or(-1, i32::from));
     }
 
     /// The caret moved to `offset` of block `block`, the selection's other end at `anchor`. A style
@@ -759,6 +813,9 @@ impl Doc {
         self.selection.set(Range { anchor: Caret { block, offset: anchor }, focus: Caret { block, offset } });
         if self.typing.get().is_some_and(|(c, _)| c != (Caret { block, offset }) || offset != anchor) {
             self.typing.set(None);
+        }
+        if self.typing_paint.get().is_some_and(|(c, _)| c != (Caret { block, offset }) || offset != anchor) {
+            self.typing_paint.set(None);
         }
         if self.range.get().is_some() {
             // the caret left a selection across blocks (a key): the wash is over
@@ -805,7 +862,8 @@ impl Doc {
             let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
             // a style asked for with a format button applies to what is typed at its caret
             let typing = self.typing.take().filter(|(c, _)| c.block == i).map(|(_, s)| s);
-            doc.edit_text(i, text, cursor, typing);
+            let paint = self.typing_paint.take().filter(|(c, _)| c.block == i).map(|(_, p)| p);
+            doc.edit_text(i, text, cursor, typing, paint);
             // `# ` or `- ` typed at the start of a paragraph
             let caret = doc.auto_format(i, &old, cursor);
             drop(doc);
@@ -1042,6 +1100,28 @@ impl Note {
                 }
             });
         }
+        // a swatch or Clear in the color popover
+        let apply: Rc<dyn Fn(Option<u8>, Option<u8>)> = {
+            let (changed, doc, weak) = (changed.clone(), doc.clone(), ui.as_weak());
+            Rc::new(move |ink, marker| {
+                let Some(ui) = weak.upgrade() else { return };
+                if doc.pick(ink, marker) {
+                    changed(None);
+                } else {
+                    // a color for what is typed next
+                    doc.show_formats(&ui);
+                }
+            })
+        };
+        {
+            let apply = apply.clone();
+            ui.on_pick_ink(move |i| apply(Some(i.clamp(0, 9) as u8), None));
+        }
+        {
+            let apply = apply.clone();
+            ui.on_pick_marker(move |i| apply(None, Some(i.clamp(0, 9) as u8)));
+        }
+        ui.on_clear_color(move || apply(Some(0), Some(0)));
         {
             let (doc, weak) = (doc.clone(), ui.as_weak());
             ui.on_focus_entered(move |i| {

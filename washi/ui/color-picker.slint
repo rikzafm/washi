@@ -165,7 +165,7 @@ export component ColorPicker inherits Rectangle {
     property <float> marker-v: root.top + PickerMetrics.marker-row-y / 1px + root.d / 2;
     property <float> caption-v: root.top + PickerMetrics.caption-y / 1px + 13;
     property <color> ink-now: PickerPalette.ink(root.ink);
-    property <string> caption: root.hover-name != "" ? root.hover-name
+    out property <string> caption: root.hover-name != "" ? root.hover-name
         : PickerPalette.name(root.ink) + " ink" + (root.marker > 0 ? " · " + PickerPalette.name(root.marker) + " marker" : "");
 
     // the shadow: layers of see-through ink (a blur cannot be tilted)

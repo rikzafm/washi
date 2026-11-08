@@ -371,6 +371,30 @@ impl Harness {
         self.paper_point(note, 22.0 + 110.0, self.paper_size(note).1 - 56.0 - 10.0 - 20.0)
     }
 
+    /// The center of an ink dot (`row` 0) or marker chip (`row` 1) `i` of the open popover, in
+    /// window coordinates.
+    pub fn swatch_point(&self, note: usize, row: usize, i: usize) -> (f32, f32) {
+        let top = self.paper_size(note).1 - 56.0 - 10.0 - 116.0;
+        let v = top + if row == 0 { 14.0 } else { 47.0 } + 10.5;
+        self.paper_point(note, 22.0 + 67.0 + 10.5 + i as f32 * 26.0, v)
+    }
+
+    /// The center of the popover's Clear link, in window coordinates.
+    pub fn clear_point(&self, note: usize) -> (f32, f32) {
+        let top = self.paper_size(note).1 - 56.0 - 10.0 - 116.0;
+        self.paper_point(note, 22.0 + 330.0 - 14.0 - 20.0, top + 80.0 + 13.0)
+    }
+
+    /// The ink and marker index the toolbar and popover show (-1: mixed).
+    pub fn shown_colors(&self, note: usize) -> (i32, i32) {
+        self.app().with_note(self.id(note), |n| (n.ui().get_fmt_ink(), n.ui().get_fmt_marker())).unwrap()
+    }
+
+    /// The caption the open popover shows.
+    pub fn picker_caption(&self, note: usize) -> String {
+        self.app().with_note(self.id(note), |n| n.ui().get_picker_caption().to_string()).unwrap()
+    }
+
     fn paper_size(&self, note: usize) -> (f32, f32) {
         let (w, h) = self.note_size(note);
         let margin = self.app().with_note(self.id(note), |n| n.ui().get_window_margin()).unwrap();

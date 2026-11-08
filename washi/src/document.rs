@@ -599,12 +599,12 @@ impl Document {
 
     /// The user edited a block's text in its field to `text`, the caret now at byte `cursor`.
     /// What was typed takes `typing` if given, else the style of the text it was typed after.
-    pub fn edit_text(&mut self, block: usize, text: &str, cursor: usize, typing: Option<Style>) {
+    pub fn edit_text(&mut self, block: usize, text: &str, cursor: usize, typing: Option<Style>, typing_paint: Option<Paint>) {
         let Some(b) = self.blocks.get_mut(block).filter(|b| b.is_text()) else { return };
         let text = one_line(text);
         let (start, end, inserted) = diff(&b.text, &text, Some(cursor));
         let style = typing.unwrap_or_else(|| b.style_for_insert(start));
-        let paint = b.paint_for_insert(start);
+        let paint = typing_paint.unwrap_or_else(|| b.paint_for_insert(start));
         b.splice(start, end, &text[start..inserted], style, paint);
         debug_assert_eq!(b.text, text);
     }
@@ -1364,13 +1364,13 @@ mod tests {
         let mut d = doc(&[(Kind::Title, "ab")]);
         d.toggle_style(0, 0, 1, Style::BOLD);
         // "a|b" -> "ax|b": after the bold a
-        d.edit_text(0, "axb", 2, None);
+        d.edit_text(0, "axb", 2, None, None);
         assert_eq!(d.blocks()[0].spans(), [(0, 2, Style::BOLD), (2, 3, Style::NONE)]);
         // at the start: the style of what follows
-        d.edit_text(0, "yaxb", 1, None);
+        d.edit_text(0, "yaxb", 1, None, None);
         assert_eq!(d.blocks()[0].spans(), [(0, 3, Style::BOLD), (3, 4, Style::NONE)]);
         // with a style asked for (a toolbar button with nothing selected)
-        d.edit_text(0, "yaxbz", 5, Some(Style::ITALIC));
+        d.edit_text(0, "yaxbz", 5, Some(Style::ITALIC), None);
         assert_eq!(d.blocks()[0].spans(), [(0, 3, Style::BOLD), (3, 4, Style::NONE), (4, 5, Style::ITALIC)]);
     }
 
@@ -1379,13 +1379,13 @@ mod tests {
         let mut d = doc(&[(Kind::Title, "aa")]);
         d.toggle_style(0, 1, 2, Style::BOLD);
         // the plain a was doubled: the caret after the first a
-        d.edit_text(0, "aaa", 1, None);
+        d.edit_text(0, "aaa", 1, None, None);
         assert_eq!(d.blocks()[0].spans(), [(0, 2, Style::NONE), (2, 3, Style::BOLD)]);
         // a selection replaced
-        d.edit_text(0, "aZ", 2, None);
+        d.edit_text(0, "aZ", 2, None, None);
         assert_eq!(d.blocks()[0].text, "aZ");
         // a deletion
-        d.edit_text(0, "Z", 0, None);
+        d.edit_text(0, "Z", 0, None, None);
         assert_eq!(d.blocks()[0].text, "Z");
         assert_eq!(d.blocks()[0].marks.len(), 1);
     }
@@ -1801,9 +1801,9 @@ ta");
         let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "ab")]);
         d.set_ink(1, 0, 1, 6);
         d.set_marker(1, 0, 1, 4);
-        d.edit_text(1, "aXb", 2, None);
+        d.edit_text(1, "aXb", 2, None, None);
         assert_eq!(colored(&d, 1), [(6, 4), (6, 4), (0, 0)]);
-        d.edit_text(1, "YaXb", 1, None);
+        d.edit_text(1, "YaXb", 1, None, None);
         assert_eq!(colored(&d, 1)[0], (6, 4), "at the start it takes the next character's");
         assert_eq!(d.blocks()[1].paint_for_insert(0), Paint { ink: 6, marker: 4 });
     }
