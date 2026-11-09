@@ -1,0 +1,237 @@
+// The Settings page: the Paper at its Settings size with the Sidebar in the strip left of it.
+// Like All notes, the content is laid out in the Paper's tilted frame (`Frame` / `Tilt` / `TRect`)
+// so glyphs stay upright on the tilted baseline.
+
+import "../../fonts/ShadowsIntoLight.ttf";
+import "../../fonts/ShadowsIntoLight-Bold.ttf";
+import { PaperTheme } from "paper-theme.slint";
+import { Paper, Tapes } from "paper.slint";
+import { Frame, Tilt, TRect } from "toolbar.slint";
+import { AllNotesMetrics } from "all-notes.slint";
+
+export global SettingsMetrics {
+    /// The strip the Sidebar adds left of the Paper (the same as All notes).
+    out property <length> strip: AllNotesMetrics.sidebar-w;
+    out property <length> paper-w: 520px;
+    out property <length> paper-min-h: 600px;
+    out property <length> pad-top: 38px;
+    out property <length> pad-x: 36px;
+}
+
+/// One tab label in the Sidebar, drawn in the panel's tilted frame `f`; `v0` is its top.
+component SidebarTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    in property <Frame> f;
+    in property <float> v0;
+
+    x: 0px;
+    y: 0px;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
+
+    if root.selected : TRect {
+        f: root.f;
+        u0: -123.0;
+        v0: root.v0;
+        w: 246.0;
+        h: 48.0;
+        r: 10.8;
+        fill: #FFFFFD;
+    }
+
+    Text {
+        x: Tilt.x(root.f, -107.0, root.v0) * 1px;
+        y: Tilt.y(root.f, -107.0, root.v0) * 1px;
+        width: 214px;
+        height: 48px;
+        text: root.text;
+        font-family: "Shadows Into Light";
+        font-size: 24px;
+        font-weight: root.selected ? 700 : 400;
+        color: #2B2F36;
+        vertical-alignment: center;
+    }
+}
+
+component SettingsSidebar inherits Rectangle {
+    in property <int> selected-tab: 0;
+    callback close-clicked();
+    /// The user pressed the Sidebar itself: the platform drags the window.
+    callback start-move();
+
+    property <[string]> labels: ["General", "Font & Style", "Shortcuts", "Privacy"];
+    // The panel, in window px: as All notes' (270 wide at x = 8, as tall as the Paper).
+    property <float> pw: 270.0;
+    property <float> ph: max(240.0, root.height / 1px - 84.0);
+    property <float> top-v: -root.ph / 2.0;
+    property <Frame> pf: {
+        w: AllNotesMetrics.sidebar-w / 1px,
+        h: root.height / 1px,
+        cx: 143.0,
+        cy: root.height / 1px / 2.0,
+        cs: Math.cos(-1.0deg),
+        sn: Math.sin(-1.0deg),
+    };
+
+    // Dragging the Sidebar's empty parts moves the whole window.
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: AllNotesMetrics.sidebar-w;
+        height: root.height;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                root.start-move();
+            }
+        }
+    }
+
+    TRect {
+        f: root.pf;
+        u0: -root.pw / 2.0;
+        v0: root.top-v;
+        w: root.pw;
+        h: root.ph;
+        r: 22.0;
+        fill: #D6DBE2;
+    }
+
+    Text {
+        x: Tilt.x(root.pf, -113.0, root.top-v + 8.0) * 1px;
+        y: Tilt.y(root.pf, -113.0, root.top-v + 8.0) * 1px;
+        text: "Settings";
+        font-family: "Shadows Into Light";
+        font-size: 44px;
+        color: #2B2F36;
+    }
+
+    // Close (x) at the panel's top right.
+    Rectangle {
+        x: Tilt.x(root.pf, 91.0, root.top-v + 10.0) * 1px;
+        y: Tilt.y(root.pf, 91.0, root.top-v + 10.0) * 1px;
+        width: 36px;
+        height: 36px;
+        border-radius: 18px;
+        background: close-hit.has-hover ? #00000012 : transparent;
+        accessible-role: button;
+        accessible-label: "Close settings";
+
+        Path {
+            x: 10px;
+            y: 10px;
+            width: 16px;
+            height: 16px;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            commands: "M 2 2 L 14 14 M 14 2 L 2 14";
+            stroke: #5B616B;
+            stroke-width: 1.8px;
+            stroke-line-cap: round;
+        }
+
+        close-hit := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.close-clicked(); }
+        }
+    }
+
+    for label[i] in root.labels : SidebarTab {
+        f: root.pf;
+        v0: root.top-v + 72.0 + i * 52.0;
+        text: label;
+        selected: i == root.selected-tab;
+    }
+}
+
+export component SettingsWindow inherits Window {
+    title: "Washi Settings";
+    no-frame: true;
+    background: transparent;
+    in property <image> app-icon;
+    icon: app-icon;
+    /// Follows the host note's pin, so Settings stays where the note was in the z-order.
+    in property <bool> pinned: false;
+    always-on-top: root.pinned;
+
+    in property <int> selected-tab: 0;
+
+    callback close-clicked();
+    callback start-move();
+
+    property <length> margin: PaperTheme.margin;
+    property <length> note-w: root.width - SettingsMetrics.strip;
+    property <length> paper-w: root.note-w - 2 * root.margin;
+    property <length> paper-h: root.height - 2 * root.margin;
+    // The Paper's tilted frame in the note area's coordinates.
+    property <Frame> paper-frame: {
+        w: root.note-w / 1px,
+        h: root.height / 1px,
+        cx: (root.margin + root.paper-w / 2) / 1px,
+        cy: (root.margin + root.paper-h / 2) / 1px,
+        cs: Math.cos(PaperTheme.paper-tilt),
+        sn: Math.sin(PaperTheme.paper-tilt),
+    };
+
+    forward-focus: fs;
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.close-clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    SettingsSidebar {
+        x: 0px;
+        y: 0px;
+        width: SettingsMetrics.strip;
+        height: root.height;
+        selected-tab: root.selected-tab;
+        close-clicked => { root.close-clicked(); }
+        start-move => { root.start-move(); }
+    }
+
+    // The note area: shadow, Paper and tapes, right of the strip.
+    Rectangle {
+        x: SettingsMetrics.strip;
+        y: 0px;
+        width: root.note-w;
+        height: root.height;
+
+        Paper {
+            width: root.note-w;
+            height: root.height;
+            cx: root.note-w / 2;
+            cy: root.height / 2;
+            paper-w: root.paper-w;
+            paper-h: root.paper-h;
+        }
+
+        // General (static for now): the title and the row labels, on the tilted baseline.
+        Text {
+            x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
+            y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
+            text: "General";
+            font-family: "Shadows Into Light";
+            font-size: 48px;
+            color: #2B2F36;
+        }
+
+        for label[i] in ["Start with Windows", "Always on top", "Installed folder", "Database folder", "Resource use"] : Text {
+            x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
+            y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
+            text: label;
+            font-family: "Shadows Into Light";
+            font-size: 26px;
+            color: #2B2F36;
+        }
+
+        Tapes {
+            width: root.note-w;
+            height: root.height;
+        }
+    }
+}

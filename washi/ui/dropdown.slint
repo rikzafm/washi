@@ -61,8 +61,10 @@ export component DropdownMenuWindow inherits Window {
 
     in property <length> card-width: 268px;
     in property <length> card-height: 320px;
-    /// The trimmed card of the All Notes editor: header and New / Settings only.
+    /// The trimmed card of the All Notes editor: header and New only.
     in property <bool> compact: false;
+    /// Settings is not offered in the compact card (the All notes editor's).
+    out property <bool> settings-visible: !root.compact;
     in property <length> shadow-margin: 16px;
 
     width: card-width + 2 * shadow-margin;
@@ -74,6 +76,7 @@ export component DropdownMenuWindow inherits Window {
     callback close_note();
     callback new_note();
     callback all_notes();
+    callback settings();
     callback select_note(int);
     in-out property <bool> pinned: false;
     in property <[DropdownNoteItem]> notes: [];
@@ -417,7 +420,11 @@ export component DropdownMenuWindow inherits Window {
             }
 
             // Settings (hand-drawn sliders)
-            BottomActionButton {
+            if root.settings-visible : BottomActionButton {
+                clicked => {
+                    root.settings();
+                }
+
                 VerticalLayout {
                     alignment: center;
                     spacing: 2px;
