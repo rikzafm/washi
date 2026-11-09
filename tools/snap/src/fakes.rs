@@ -310,6 +310,12 @@ impl ProcessStats for FakeStats {
 #[derive(Default)]
 pub struct FakeShell {
     pub opened: RefCell<Vec<PathBuf>>,
+    /// The uninstaller "beside the exe"; tests set it to fake its presence.
+    pub uninstaller: RefCell<Option<PathBuf>>,
+    /// Programs launched.
+    pub launched: RefCell<Vec<PathBuf>>,
+    /// When set, `launch` fails with this message.
+    pub launch_error: RefCell<Option<String>>,
 }
 
 impl Shell for FakeShell {
@@ -318,6 +324,16 @@ impl Shell for FakeShell {
     }
     fn open_folder(&self, path: &std::path::Path) {
         self.opened.borrow_mut().push(path.to_path_buf());
+    }
+    fn uninstaller(&self) -> Option<PathBuf> {
+        self.uninstaller.borrow().clone()
+    }
+    fn launch(&self, exe: &std::path::Path) -> Result<(), String> {
+        if let Some(e) = self.launch_error.borrow().clone() {
+            return Err(e);
+        }
+        self.launched.borrow_mut().push(exe.to_path_buf());
+        Ok(())
     }
 }
 
