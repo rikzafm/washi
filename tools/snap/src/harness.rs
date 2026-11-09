@@ -962,6 +962,52 @@ impl Harness {
         self.settle();
     }
 
+    /// Press Settings in the open dropdown menu.
+    pub fn invoke_dropdown_settings(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_settings();
+        }
+        self.settle();
+    }
+
+    /// Whether the open dropdown menu shows its Settings button (`None` without a dropdown).
+    pub fn dropdown_settings_visible(&self) -> Option<bool> {
+        self.app.as_ref().and_then(|a| a.dropdown_settings_visible())
+    }
+
+    pub fn is_settings_open(&self) -> bool {
+        self.app.as_ref().is_some_and(|a| a.is_settings_open())
+    }
+
+    /// The Settings window's place and size, logical px (physical at scale 1).
+    pub fn settings_window_geometry(&self) -> Option<(i32, i32, u32, u32)> {
+        let s = self.app.as_ref()?.settings()?;
+        let w = s.ui().window();
+        let (p, sz) = (w.position(), w.size());
+        Some((p.x, p.y, sz.width, sz.height))
+    }
+
+    /// Press the Sidebar's X.
+    pub fn settings_close(&mut self) {
+        if let Some(s) = self.app.as_ref().and_then(|a| a.settings()) {
+            s.ui().invoke_close_clicked();
+        }
+        self.settle();
+    }
+
+    pub fn settings_press_escape(&mut self) {
+        if let Some(app) = &self.app {
+            app.dispatch_settings_event(WindowEvent::KeyPressed { text: Key::Escape.into() });
+            app.dispatch_settings_event(WindowEvent::KeyReleased { text: Key::Escape.into() });
+        }
+        self.settle();
+    }
+
+    /// Whether a note's desktop window is shown.
+    pub fn note_visible(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.ui().window().is_visible()).unwrap()
+    }
+
     pub fn is_all_notes_open(&self) -> bool {
         self.app.as_ref().is_some_and(|a| a.is_all_notes_open())
     }

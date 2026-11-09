@@ -1,6 +1,7 @@
 //! The app: opens the encrypted store, shows the open notes, and owns their lifecycle.
 
 use crate::all_notes::AllNotesView;
+use crate::settings::SettingsView;
 use crate::delete_dialog::{calculate_dialog_position, DeleteDialog};
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
 use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
@@ -94,6 +95,8 @@ struct Inner {
     delete_dialog: RefCell<Option<Rc<DeleteDialog>>>,
     /// Currently open All Notes window, if any.
     all_notes: RefCell<Option<Rc<AllNotesView>>>,
+    /// Currently open Settings page, if any.
+    settings: RefCell<Option<Rc<SettingsView>>>,
 }
 
 /// A picture on its way into a note.
@@ -194,6 +197,7 @@ impl App {
             dropdown: RefCell::new(None),
             delete_dialog: RefCell::new(None),
             all_notes: RefCell::new(None),
+            settings: RefCell::new(None),
         });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
@@ -438,6 +442,103 @@ impl App {
         if let Some(d) = self.dropdown() {
             d.invoke_all_notes();
         }
+    }
+
+    /// Whether the open dropdown menu offers Settings (`None` without a dropdown).
+    pub fn dropdown_settings_visible(&self) -> Option<bool> {
+        self.dropdown().map(|d| d.settings_visible())
+    }
+
+    /// Press Settings on the active dropdown (for testing).
+    pub fn invoke_dropdown_settings(&self) {
+        if let Some(d) = self.dropdown() {
+            d.invoke_settings();
+        }
+    }
+
+    /// Clone the handle to the open Settings page, if any.
+    pub fn settings(&self) -> Option<Rc<SettingsView>> {
+        self.0.settings.borrow().clone()
+    }
+
+    pub fn is_settings_open(&self) -> bool {
+        self.0.settings.borrow().is_some()
+    }
+
+    /// Send a window event to the Settings page (for testing).
+    pub fn dispatch_settings_event(&self, event: slint::platform::WindowEvent) {
+        if let Some(s) = self.settings() {
+            s.ui().window().dispatch_event(event);
+        }
+    }
+
+    /// Settings from note `host`'s dropdown: one Settings page at a time, so pressing it again
+    /// (from any note) brings the existing page to the front.
+    pub fn open_settings(&self, host: NoteId) {
+        if let Some(s) = self.settings() {
+            let _ = s.ui().show();
+            self.0.env.window_control.bring_to_front(0, s.hwnd());
+            return;
+        }
+        let Some((geometry, pinned)) = self.with_note(host, |n| {
+            n.flush();
+            (n.geometry(), n.always_on_top())
+        }) else {
+            return;
+        };
+        let weak = Rc::downgrade(&self.0);
+        let app = move || weak.upgrade().map(App);
+        let hooks = crate::settings::Hooks {
+            desktop_visible: Rc::new({
+                let app = app.clone();
+                move |id, visible| {
+                    let Some(a) = app() else { return };
+                    // an All notes editor stands in for the note it shows: never show it twice
+                    let show = visible && !a.all_notes().is_some_and(|v| v.editor_note_id() == id);
+                    a.with_note(id, |n| n.set_visible(show));
+                }
+            }),
+            restore_host: Rc::new({
+                let app = app.clone();
+                move |id, g| {
+                    let Some(a) = app() else { return };
+                    if a.with_note(id, |n| n.place(g)).is_some() {
+                        let hwnd = a.with_note(id, |n| n.hwnd()).flatten();
+                        a.0.env.window_control.bring_to_front(id, hwnd);
+                    }
+                }
+            }),
+            closed: Rc::new({
+                let app = app.clone();
+                move || {
+                    if let Some(a) = app() {
+                        a.settings_closed();
+                    }
+                }
+            }),
+            work_areas: Rc::new({
+                let app = app.clone();
+                move || app().map(|a| a.0.env.window_control.work_areas()).unwrap_or_default()
+            }),
+            begin_move: Rc::new({
+                let app = app.clone();
+                move |hwnd| {
+                    if let Some(a) = app() {
+                        a.0.env.window_control.begin_move(0, hwnd);
+                    }
+                }
+            }),
+        };
+        match SettingsView::open(host, geometry, pinned, hooks) {
+            Ok(view) => *self.0.settings.borrow_mut() = Some(view),
+            Err(e) => eprintln!("washi: could not open Settings: {e}"),
+        }
+    }
+
+    /// The Settings page has closed: drop it on the next turn of the loop, never inside its own callback.
+    fn settings_closed(&self) {
+        let view = self.0.settings.borrow_mut().take();
+        slint::Timer::single_shot(std::time::Duration::ZERO, move || drop(view));
     }
 
     /// Clone the handle to the open All Notes view, if any.
@@ -739,7 +840,10 @@ impl App {
             let weak = weak.clone();
             Rc::new(move |id, visible| {
                 if let Some(inner) = weak.upgrade() {
-                    App(inner).with_note(id, |n| n.set_visible(visible));
+                    let app = App(inner);
+                    // Settings stands in for its host while it is open
+                    let show = visible && !app.settings().is_some_and(|s| s.host() == id);
+                    app.with_note(id, |n| n.set_visible(show));
                 }
             })
         };
@@ -882,7 +986,7 @@ impl App {
         self.open_editor_dropdown(&v);
     }
 
-    /// The editor's dropdown: pin, close, delete (as the action bar does it), New and Settings.
+    /// The editor's dropdown: pin, close, delete (as the action bar does it), and New.
     fn open_editor_dropdown(&self, v: &Rc<AllNotesView>) {
         let id = v.editor_note_id();
         let editor = v.editor_handle();
@@ -1063,6 +1167,15 @@ impl App {
                         let app = App(inner);
                         app.dismiss_dropdown();
                         app.open_all_notes(id);
+                    }
+                });
+
+                let weak = Rc::downgrade(&self.0);
+                menu.ui().on_settings(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App(inner);
+                        app.dismiss_dropdown();
+                        app.open_settings(id);
                     }
                 });
 

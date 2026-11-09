@@ -17,6 +17,7 @@ pub mod note_window;
 pub mod occlusion;
 pub mod placement;
 pub mod platform;
+pub mod settings;
 pub mod textflow;
 pub mod storage;
 pub mod suspend;

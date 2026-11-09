@@ -319,6 +319,15 @@ impl DropdownMenu {
         self.ui.invoke_all_notes();
     }
 
+    pub fn invoke_settings(&self) {
+        self.ui.invoke_settings();
+    }
+
+    /// Whether the card offers Settings (not the compact one).
+    pub fn settings_visible(&self) -> bool {
+        self.ui.get_settings_visible()
+    }
+
     pub fn invoke_select_note(&self, id: NoteId) {
         self.ui.invoke_select_note(id as i32);
     }
