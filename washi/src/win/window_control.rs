@@ -116,6 +116,18 @@ impl WindowControl for Win32WindowControl {
         }
     }
 
+    fn fine_timer(&self, on: bool) {
+        use windows_sys::Win32::Media::{timeBeginPeriod, timeEndPeriod};
+        // SAFETY: plain calls; paired by the caller (SettingsView).
+        unsafe {
+            if on {
+                timeBeginPeriod(1);
+            } else {
+                timeEndPeriod(1);
+            }
+        }
+    }
+
     fn set_bounds(&self, hwnd: Option<isize>, x: i32, y: i32, w: i32, h: i32) -> bool {
         let Some(hwnd) = hwnd else { return false };
         set_window_bounds(hwnd, x, y, w, h);

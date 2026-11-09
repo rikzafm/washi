@@ -71,20 +71,45 @@ Not done: Sticky Notes side-by-side (`-StickyNotes`), live capture at 150% (this
 
 ## Settings transition (ticket 02 of the Settings page)
 
-The open/close transition sets the Settings window bounds about every 16 ms for 240 ms (after a 90 ms
-fade of the host text), with one native SetWindowPos per frame (move and resize together, no activate,
-no z-order change, always repainting). The frame work is SettingsView::step, bracketed by the
-`settings-frame` trace mark (WASHI_TRACE).
+The spec said "about 300 ms"; after the real app felt delayed and choppy the user asked for quick and snappy,
+so the numbers below replace it.
 
-Status: **frame cost NOT yet measured on a real display.** The headless harness cannot measure it and this
-change was built without driving the real app. The window-resizing approach is in place; the fixed-large-window
-fallback (Settings window at its final bounds, transparent, only the drawing animating inside it) is not built.
-To close this out: run a release build with WASHI_TRACE set, open and close Settings at 100% and 150% display
-scale (window 447x468 -> 886x684 logical), check the worst frame is <= 16 ms with no tearing, and record it here.
-Switch to the fallback only if it is not.
+Cause of "choppy and delayed", found by reading the code (not by a real-display measurement):
 
-Verified in tests: the timer stops at rest (no idle CPU), the transition is wall-clock based (a late frame
-skips ahead instead of stretching), and end states equal the ticket 01 geometry.
+1. **Timer grid.** The frame timer was a 16 ms Slint timer. On Windows timers fire on a ~15.6 ms grid unless
+   a finer resolution is requested (nothing in the app called timeBeginPeriod), so a 16 ms timer fires every
+   ~31 ms (about 30 fps, 6-8 frames per transition), and as Slint timers run after rendering, frames also slip.
+2. **Sequential and long.** Open was a 90 ms text fade, a swap frame, then a 240 ms grow (about 350 ms before
+   the page was usable); close ended with another 90 ms fade; a tab switch was 200 ms in-out cubic (slow at the
+   start, so it felt late).
+3. The per-frame cost (one SetWindowPos of a large layered window, relayout and software repaint of the page and
+   its paper shadow) is real but was not the first-order problem and is unchanged.
+
+Now: Settings shows at once on the note's Paper (no pre-fade; the note's text sits hidden beneath the opaque
+Paper), grows over **190 ms** ease-out (at rest about 200 ms after the press); close is 190 ms plus a 40 ms text
+fade-in (about 250 ms); a tab switch is **130 ms** ease-out (height tween and the out-then-in content fade run
+together). The frame timer is **8 ms** and holds the 1 ms system timer resolution (timeBeginPeriod and
+timeEndPeriod, paired) only while a transition runs, so it is released at rest. The frame work is
+SettingsView::step, bracketed by the `settings-frame` trace mark (WASHI_TRACE).
+
+Fixed-large-window fallback (window at its final bounds, Paper animating inside it): NOT built. Washi uses the
+software renderer (ADR 0001), so there is no GPU or vsync compositing to gain; a fixed transparent window would
+make every frame repaint and present the whole large layered surface and needs a window shape to keep the empty
+areas click-through. Reconsider only if the measured frame cost on a real display is still too high.
+
+Regression check against main (94ae630): this branch adds no timer or work to the other animations. `Hooks::now`
+is just the clock's monotonic read, and the Settings timers (frame timer, 1 Hz stats) exist only while Settings is
+open (stats only on General). The one shared change is note.slint: the note's text, scrollbar, toolbar and menu
+button now multiply by `content-opacity` (always 1 outside the Settings transition). Whether the software renderer
+treats an opacity bound to exactly 1 as free (no layer) was NOT measured; if the dropdown or All notes still feel
+slower than on main, look there first.
+
+Measured vs not: **frame cost and smoothness on a real display are NOT measured** (headless harness only).
+Verified in tests: open at rest within 230 ms and close within 260 ms landing exactly on the host's geometry, tab
+height tween ease-out and done within 140 ms, Settings shown from the first instant (overlap, not sequence), the
+timer resolution hold is balanced and the frame timer stops at rest, tweens are wall-clock based. To close this
+out: run a release build with WASHI_TRACE set, open and close Settings and switch tabs at 100% and 150% display
+scale, and record the worst `settings-frame` interval here.
 
 ## Settings General tab: 1 Hz stats timer
 

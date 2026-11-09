@@ -70,20 +70,21 @@ pub fn fit_on_screen(paper: RectF, strip: f32, areas: &[RectF]) -> RectF {
     RectF { x: paper.x.min(max_x).max(min_x), y: paper.y.min(max_y).max(min_y), ..paper }
 }
 
-/// Fade of the host note's text out (and back in), ms.
-pub const NOTE_FADE: Duration = Duration::from_millis(90);
-/// The Paper's growth to the Settings size (and back), ms.
-pub const GROW: Duration = Duration::from_millis(240);
+/// Fade of the host note's text back in once Settings has closed onto it, ms. (Opening has no
+/// separate fade: Settings is shown at once and the text is gone beneath its Paper.)
+pub const NOTE_FADE: Duration = Duration::from_millis(40);
+/// The Paper's growth to the Settings size (and back), ms. Open is about 200 ms end to end, close about 230.
+pub const GROW: Duration = Duration::from_millis(190);
 /// A tab switch: the Paper's height tween and the content cross-fade, ms.
-pub const TAB_SWITCH: Duration = Duration::from_millis(200);
-/// One frame of the transition.
-pub const TICK: Duration = Duration::from_millis(16);
+pub const TAB_SWITCH: Duration = Duration::from_millis(130);
+/// One frame of the transition. Short, because a timer fires after the frame has rendered: the next
+/// frame starts as soon as the last one is drawn instead of waiting out a whole 16 ms.
+pub const TICK: Duration = Duration::from_millis(8);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ease {
     Linear,
     OutCubic,
-    InOutCubic,
 }
 
 impl Ease {
@@ -91,13 +92,6 @@ impl Ease {
         match self {
             Ease::Linear => t,
             Ease::OutCubic => 1.0 - (1.0 - t).powi(3),
-            Ease::InOutCubic => {
-                if t < 0.5 {
-                    4.0 * t * t * t
-                } else {
-                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
-                }
-            }
         }
     }
 }
@@ -239,13 +233,10 @@ mod tests {
     }
 
     #[test]
-    fn in_out_cubic_is_slow_at_the_ends_and_exact_at_them() {
-        let t = Tween::new(0.0, 1.0, ms(0), ms(200), Ease::InOutCubic);
-        assert_eq!(t.sample(ms(0)).0, 0.0);
-        assert_eq!(t.sample(ms(100)).0, 0.5);
-        assert!(t.sample(ms(20)).0 < 0.1, "eases in");
-        assert!(t.sample(ms(180)).0 > 0.9, "eases out");
-        assert_eq!(t.sample(ms(200)), (1.0, true));
+    fn the_transitions_are_snappy() {
+        assert!(GROW + TICK <= ms(200), "open is about 200 ms: {GROW:?}");
+        assert!(GROW + NOTE_FADE + 2 * TICK <= ms(250), "close is under 250 ms");
+        assert!(TAB_SWITCH >= ms(120) && TAB_SWITCH <= ms(150), "{TAB_SWITCH:?}");
     }
 
     #[test]

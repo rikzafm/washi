@@ -161,7 +161,7 @@ fn window_at(h: &Harness) -> (i32, i32, u32, u32) {
 }
 
 #[test]
-fn opening_fades_the_note_then_grows_left_and_closing_comes_back_exactly() {
+fn opening_grows_left_at_once_with_no_wait_for_a_text_fade_and_closing_comes_back_exactly() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
@@ -169,26 +169,19 @@ fn opening_fades_the_note_then_grows_left_and_closing_comes_back_exactly() {
     h.toggle_dropdown(0);
     h.invoke_dropdown_settings();
 
-    // the host's own text fades out first, Settings is not on screen yet
-    assert!(h.note_visible(0));
-    assert!(!h.settings_shown());
-    h.advance_frames(ms(40));
-    let o = h.note_content_opacity(0);
-    assert!(o > 0.0 && o < 1.0, "mid-fade: {o}");
-    assert_eq!(window_at(&h), (note.x, note.y, note.w, note.h), "waits exactly on the note's Paper");
-
-    h.advance_frames(ms(80)); // fade done (on the next frame tick): Settings shown
+    // Settings is on screen from the first instant, exactly on the note's Paper (no sequential fade first)
     assert!(h.settings_shown());
+    assert_eq!(window_at(&h), (note.x, note.y, note.w, note.h), "starts exactly on the note's Paper");
     h.advance_frames(ms(16)); // swap: host hidden
     assert!(!h.note_visible(0));
 
-    h.advance_frames(ms(80)); // into the morph
+    h.advance_frames(ms(48)); // into the morph
     let (x, y, w, _) = window_at(&h);
     assert!(w > note.w && w < FULL_W, "wider than the note by part of the Sidebar: {w}");
     assert!(x < note.x && x > note.x - STRIP, "the strip is partly out: {x}");
     assert_eq!(y, note.y, "top-left anchored");
 
-    h.advance_frames(ms(300)); // done
+    h.advance_frames(ms(200)); // done
     let (x, y, w, hh) = window_at(&h);
     assert_eq!((x + STRIP, y, w), (note.x, note.y, FULL_W));
     assert_eq!(hh, GENERAL_H + 2 * MARGIN as u32, "opens at the General tab's height, not at 600");
@@ -201,24 +194,44 @@ fn opening_fades_the_note_then_grows_left_and_closing_comes_back_exactly() {
 }
 
 #[test]
-fn the_morph_takes_about_300ms_with_ease_out() {
+fn opening_is_snappy_over_in_about_200ms_with_ease_out() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
     let note = h.note_geometry(0);
     h.toggle_dropdown(0);
     h.invoke_dropdown_settings();
-    h.advance_frames(ms(106)); // fade (90) + swap (16): the morph starts here
-    h.advance_frames(ms(80));
+    h.advance_frames(ms(16 + 64)); // swap frame, then a third of the morph
     let (_, _, w1, _) = window_at(&h);
-    h.advance_frames(ms(80));
+    h.advance_frames(ms(64));
     let (_, _, w2, _) = window_at(&h);
     let grown = |w: u32| w as f32 - note.w as f32;
     let total = (FULL_W - note.w) as f32;
     assert!(grown(w1) > total / 3.0, "ease-out: well past a third after a third of the time ({} of {total})", grown(w1));
     assert!(w2 > w1 && w2 < FULL_W);
-    h.advance_frames(ms(100)); // 260 ms into the morph
+    h.advance_frames(ms(100)); // 244 ms after the press: at rest
     assert_eq!(window_at(&h).2, FULL_W);
+    assert!(!h.settings_ticking());
+}
+
+#[test]
+fn open_takes_about_200ms_and_close_about_250ms() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    let note = h.note_geometry(0);
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_settings();
+    h.advance_frames(ms(230));
+    assert!(!h.settings_ticking(), "open is at rest by 230 ms");
+    assert_eq!(window_at(&h).2, FULL_W);
+
+    h.settings_close();
+    h.advance_frames(ms(260)); // (harness frames are 16 ms; real ones are 8 ms)
+    assert!(!h.is_settings_open(), "close is over by 260 ms");
+    assert_eq!(h.note_geometry(0), note, "lands exactly on the host's original geometry");
+    assert!(h.note_visible(0));
+    assert_eq!(h.note_content_opacity(0), 1.0);
 }
 
 #[test]
@@ -229,7 +242,7 @@ fn close_mid_open_reverses_from_the_current_state() {
     let note = h.note_geometry(0);
     h.toggle_dropdown(0);
     h.invoke_dropdown_settings();
-    h.advance_frames(ms(106 + 64));
+    h.advance_frames(ms(16 + 64));
     let at_close = window_at(&h).2;
     assert!(at_close > note.w && at_close < FULL_W);
 
@@ -251,13 +264,32 @@ fn close_mid_open_reverses_from_the_current_state() {
 }
 
 #[test]
-fn close_during_the_note_fade_never_shows_settings() {
+fn frames_hold_the_fine_timer_resolution_only_while_they_run() {
+    // Windows timers fire on a ~15.6 ms grid unless asked: that, not the drawing, made it choppy
+    let mut h = Harness::new();
+    h.start().unwrap();
+    assert_eq!(h.control.fine_timer_holds.get(), 0);
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_settings();
+    assert_eq!(h.control.fine_timer_holds.get(), 1, "held while opening");
+    h.advance_frames(ms(300));
+    assert_eq!(h.control.fine_timer_holds.get(), 0, "given back at rest");
+    h.settings_click_tab(1);
+    assert_eq!(h.control.fine_timer_holds.get(), 1, "held for a tab switch");
+    h.advance_frames(ms(300));
+    h.settings_close();
+    h.advance_frames(ms(600));
+    assert_eq!(h.control.fine_timer_holds.get(), 0, "balanced after close");
+}
+
+#[test]
+fn close_right_after_pressing_settings_lands_on_the_note() {
     let mut h = Harness::new();
     h.start().unwrap();
     let note = h.note_geometry(0);
     h.toggle_dropdown(0);
     h.invoke_dropdown_settings();
-    h.advance_frames(ms(40));
+    h.advance_frames(ms(8));
     h.settings_close();
     h.advance_frames(ms(600));
 
@@ -277,7 +309,7 @@ fn the_shift_to_stay_on_screen_grows_in_and_is_undone_on_close() {
     h.place_note(0, near_edge);
     h.toggle_dropdown(0);
     h.invoke_dropdown_settings();
-    h.advance_frames(ms(106 + 120));
+    h.advance_frames(ms(16 + 100));
     let (x, _, _, _) = window_at(&h);
     assert!(x >= 0, "never off the left edge mid-way: {x}");
     h.advance_frames(ms(300));
@@ -346,7 +378,7 @@ fn each_tab_ends_at_its_height_and_the_width_stays() {
 }
 
 #[test]
-fn the_height_tweens_over_about_200ms() {
+fn the_height_tweens_over_about_130ms() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
     h.settings_click_tab(1);
@@ -354,13 +386,15 @@ fn the_height_tweens_over_about_200ms() {
     h.advance_frames(ms(250));
     assert_eq!(paper_h(&h), GENERAL_H);
     h.settings_click_tab(1);
-    h.advance_frames(ms(100));
+    h.advance_frames(ms(32));
     let mid = paper_h(&h);
     assert!(mid > STYLE_H && mid < GENERAL_H, "mid-tween: {mid}");
-    h.advance_frames(ms(48));
+    assert!(GENERAL_H - mid > (GENERAL_H - STYLE_H) / 2, "ease-out: past half the way a quarter in: {mid}");
+    h.advance_frames(ms(64));
     assert!(paper_h(&h) < STYLE_H + 10, "nearly there at 3/4 of the time");
-    h.advance_frames(ms(100));
-    assert_eq!(paper_h(&h), STYLE_H);
+    h.advance_frames(ms(48));
+    assert_eq!(paper_h(&h), STYLE_H, "done within 140 ms");
+    assert!(!h.settings_ticking());
 }
 
 #[test]
@@ -380,7 +414,7 @@ fn switching_mid_tween_retargets_smoothly() {
         assert!(now_h <= last_h, "monotonic: {now_h} after {last_h}");
         last_h = now_h;
         let o = h.settings_content_opacity();
-        assert!((o - last_o).abs() <= 0.2, "opacity does not jump: {last_o} -> {o}");
+        assert!((o - last_o).abs() <= 0.3, "opacity does not jump: {last_o} -> {o}");
         last_o = o;
     }
     assert_eq!(last_h, STYLE_H as i32);
@@ -399,7 +433,7 @@ fn content_swaps_only_when_invisible() {
     for _ in 0..20 {
         h.advance_frames(ms(16));
         if h.settings_shown_tab() == 2 {
-            assert!(h.settings_content_opacity() <= 0.2, "swapped while visible: {}", h.settings_content_opacity());
+            assert!(h.settings_content_opacity() <= 0.3, "swapped while visible: {}", h.settings_content_opacity());
             swapped = true;
             break;
         }

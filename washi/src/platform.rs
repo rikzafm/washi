@@ -200,6 +200,9 @@ pub trait WindowControl {
     fn set_bounds(&self, _hwnd: Option<isize>, _x: i32, _y: i32, _w: i32, _h: i32) -> bool {
         false
     }
+    /// Ask for a fine (1 ms) system timer resolution while a frame timer runs (`true`) and give it
+    /// back (`false`). Calls are paired.
+    fn fine_timer(&self, _on: bool) {}
     /// Work areas (screens minus taskbars) of all connected monitors, primary first.
     fn work_areas(&self) -> Vec<ScreenRect>;
     /// The given notes (id and native handle, if any) ordered by their windows' stacking on the
