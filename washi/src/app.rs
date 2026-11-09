@@ -529,6 +529,14 @@ impl App {
                 let app = app.clone();
                 move |hwnd, x, y, w, h| app().is_some_and(|a| a.0.env.window_control.set_bounds(hwnd, x, y, w, h))
             }),
+            fine_timer: Rc::new({
+                let app = app.clone();
+                move |on| {
+                    if let Some(a) = app() {
+                        a.0.env.window_control.fine_timer(on);
+                    }
+                }
+            }),
             general: crate::settings::general::GeneralDeps {
                 env: self.0.env.clone(),
                 db: self.0.db.clone(),

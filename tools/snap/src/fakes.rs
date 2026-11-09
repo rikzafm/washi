@@ -236,11 +236,14 @@ pub struct FakeWindowControl {
     pub areas: RefCell<Vec<ScreenRect>>,
     /// Bottom-to-top order the fake desktop reports; empty means "as asked".
     pub stacking: RefCell<Vec<NoteId>>,
+    /// Holds of the fine timer resolution not yet given back.
+    pub fine_timer_holds: std::cell::Cell<i32>,
 }
 
 impl Default for FakeWindowControl {
     fn default() -> Self {
         FakeWindowControl {
+            fine_timer_holds: std::cell::Cell::new(0),
             log: RefCell::new(Vec::new()),
             // one 1920 x 1080 monitor with a 40 px taskbar
             areas: RefCell::new(vec![ScreenRect::new(0, 0, 1920, 1040)]),
@@ -250,6 +253,9 @@ impl Default for FakeWindowControl {
 }
 
 impl WindowControl for FakeWindowControl {
+    fn fine_timer(&self, on: bool) {
+        self.fine_timer_holds.set(self.fine_timer_holds.get() + if on { 1 } else { -1 });
+    }
     fn begin_move(&self, note: NoteId, _hwnd: Option<isize>) {
         self.log.borrow_mut().push(WindowCommand::Move(note));
     }

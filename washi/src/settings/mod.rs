@@ -1,13 +1,15 @@
 //! The Settings page.
 //!
-//! Pressing Settings in a note's dropdown turns that note into one global Settings window: the host's
-//! text fades out, the window shows at the host's Paper (identical blank paper) and then grows left by
-//! the Sidebar's strip and to the Settings size while the host's own window hides. Closing plays it in
-//! reverse and puts the host back exactly where it was. Same pattern as All notes: the Settings window
-//! is a separate window, the note stays alive underneath.
+//! Pressing Settings in a note's dropdown turns that note into one global Settings window: the window
+//! shows at once at the host's Paper (identical blank paper) and grows left by the Sidebar's strip and
+//! to the Settings size (about 190 ms) while the host's own window hides. Closing plays it in reverse,
+//! puts the host back exactly where it was and fades its text in (40 ms). Same pattern as All notes: the
+//! Settings window is a separate window, the note stays alive underneath.
 //!
-//! The window's bounds are set by a ~16 ms timer from a wall-clock tween (so a slow frame skips ahead
-//! instead of stretching the animation, and the harness can sample any instant).
+//! The window's bounds are set by an 8 ms timer from a wall-clock tween (so a slow frame skips ahead
+//! instead of stretching the animation, and the harness can sample any instant). The timer holds the
+//! system's 1 ms timer resolution while it runs: at the default ~15.6 ms grid a 16 ms timer fires every
+//! ~31 ms.
 
 pub mod anim;
 pub mod shortcuts;
@@ -41,14 +43,14 @@ pub struct Hooks {
     pub now: Rc<dyn Fn() -> Duration>,
     /// Move and resize a native window in one call (physical px); false if the platform cannot.
     pub set_bounds: Rc<dyn Fn(Option<isize>, i32, i32, i32, i32) -> bool>,
+    /// Ask for a fine system timer resolution (true) while frames run, and give it back (false).
+    pub fine_timer: Rc<dyn Fn(bool)>,
     /// What the General tab reads and changes.
     pub general: general::GeneralDeps,
 }
 
 #[derive(Clone, Debug)]
 enum Phase {
-    /// The host fades its text out; Settings is not shown yet.
-    NoteFadeOut { tween: Tween },
     /// Both windows are on screen (identical blank paper) for one frame; then hide one and go on.
     Swap { then: Box<Phase>, closing: bool },
     /// The note (e = 0) and the Settings page (e = 1).
@@ -83,6 +85,8 @@ pub struct SettingsView {
     placed: Cell<Geometry>,
     phase: RefCell<Phase>,
     tick: slint::Timer,
+    /// Whether the fine (1 ms) system timer resolution is held for the frame timer.
+    fine_timer: Cell<bool>,
     me: Weak<SettingsView>,
     /// The Paper at e = 0 and e = 1 of the current morph.
     morph_from: Cell<RectF>,
@@ -116,8 +120,12 @@ impl SettingsView {
             host,
             host_window,
             placed: Cell::new(host_window),
-            phase: RefCell::new(Phase::NoteFadeOut { tween: Tween::new(1.0, 0.0, now, NOTE_FADE, Ease::OutCubic) }),
+            phase: RefCell::new(Phase::Swap {
+                then: Box::new(Phase::Morph { tween: Tween::new(0.0, 1.0, now, GROW, Ease::OutCubic), closing: false }),
+                closing: false,
+            }),
             tick: slint::Timer::default(),
+            fine_timer: Cell::new(false),
             me: me.clone(),
             morph_from: Cell::new(paper_of_note(host_window)),
             morph_to: Cell::new(RectF::default()),
@@ -131,8 +139,10 @@ impl SettingsView {
         });
         view.wire(Rc::downgrade(&view));
         view.morph_to.set(view.open_paper());
-        // The window waits, unshown, exactly on the note's Paper while the note's text fades out.
+        // Settings shows at once, exactly on the note's Paper (blank, as the note's text is gone beneath
+        // it); the grow starts on the next frame, when the host's window is hidden.
         view.apply(grow_pose(view.morph_from.get(), view.morph_to.get(), 0.0));
+        let _ = view.ui.show();
         view.start_ticking();
         Ok(view)
     }
@@ -212,7 +222,7 @@ impl SettingsView {
         self.tab_from.set(from);
         self.tab_to.set(fit_on_screen(want, SIDEBAR_STRIP, &self.areas()));
         self.tab.set(to);
-        *self.phase.borrow_mut() = Phase::Tab { h: Tween::new(0.0, 1.0, now, TAB_SWITCH, Ease::InOutCubic), fade_start, to_tab: to, swapped: false };
+        *self.phase.borrow_mut() = Phase::Tab { h: Tween::new(0.0, 1.0, now, TAB_SWITCH, Ease::OutCubic), fade_start, to_tab: to, swapped: false };
         self.start_ticking();
         self.sync_general();
     }
@@ -233,9 +243,22 @@ impl SettingsView {
         (self.hooks.now)()
     }
 
+    /// Stop the frame timer and give back the fine timer resolution.
+    fn stop_ticking(&self) {
+        self.tick.stop();
+        if self.fine_timer.replace(false) {
+            (self.hooks.fine_timer)(false);
+        }
+    }
+
     fn start_ticking(&self) {
         if self.tick.running() {
             return;
+        }
+        // Windows timers fire on a ~15.6 ms grid unless asked otherwise: a 16 ms frame timer then
+        // lands every ~31 ms (about 30 fps), which is what made the transition look choppy.
+        if !self.fine_timer.replace(true) {
+            (self.hooks.fine_timer)(true);
         }
         let me = self.me.clone();
         self.tick.start(slint::TimerMode::Repeated, TICK, move || {
@@ -260,21 +283,12 @@ impl SettingsView {
         let now = self.now();
         let phase = self.phase.borrow().clone();
         let next: Option<Phase> = match phase {
-            Phase::NoteFadeOut { tween } => {
-                let (o, done) = tween.sample(now);
-                (self.hooks.host_content)(self.host, o);
-                if done {
-                    let _ = self.ui.show();
-                    Some(Phase::Swap { then: Box::new(self.open_morph(now)), closing: false })
-                } else {
-                    None
-                }
-            }
             Phase::Swap { then, closing } => {
                 if closing {
                     let _ = self.ui.hide();
                 } else {
                     (self.hooks.desktop_visible)(self.host, false);
+                    (self.hooks.host_content)(self.host, 0.0);
                 }
                 Some(then.restarted(now))
             }
@@ -319,7 +333,7 @@ impl SettingsView {
                 }
             }
             Phase::Open | Phase::Done => {
-                self.tick.stop();
+                self.stop_ticking();
                 None
             }
         };
@@ -327,14 +341,10 @@ impl SettingsView {
             let rest = matches!(p, Phase::Open | Phase::Done);
             *self.phase.borrow_mut() = p;
             if rest {
-                self.tick.stop();
+                self.stop_ticking();
             }
         }
         self.sync_general();
-    }
-
-    fn open_morph(&self, now: Duration) -> Phase {
-        Phase::Morph { tween: Tween::new(0.0, 1.0, now, GROW, Ease::OutCubic), closing: false }
     }
 
     /// X or Esc: play the transition backwards, from wherever it is, and put the host back.
@@ -342,11 +352,6 @@ impl SettingsView {
         let now = self.now();
         let phase = self.phase.borrow().clone();
         let next = match phase {
-            Phase::NoteFadeOut { tween } => {
-                // Settings never showed: the host's text just comes back
-                let (o, _) = tween.sample(now);
-                Phase::NoteFadeIn { tween: Tween::new(o, 1.0, now, NOTE_FADE, Ease::OutCubic) }
-            }
             Phase::Morph { closing: true, .. } | Phase::Swap { closing: true, .. } | Phase::NoteFadeIn { .. } | Phase::Done => return,
             Phase::Morph { tween, closing: false } => {
                 let (e, _) = tween.sample(now);
