@@ -10,6 +10,7 @@
 //! instead of stretching the animation, and the harness can sample any instant).
 
 pub mod anim;
+pub mod shortcuts;
 
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
@@ -99,6 +100,7 @@ impl SettingsView {
         let ui = SettingsWindow::new()?;
         ui.set_app_icon(app_icon());
         ui.set_pinned(pinned);
+        ui.set_shortcuts(shortcuts::model());
         let now = (hooks.now)();
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,

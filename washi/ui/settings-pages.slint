@@ -1,0 +1,247 @@
+// The read-only Settings pages: Shortcuts and Privacy. Each is laid out in the Paper's tilted frame
+// (like the rest of Settings): `f` is the frame, `u0`/`v0` the content's top-left in it (px from the
+// Paper's center), `content-w` its width. Glyphs stay upright; only positions follow the tilt.
+
+import "../../fonts/ShadowsIntoLight.ttf";
+import { Frame, Tilt, TRect } from "toolbar.slint";
+
+export struct ShortcutRow {
+    label: string,
+    keys: [string],
+}
+
+/// A text placed at `(u, v)` of the tilted frame.
+component TText inherits Text {
+    in property <Frame> f;
+    in property <float> u;
+    in property <float> v;
+    x: Tilt.x(root.f, root.u, root.v) * 1px;
+    y: Tilt.y(root.f, root.u, root.v) * 1px;
+    font-family: "Shadows Into Light";
+    color: #2B2F36;
+}
+
+/// An upright box placed with its top-left at `(u, v)` of the tilted frame.
+component TBox inherits Rectangle {
+    in property <Frame> f;
+    in property <float> u;
+    in property <float> v;
+    x: Tilt.x(root.f, root.u, root.v) * 1px;
+    y: Tilt.y(root.f, root.u, root.v) * 1px;
+}
+
+/// The grey note box under a page's rows.
+component NoteBox inherits Rectangle {
+    in property <Frame> f;
+    in property <float> u;
+    in property <float> v;
+    in property <float> w;
+    in property <float> h;
+    in property <string> text;
+
+    TRect {
+        f: root.f;
+        u0: root.u;
+        v0: root.v;
+        w: root.w;
+        h: root.h;
+        r: 12.0;
+        fill: #F0F0EE;
+    }
+
+    TText {
+        f: root.f;
+        u: root.u + 16.0;
+        v: root.v + 6.0;
+        width: root.w * 1px - 32px;
+        height: root.h * 1px - 12px;
+        text: root.text;
+        wrap: word-wrap;
+        vertical-alignment: center;
+        font-size: 18px;
+        color: #5B616B;
+    }
+}
+
+component KeyCap inherits Rectangle {
+    in property <string> text;
+    height: 32px;
+    min-width: 32px;
+    border-radius: 8px;
+    background: #F0F0EE;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text {
+            text: root.text;
+            font-family: "Shadows Into Light";
+            font-size: 20px;
+            color: #2B2F36;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+export component ShortcutsPage inherits Rectangle {
+    in property <Frame> f;
+    in property <float> u0;
+    in property <float> v0;
+    in property <float> content-w;
+    in property <[ShortcutRow]> rows;
+
+    for row[i] in root.rows : TBox {
+        f: root.f;
+        u: root.u0;
+        v: root.v0 + i * 44.0;
+        width: root.content-w * 1px;
+        height: 44px;
+        accessible-role: list-item;
+        accessible-label: row.label;
+
+        Text {
+            x: 0px;
+            width: 200px;
+            height: 44px;
+            text: row.label;
+            font-family: "Shadows Into Light";
+            font-size: 24px;
+            color: #2B2F36;
+            vertical-alignment: center;
+        }
+
+        HorizontalLayout {
+            alignment: end;
+            spacing: 6px;
+            padding-top: 6px;
+            padding-bottom: 6px;
+            for key in row.keys : KeyCap {
+                text: key;
+            }
+        }
+    }
+
+    NoteBox {
+        f: root.f;
+        u: root.u0;
+        v: root.v0 + root.rows.length * 44.0 + 18.0;
+        w: root.content-w;
+        h: 54.0;
+        text: "Shortcuts follow the keys' places, so they also work on keyboard layouts without Latin letters.";
+    }
+}
+
+/// One Privacy line: what, a hint under it, and its value on the right.
+component PrivacyRow inherits TBox {
+    in property <string> label;
+    in property <string> hint;
+    in property <string> value;
+
+    Text {
+        x: 0px;
+        y: 4px;
+        text: root.label;
+        font-family: "Shadows Into Light";
+        font-size: 26px;
+        color: #2B2F36;
+    }
+
+    Text {
+        x: 0px;
+        y: 36px;
+        text: root.hint;
+        font-family: "Shadows Into Light";
+        font-size: 17px;
+        color: #5B616B;
+    }
+
+    Text {
+        x: parent.width - self.width;
+        y: 4px;
+        width: 140px;
+        text: root.value;
+        horizontal-alignment: right;
+        font-family: "Shadows Into Light";
+        font-size: 22px;
+        font-weight: 700;
+        color: #2B2F36;
+    }
+}
+
+export component PrivacyPage inherits Rectangle {
+    in property <Frame> f;
+    in property <float> u0;
+    in property <float> v0;
+    in property <float> content-w;
+
+    // The lock (stroke 1.8), left of the page's lead line.
+    TBox {
+        f: root.f;
+        u: root.u0;
+        v: root.v0;
+        width: 32px;
+        height: 32px;
+        Path {
+            width: 32px;
+            height: 32px;
+            viewbox-width: 32;
+            viewbox-height: 32;
+            commands: "M 9 14 L 9 10 A 7 7 0 0 1 23 10 L 23 14 M 7 14 L 25 14 L 25 27 L 7 27 Z";
+            stroke: #2B2F36;
+            stroke-width: 1.8px;
+            stroke-line-join: round;
+            stroke-line-cap: round;
+        }
+    }
+
+    TText {
+        f: root.f;
+        u: root.u0 + 44.0;
+        v: root.v0 + 2.0;
+        text: "Your notes are locked on disk.";
+        font-size: 24px;
+    }
+
+    PrivacyRow {
+        f: root.f;
+        u: root.u0;
+        v: root.v0 + 56.0;
+        width: root.content-w * 1px;
+        height: 64px;
+        label: "Unlocks with your Windows account";
+        hint: "Only you, signed in to this PC, can read them.";
+        value: "Automatic";
+    }
+
+    PrivacyRow {
+        f: root.f;
+        u: root.u0;
+        v: root.v0 + 120.0;
+        width: root.content-w * 1px;
+        height: 64px;
+        label: "Stays on this computer";
+        hint: "Washi has no network access and sends nothing.";
+        value: "Offline";
+    }
+
+    PrivacyRow {
+        f: root.f;
+        u: root.u0;
+        v: root.v0 + 184.0;
+        width: root.content-w * 1px;
+        height: 64px;
+        label: "Deleted notes";
+        hint: "They are gone for good, not kept in a bin.";
+        value: "Permanent";
+    }
+
+    NoteBox {
+        f: root.f;
+        u: root.u0;
+        v: root.v0 + 266.0;
+        w: root.content-w;
+        h: 72.0;
+        text: "No backup of the key. If the Windows account is lost or reset, the notes cannot be opened again.";
+    }
+}
