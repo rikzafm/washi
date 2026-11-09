@@ -128,6 +128,8 @@ export component TextLayer inherits Rectangle {
     callback focus-entered(int);
     /// While the note is suspended (covered, minimized) losing the focus does not change its look.
     in property <bool> suspended: false;
+    in property <bool> allow-autofocus: true;
+    in property <bool> hide-inputs: false;
     in property <int> resync: 0;
     in property <float> pitch-scale: 1;
     /// What the paper's tilted top edge needs to cut the resting words along it: the paper's own
@@ -348,8 +350,8 @@ export component TextLayer inherits Rectangle {
                 return root.range-key(e.text, e.modifiers.shift) != 0;
             }
             italic: b.italic;
-            autofocus: i == 0;
-            show-input: root.flat >= 1;
+            autofocus: i == 0 && root.allow-autofocus;
+            show-input: !root.hide-inputs && root.flat >= 1;
             resync: root.resync;
             // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
             gap-before: i == 0 || root.blocks[i - 1].kind == b.kind || (root.blocks[i - 1].kind == BlockKind.list-item && b.kind == BlockKind.body) || (root.blocks[i - 1].kind == BlockKind.body && b.kind == BlockKind.list-item) ? 0px

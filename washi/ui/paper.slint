@@ -30,8 +30,10 @@ export global PaperGeometry {
 }
 
 export component Paper {
-    property <length> paper-w: root.width - 2 * PaperTheme.margin;
-    property <length> paper-h: root.height - 2 * PaperTheme.margin;
+    in property <length> cx: root.width / 2;
+    in property <length> cy: root.height / 2;
+    in property <length> paper-w: root.width - 2 * PaperTheme.margin;
+    in property <length> paper-h: root.height - 2 * PaperTheme.margin;
 
     for growth[i] in PaperTheme.shadow-growths: Path {
         width: root.width;
@@ -39,7 +41,7 @@ export component Paper {
         viewbox-width: root.width / 1px;
         viewbox-height: root.height / 1px;
         commands: PaperGeometry.quad(
-            root.width / 2, root.height / 2 + PaperTheme.shadow-offset-y,
+            root.cx, root.cy + PaperTheme.shadow-offset-y,
             root.paper-w / 2 + growth, root.paper-h / 2 + growth);
         fill: PaperTheme.shadow-colors[i];
     }
@@ -49,7 +51,7 @@ export component Paper {
         height: root.height;
         viewbox-width: root.width / 1px;
         viewbox-height: root.height / 1px;
-        commands: PaperGeometry.quad(root.width / 2, root.height / 2, root.paper-w / 2, root.paper-h / 2);
+        commands: PaperGeometry.quad(root.cx, root.cy, root.paper-w / 2, root.paper-h / 2);
         fill: PaperTheme.paper-color;
     }
 }
