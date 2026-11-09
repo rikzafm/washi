@@ -4,11 +4,13 @@ import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
 
+import { AllNotesSidebar, AllNotesPaperOverlay, AllNoteItem, PreviewRun } from "all-notes.slint";
+
 export { BlockData, BlockKind, MarkerData, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
-export { AllNotesWindow, AllNoteItem, PreviewRun } from "all-notes.slint";
+export { AllNoteItem, PreviewRun } from "all-notes.slint";
 export { DeleteNoteDialog } from "delete-dialog.slint";
 export { PaletteEntry, PickerPalette } from "color-picker.slint";
 import { Toolbar, ToolbarMetrics, MenuButton } from "toolbar.slint";
@@ -38,6 +40,29 @@ export component NoteWindow inherits Window {
     title: window-title;
     always-on-top: pinned;
     icon: app-icon;
+
+    // All Notes view properties and callbacks
+    in-out property <bool> all-notes-open: false;
+    in-out property <int> all-notes-selected-id: -1;
+    in-out property <bool> all-notes-selected-is-open: false;
+    in-out property <string> all-notes-status-text: "";
+    in-out property <[PreviewRun]> all-notes-status-runs: [];
+    in-out property <[PreviewRun]> all-notes-preview-runs: [];
+    in-out property <int> all-notes-open-count: 0;
+    in-out property <int> all-notes-closed-count: 0;
+    in-out property <[AllNoteItem]> all-notes-open-list: [];
+    in-out property <[AllNoteItem]> all-notes-closed-list: [];
+    in-out property <bool> all-notes-confirming-delete: false;
+
+    callback all-notes-close-view();
+    callback all-notes-select-note(int);
+    callback all-notes-new-note();
+    callback all-notes-open-or-focus();
+    callback all-notes-close-note();
+    callback all-notes-export-note();
+    callback all-notes-request-delete();
+    callback all-notes-cancel-delete();
+    callback all-notes-confirm-delete();
     // The window is the paper plus a fixed transparent margin on every side.
     no-frame: true;
     background: transparent;
@@ -198,12 +223,20 @@ export component NoteWindow inherits Window {
     property <length> paper-bottom: root.height - PaperTheme.margin;
 
     // Shadow and paper (the look: see paper.slint). Behind everything.
-    Paper { width: root.width; height: root.height; }
+    Paper {
+        width: root.width;
+        height: root.height;
+        cx: root.all-notes-open ? 412.1px : root.width / 2;
+        cy: root.all-notes-open ? 311.6px : root.height / 2;
+        paper-w: root.all-notes-open ? 334.8px : root.width - 2 * root.margin;
+        paper-h: root.all-notes-open ? 418.8px : root.height - 2 * root.margin;
+    }
 
     // The whole note: it holds everything, so `has-hover` stays true over the editor and the
     // toolbar too (ADR 0001). The editor ignores the right button, so a right click anywhere
     // reaches this.
     paper-touch := TouchArea {
+        enabled: !root.all-notes-open;
         scroll-event(e) => {
             if (root.max-scroll <= 0px) { return reject; }
             root.scroll-y = max(0px, min(root.max-scroll, root.scroll-y - e.delta-y));
@@ -256,6 +289,7 @@ export component NoteWindow inherits Window {
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             text-view := Rectangle {
+                visible: !root.all-notes-open;
                 x: root.margin;
                 // The tilted paper's top edge rises by half the paper width times sin(tilt) at the left.
                 // The clip starts at the highest point of the tilted top edge so images and text can reach the tilted edge.
@@ -337,6 +371,7 @@ export component NoteWindow inherits Window {
         // Invisible grips for moving and resizing (inside paper-touch, so hovering them keeps the
         // toolbar up). Above the editor; none of them reaches into the text area.
         WindowHandles {
+            visible: !root.all-notes-open;
             x: 0px;
             y: 0px;
             width: root.width;
@@ -349,6 +384,7 @@ export component NoteWindow inherits Window {
 
         // The scrollbar: drawn in the paper's frame (like the toolbar), hugging its right edge.
         scrollbar := ScrollBar {
+            visible: !root.all-notes-open;
             x: 0px;
             y: 0px;
             width: root.width;
@@ -391,7 +427,7 @@ export component NoteWindow inherits Window {
                 if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
             }
             opacity: (paper-touch.has-hover || self.any-pressed || root.dropdown-open) ? 1 : 0;
-            visible: self.opacity > 0;
+            visible: !root.all-notes-open && self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }
 
@@ -403,7 +439,7 @@ export component NoteWindow inherits Window {
             active: root.dropdown-open;
             clicked => { root.open-dropdown(); }
             opacity: (paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open) ? 1 : 0;
-            visible: self.opacity > 0;
+            visible: !root.all-notes-open && self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }
     }
@@ -419,7 +455,7 @@ export component NoteWindow inherits Window {
         paper-w: root.width - 2 * root.margin;
         paper-h: root.height - 2 * root.margin;
         tilt: root.tilt;
-        open: root.picker-open;
+        open: !root.all-notes-open && root.picker-open;
         focus-index: root.picker-focus;
         ink: root.fmt-ink;
         marker: root.fmt-marker;
@@ -430,5 +466,37 @@ export component NoteWindow inherits Window {
     }
 
     // The tapes lie over the paper.
-    Tapes { width: root.width; height: root.height; }
+    Tapes { width: root.width; height: root.height; visible: !root.all-notes-open; }
+
+    if root.all-notes-open : AllNotesSidebar {
+        selected-note-id: root.all-notes-selected-id;
+        open-count: root.all-notes-open-count;
+        closed-count: root.all-notes-closed-count;
+        open-notes: root.all-notes-open-list;
+        closed-notes: root.all-notes-closed-list;
+        select-note(id) => {
+            root.all-notes-confirming-delete = false;
+            root.all-notes-select-note(id);
+        }
+        new-note => {
+            root.all-notes-confirming-delete = false;
+            root.all-notes-new-note();
+        }
+    }
+
+    if root.all-notes-open : AllNotesPaperOverlay {
+        selected-note-id: root.all-notes-selected-id;
+        selected-note-open: root.all-notes-selected-is-open;
+        confirming-delete <=> root.all-notes-confirming-delete;
+        status-runs: root.all-notes-status-runs;
+        preview-runs: root.all-notes-preview-runs;
+        show-preview-runs: true;
+        close-view => { root.all-notes-close-view(); }
+        open-or-focus-note => { root.all-notes-open-or-focus(); }
+        close-note => { root.all-notes-close-note(); }
+        export-note => { root.all-notes-export-note(); }
+        request-delete => { root.all-notes-request-delete(); }
+        cancel-delete => { root.all-notes-cancel-delete(); }
+        confirm-delete => { root.all-notes-confirm-delete(); }
+    }
 }

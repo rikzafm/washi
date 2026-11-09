@@ -443,14 +443,14 @@ impl App {
     /// Set the inline delete confirmation state in All Notes (for testing).
     pub fn set_all_notes_confirming_delete(&self, confirming: bool) {
         if let Some(v) = self.all_notes() {
-            v.ui().set_confirming_delete(confirming);
+            v.set_confirming_delete(confirming);
         }
     }
 
     /// Select note `id` in the open All Notes window and reset inline delete confirmation.
     pub fn select_all_notes_note(&self, id: NoteId) {
         if let Some(v) = self.all_notes() {
-            v.ui().set_confirming_delete(false);
+            v.set_confirming_delete(false);
             let rows = self.all_notes_rows();
             let now_ms = self.0.env.clock.unix_millis();
             v.refresh(&rows, Some(id), now_ms);
@@ -460,7 +460,7 @@ impl App {
     /// Create a new note from the All Notes window, refresh All Notes, and select the new note.
     pub fn all_notes_new_note(&self) {
         if let Some(v) = self.all_notes() {
-            v.ui().set_confirming_delete(false);
+            v.set_confirming_delete(false);
         }
         let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
         let new_id = self.create_new_note(from);
@@ -471,7 +471,7 @@ impl App {
     pub fn all_notes_open_or_focus(&self) {
         let Some(selected_id) = self.all_notes_selected_id() else { return };
         if let Some(v) = self.all_notes() {
-            v.ui().set_confirming_delete(false);
+            v.set_confirming_delete(false);
         }
         self.activate_note(selected_id);
     }
@@ -480,7 +480,7 @@ impl App {
     pub fn all_notes_close_note(&self) {
         let Some(selected_id) = self.all_notes_selected_id() else { return };
         if let Some(v) = self.all_notes() {
-            v.ui().set_confirming_delete(false);
+            v.set_confirming_delete(false);
         }
         if self.with_note(selected_id, |_| ()).is_some() {
             self.close_note(selected_id);
@@ -634,7 +634,7 @@ impl App {
             Ok(view) => {
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_select_note(move |selected_id| {
+                    view.ui().on_all_notes_select_note(move |selected_id| {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).select_all_notes_note(selected_id as NoteId);
                         }
@@ -642,7 +642,7 @@ impl App {
                 }
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_new_note(move || {
+                    view.ui().on_all_notes_new_note(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_new_note();
                         }
@@ -650,7 +650,7 @@ impl App {
                 }
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_open_or_focus_note(move || {
+                    view.ui().on_all_notes_open_or_focus(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_open_or_focus();
                         }
@@ -658,7 +658,7 @@ impl App {
                 }
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_close_note(move || {
+                    view.ui().on_all_notes_close_note(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_close_note();
                         }
@@ -666,7 +666,7 @@ impl App {
                 }
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_export_note(move || {
+                    view.ui().on_all_notes_export_note(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_export_note();
                         }
@@ -674,7 +674,7 @@ impl App {
                 }
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_request_delete(move || {
+                    view.ui().on_all_notes_request_delete(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_request_delete();
                         }
@@ -682,7 +682,7 @@ impl App {
                 }
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_cancel_delete(move || {
+                    view.ui().on_all_notes_cancel_delete(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_cancel_delete();
                         }
@@ -690,7 +690,7 @@ impl App {
                 }
                 {
                     let weak = Rc::downgrade(&self.0);
-                    view.ui().on_confirm_delete(move || {
+                    view.ui().on_all_notes_confirm_delete(move || {
                         if let Some(inner) = weak.upgrade() {
                             App(inner).all_notes_confirm_delete();
                         }

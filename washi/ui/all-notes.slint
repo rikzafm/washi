@@ -131,6 +131,25 @@ export component AllNotesSidebar inherits Rectangle {
         sn: Math.sin(-1.0deg),
     };
 
+    // Backing: the mockup's slate desk color behind the sidebar column, so the dark text reads on
+    // any wallpaper (the window itself stays transparent). Tilted with the sidebar.
+    TRect {
+        f: {
+            w: 603.0,
+            h: 625.0,
+            cx: 124.8,
+            cy: 345.0,
+            cs: Math.cos(-1.0deg),
+            sn: Math.sin(-1.0deg),
+        };
+        u0: -112.0;
+        v0: -262.0;
+        w: 224.0;
+        h: 524.0;
+        r: 18.0;
+        fill: #D6DBE2;
+    }
+
     if root.max-scroll > 0.0 : TouchArea {
         x: 24px;
         y: 100px;
@@ -260,6 +279,25 @@ export component AllNotesPaperOverlay inherits Rectangle {
     callback request-delete();
     callback cancel-delete();
     callback confirm-delete();
+    callback close-view();
+
+    FocusScope {
+        width: 100%;
+        height: 100%;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                if (root.confirming-delete) {
+                    root.confirming-delete = false;
+                    root.cancel-delete();
+                } else {
+                    root.close-view();
+                }
+                return accept;
+            }
+            reject
+        }
+    }
 
     property <Frame> paper-frame: {
         w: 603.0,

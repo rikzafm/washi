@@ -2,11 +2,11 @@
 
 use crate::document::{Document, Kind, PALETTE, Style as DocStyle};
 use crate::dropdown::{extract_title_and_preview, format_relative_timestamp};
-use crate::note_window::{AllNoteItem, AllNotesWindow, PreviewRun};
+use crate::note_window::{AllNoteItem, NoteWindow, PreviewRun};
 use crate::platform::NoteId;
-use crate::storage::AllNoteRow;
+use crate::storage::{AllNoteRow, Geometry};
 use crate::textflow;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -17,7 +17,9 @@ pub const PREVIEW_PAPER_CENTER: (f64, f64) = (412.1, 311.6);
 pub const PREVIEW_PAPER_SIZE: (f64, f64) = (334.8, 418.8);
 pub const PREVIEW_TILT_DEG: f64 = 1.5;
 const MAX_STEP_WIDTH: f64 = 28.0;
-const MAX_PREVIEW_V: f64 = 365.0;
+/// Bottom of the text area in the paper's frame: the mockup's 56 px toolbar strip, its 6 px
+/// margin and the 14 px gap above it, at 0.6975 scale (600 - 76 = 524 -> 365.5).
+const MAX_PREVIEW_V: f64 = 365.5;
 
 struct ViewState {
     rows: RefCell<Vec<AllNoteRow>>,
@@ -82,6 +84,25 @@ fn wrap_text_lines(text: &str, size: f64, max_width: f64) -> Vec<String> {
     let mut current_w = 0.0;
 
     for word in text.split(' ') {
+        // A word wider than a whole line (a path, a hash) is broken by characters, so it wraps
+        // inside the paper instead of running past its edge.
+        if textflow::line_width(word, size) > max_width + 1e-6 {
+            if !current.is_empty() {
+                lines.push(std::mem::take(&mut current));
+            }
+            let mut chunk = String::new();
+            for ch in word.chars() {
+                chunk.push(ch);
+                if textflow::line_width(&chunk, size) > max_width + 1e-6 && chunk.chars().count() > 1 {
+                    chunk.pop();
+                    lines.push(std::mem::take(&mut chunk));
+                    chunk.push(ch);
+                }
+            }
+            current = chunk;
+            current_w = textflow::line_width(&current, size);
+            continue;
+        }
         let space_w = if current.is_empty() {
             0.0
         } else {
@@ -160,7 +181,8 @@ pub fn layout_preview_runs(content: &str) -> Vec<PreviewRun> {
 
         let lines = wrap_text_lines(&block_text, size, avail);
         for line in lines {
-            if v >= MAX_PREVIEW_V {
+            // Clip at the toolbar strip: a line that would not fit above it is not drawn.
+            if v + pitch > MAX_PREVIEW_V {
                 return runs;
             }
             if !line.is_empty() {
@@ -184,11 +206,11 @@ pub fn layout_preview_runs(content: &str) -> Vec<PreviewRun> {
     runs
 }
 
-fn apply_selected_note(ui: &AllNotesWindow, rows: &[AllNoteRow], selected_id: Option<NoteId>, now_ms: i64) {
+fn apply_selected_note(ui: &NoteWindow, rows: &[AllNoteRow], selected_id: Option<NoteId>, now_ms: i64) {
     match selected_id.and_then(|id| rows.iter().find(|r| r.id == id)) {
         Some(row) => {
-            ui.set_selected_note_id(row.id as i32);
-            ui.set_selected_note_open(row.is_open);
+            ui.set_all_notes_selected_id(row.id as i32);
+            ui.set_all_notes_selected_is_open(row.is_open);
             let status = format_status_line(row, now_ms);
             let status_runs = layout_line_runs(
                 &status,
@@ -203,41 +225,70 @@ fn apply_selected_note(ui: &AllNotesWindow, rows: &[AllNoteRow], selected_id: Op
                 },
             );
             let preview_runs = layout_preview_runs(&row.content);
-            ui.set_status_text(status.into());
-            ui.set_status_runs(slint::ModelRc::from(Rc::new(slint::VecModel::from(status_runs))));
-            ui.set_preview_runs(slint::ModelRc::from(Rc::new(slint::VecModel::from(preview_runs))));
+            ui.set_all_notes_status_text(status.into());
+            ui.set_all_notes_status_runs(slint::ModelRc::from(Rc::new(slint::VecModel::from(status_runs))));
+            ui.set_all_notes_preview_runs(slint::ModelRc::from(Rc::new(slint::VecModel::from(preview_runs))));
         }
         None => {
-            ui.set_selected_note_id(-1);
-            ui.set_selected_note_open(false);
-            ui.set_status_text("".into());
-            ui.set_status_runs(slint::ModelRc::default());
-            ui.set_preview_runs(slint::ModelRc::default());
+            ui.set_all_notes_selected_id(-1);
+            ui.set_all_notes_selected_is_open(false);
+            ui.set_all_notes_status_text("".into());
+            ui.set_all_notes_status_runs(slint::ModelRc::default());
+            ui.set_all_notes_preview_runs(slint::ModelRc::default());
         }
     }
 }
 
 pub struct AllNotesView {
-    ui: AllNotesWindow,
+    host_note_id: NoteId,
+    ui: NoteWindow,
     state: Rc<ViewState>,
+    saved_geometry: Geometry,
+    host_still_open: Cell<bool>,
+    selected_note_id: Cell<NoteId>,
 }
 
 impl AllNotesView {
+    pub fn attach(
+        host_note_id: NoteId,
+        ui: NoteWindow,
+        saved_geometry: Geometry,
+        rows: &[AllNoteRow],
+        now_ms: i64,
+    ) -> Self {
+        let state = Rc::new(ViewState {
+            rows: RefCell::new(rows.to_vec()),
+            now_ms: Cell::new(now_ms),
+        });
+
+        ui.set_all_notes_open(true);
+        let view = Self {
+            host_note_id,
+            ui,
+            state,
+            saved_geometry,
+            host_still_open: Cell::new(true),
+            selected_note_id: Cell::new(host_note_id),
+        };
+        view.refresh(rows, Some(host_note_id), now_ms);
+        view
+    }
+
     pub fn open(
         initial_selected_id: NoteId,
         rows: &[AllNoteRow],
         now_ms: i64,
         on_close: Rc<dyn Fn()>,
     ) -> Result<Self, slint::PlatformError> {
-        let ui = AllNotesWindow::new()?;
-        let state = Rc::new(ViewState {
-            rows: RefCell::new(rows.to_vec()),
-            now_ms: Cell::new(now_ms),
-        });
+        let ui = NoteWindow::new()?;
+        ui.window().set_size(slint::LogicalSize::new(ALL_NOTES_WIDTH, ALL_NOTES_HEIGHT));
+        ui.set_all_notes_open(true);
+        let g = Geometry { x: 0, y: 0, w: 447, h: 468 };
+        let view = Self::attach(initial_selected_id, ui.as_weak().upgrade().unwrap(), g, rows, now_ms);
 
         {
             let on_close = on_close.clone();
-            ui.on_close_window(move || {
+            ui.on_all_notes_close_view(move || {
                 on_close();
             });
         }
@@ -250,10 +301,10 @@ impl AllNotesView {
         }
         {
             let weak_ui = ui.as_weak();
-            let state = state.clone();
-            ui.on_select_note(move |id| {
+            let state = view.state.clone();
+            ui.on_all_notes_select_note(move |id| {
                 if let Some(ui) = weak_ui.upgrade() {
-                    ui.set_confirming_delete(false);
+                    ui.set_all_notes_confirming_delete(false);
                     apply_selected_note(
                         &ui,
                         &state.rows.borrow(),
@@ -264,14 +315,29 @@ impl AllNotesView {
             });
         }
 
-        let view = Self { ui, state };
-        view.refresh(rows, Some(initial_selected_id), now_ms);
         view.ui.show()?;
         Ok(view)
     }
 
+    pub fn host_note_id(&self) -> NoteId {
+        self.host_note_id
+    }
+
+    pub fn saved_geometry(&self) -> Geometry {
+        self.saved_geometry
+    }
+
+    pub fn host_still_open(&self) -> bool {
+        self.host_still_open.get()
+    }
+
+    pub fn set_host_still_open(&self, open: bool) {
+        self.host_still_open.set(open);
+    }
+
     pub fn select_note(&self, id: NoteId) {
-        self.ui.set_confirming_delete(false);
+        self.selected_note_id.set(id);
+        self.ui.set_all_notes_confirming_delete(false);
         apply_selected_note(
             &self.ui,
             &self.state.rows.borrow(),
@@ -281,43 +347,43 @@ impl AllNotesView {
     }
 
     pub fn invoke_select_note(&self, id: NoteId) {
-        self.ui.set_confirming_delete(false);
-        self.ui.invoke_select_note(id as i32);
+        self.ui.set_all_notes_confirming_delete(false);
+        self.ui.invoke_all_notes_select_note(id as i32);
     }
 
     pub fn invoke_new_note(&self) {
-        self.ui.set_confirming_delete(false);
-        self.ui.invoke_new_note();
+        self.ui.set_all_notes_confirming_delete(false);
+        self.ui.invoke_all_notes_new_note();
     }
 
     pub fn invoke_open_or_focus_note(&self) {
-        self.ui.set_confirming_delete(false);
-        self.ui.invoke_open_or_focus_note();
+        self.ui.set_all_notes_confirming_delete(false);
+        self.ui.invoke_all_notes_open_or_focus();
     }
 
     pub fn invoke_close_note(&self) {
-        self.ui.set_confirming_delete(false);
-        self.ui.invoke_close_note();
+        self.ui.set_all_notes_confirming_delete(false);
+        self.ui.invoke_all_notes_close_note();
     }
 
     pub fn invoke_export_note(&self) {
-        self.ui.invoke_export_note();
+        self.ui.invoke_all_notes_export_note();
     }
 
     pub fn invoke_request_delete(&self) {
         if self.selected_note_id().is_some() {
-            self.ui.set_confirming_delete(true);
-            self.ui.invoke_request_delete();
+            self.ui.set_all_notes_confirming_delete(true);
+            self.ui.invoke_all_notes_request_delete();
         }
     }
 
     pub fn invoke_cancel_delete(&self) {
-        self.ui.set_confirming_delete(false);
-        self.ui.invoke_cancel_delete();
+        self.ui.set_all_notes_confirming_delete(false);
+        self.ui.invoke_all_notes_cancel_delete();
     }
 
     pub fn invoke_confirm_delete(&self) {
-        self.ui.invoke_confirm_delete();
+        self.ui.invoke_all_notes_confirm_delete();
     }
 
     pub fn refresh(&self, rows: &[AllNoteRow], preferred_selected_id: Option<NoteId>, now_ms: i64) {
@@ -341,12 +407,12 @@ impl AllNotesView {
             }
         }
 
-        self.ui.set_open_count(open_items.len() as i32);
-        self.ui.set_closed_count(closed_items.len() as i32);
+        self.ui.set_all_notes_open_count(open_items.len() as i32);
+        self.ui.set_all_notes_closed_count(closed_items.len() as i32);
         self.ui
-            .set_open_notes(slint::ModelRc::from(Rc::new(slint::VecModel::from(open_items))));
+            .set_all_notes_open_list(slint::ModelRc::from(Rc::new(slint::VecModel::from(open_items))));
         self.ui
-            .set_closed_notes(slint::ModelRc::from(Rc::new(slint::VecModel::from(closed_items))));
+            .set_all_notes_closed_list(slint::ModelRc::from(Rc::new(slint::VecModel::from(closed_items))));
 
         let current_selected = self.selected_note_id();
         let target_id = preferred_selected_id
@@ -354,47 +420,67 @@ impl AllNotesView {
             .or_else(|| current_selected.filter(|&id| rows.iter().any(|r| r.id == id)))
             .or_else(|| rows.first().map(|r| r.id));
 
+        if let Some(id) = target_id {
+            self.selected_note_id.set(id);
+        }
         apply_selected_note(&self.ui, rows, target_id, now_ms);
     }
 
-    pub fn ui(&self) -> &AllNotesWindow {
+    pub fn ui(&self) -> &NoteWindow {
         &self.ui
     }
 
     pub fn selected_note_id(&self) -> Option<NoteId> {
-        let id = self.ui.get_selected_note_id();
+        let id = self.ui.get_all_notes_selected_id();
         (id >= 0).then_some(id as NoteId)
     }
 
+    pub fn is_selected_note_open(&self) -> bool {
+        self.ui.get_all_notes_selected_is_open()
+    }
+
+    pub fn is_confirming_delete(&self) -> bool {
+        self.ui.get_all_notes_confirming_delete()
+    }
+
+    pub fn set_confirming_delete(&self, confirming: bool) {
+        self.ui.set_all_notes_confirming_delete(confirming);
+    }
+
     pub fn open_count(&self) -> usize {
-        self.ui.get_open_count().max(0) as usize
+        self.ui.get_all_notes_open_count().max(0) as usize
     }
 
     pub fn closed_count(&self) -> usize {
-        self.ui.get_closed_count().max(0) as usize
+        self.ui.get_all_notes_closed_count().max(0) as usize
+    }
+
+    pub fn open_items(&self) -> Vec<AllNoteItem> {
+        self.ui.get_all_notes_open_list().iter().collect()
+    }
+
+    pub fn closed_items(&self) -> Vec<AllNoteItem> {
+        self.ui.get_all_notes_closed_list().iter().collect()
     }
 
     pub fn open_notes(&self) -> Vec<AllNoteItem> {
-        use slint::Model;
-        self.ui.get_open_notes().iter().collect()
+        self.open_items()
     }
 
     pub fn closed_notes(&self) -> Vec<AllNoteItem> {
-        use slint::Model;
-        self.ui.get_closed_notes().iter().collect()
+        self.closed_items()
     }
 
     pub fn status_text(&self) -> String {
-        self.ui.get_status_text().to_string()
+        self.ui.get_all_notes_status_text().to_string()
     }
 
     pub fn preview_runs(&self) -> Vec<PreviewRun> {
-        use slint::Model;
-        self.ui.get_preview_runs().iter().collect()
+        self.ui.get_all_notes_preview_runs().iter().collect()
     }
 
     pub fn confirming_delete(&self) -> bool {
-        self.ui.get_confirming_delete()
+        self.ui.get_all_notes_confirming_delete()
     }
 
     pub fn close(&self) {
@@ -413,12 +499,6 @@ impl AllNotesView {
 
     pub fn dispatch_event(&self, event: slint::platform::WindowEvent) {
         self.ui.window().dispatch_event(event);
-    }
-}
-
-impl Drop for AllNotesView {
-    fn drop(&mut self) {
-        let _ = self.ui.hide();
     }
 }
 
@@ -482,21 +562,21 @@ mod tests {
         let view = AllNotesView::open(1, &rows, 1_000, Rc::new(|| {})).expect("AllNotesView::open");
 
         assert_eq!(view.selected_note_id(), Some(1));
-        assert!(view.ui().get_selected_note_open());
+        assert!(view.is_selected_note_open());
 
-        view.ui().set_confirming_delete(true);
+        view.set_confirming_delete(true);
         assert!(view.confirming_delete());
 
         // Select a closed note (id = 3)
         view.invoke_select_note(3);
         assert_eq!(view.selected_note_id(), Some(3));
-        assert!(!view.ui().get_selected_note_open());
+        assert!(!view.is_selected_note_open());
         assert!(!view.confirming_delete(), "selecting a note resets confirming-delete");
 
         // Select an open note (id = 2)
         view.invoke_select_note(2);
         assert_eq!(view.selected_note_id(), Some(2));
-        assert!(view.ui().get_selected_note_open());
+        assert!(view.is_selected_note_open());
     }
 
     #[test]
@@ -507,11 +587,11 @@ mod tests {
 
         let new_called = Rc::new(Cell::new(false));
         let nc = new_called.clone();
-        view.ui().on_new_note(move || {
+        view.ui().on_all_notes_new_note(move || {
             nc.set(true);
         });
 
-        view.ui().set_confirming_delete(true);
+        view.set_confirming_delete(true);
         view.invoke_new_note();
         assert!(new_called.get());
         assert!(!view.confirming_delete());
@@ -587,6 +667,20 @@ mod tests {
     }
 
     #[test]
+    fn long_unbroken_words_wrap_inside_the_paper_and_stop_above_the_toolbar_strip() {
+        let long = "libopenssl_sys-bfe5c79ac9ec7be.rlib(libcrypto-lib-ct_sct.obj) : warning LNK4099: PDB 'ossl_static.pdb' was not found";
+        let content = format!("# Title\n{}\n{}\n{}\n{}", long, long, long, long);
+        let runs = layout_preview_runs(&content);
+        assert!(!runs.is_empty());
+        for r in &runs {
+            // every piece ends inside the paper's text column (title 285 wide, body 275 wide)
+            assert!((r.u + r.width) as f64 <= 24.8 + 290.0 + 0.5, "piece {:?} runs past the paper", r.text);
+            // and its line fits above the toolbar strip
+            assert!(r.v as f64 + 22.0 <= MAX_PREVIEW_V + 1e-3, "line at v={} overlaps the toolbar", r.v);
+        }
+    }
+
+    #[test]
     fn sidebar_renders_headers_tilted_selection_pill_and_handles_row_and_new_note_clicks() {
         let win = test_platform();
 
@@ -634,9 +728,9 @@ mod tests {
             pill_px.r >= 250 && pill_px.g >= 250 && pill_px.b >= 250,
             "selected row 0 should have white pill at (160, 234), got {pill_px:?}"
         );
-        // Unselected row 1 ("Grocery run") at (160, 276) has desk background (#D6DBE2 = 214, 219, 226)
+        // Unselected row 1 ("Grocery run") at (160, 276) sits on the slate backing (#D6DBE2)
         let desk_px = px(&buf, 160, 276);
-        assert_eq!((desk_px.r, desk_px.g, desk_px.b), (214, 219, 226));
+        assert_eq!((desk_px.r, desk_px.g, desk_px.b), (0xD6, 0xDB, 0xE2));
 
         // 6. "+ New note" button at center (83.5, 498.5) has dark pill (#2B2F36 = 43, 47, 54)
         let has_dark_pill = (488..=508).any(|y| (45..=120).any(|x| {
@@ -646,7 +740,7 @@ mod tests {
         assert!(has_dark_pill, "+ New note button should render #2B2F36 dark pill");
 
         // 7. Clicking closed row "Meeting ideas" at (80, 340) selects note 3 and resets confirming-delete
-        view.ui().set_confirming_delete(true);
+        view.set_confirming_delete(true);
         let click = |x: f32, y: f32| {
             let position = slint::LogicalPosition::new(x, y);
             let button = slint::platform::PointerEventButton::Left;
@@ -668,10 +762,10 @@ mod tests {
         // 8. Clicking "+ New note" button at (83.5, 498.5) invokes new-note callback
         let new_clicked = Rc::new(Cell::new(false));
         let nc = new_clicked.clone();
-        view.ui().on_new_note(move || {
+        view.ui().on_all_notes_new_note(move || {
             nc.set(true);
         });
-        view.ui().set_confirming_delete(true);
+        view.set_confirming_delete(true);
         click(83.5, 498.5);
         assert!(new_clicked.get(), "clicking + New note button should fire new-note callback");
         assert!(!view.confirming_delete());
@@ -827,27 +921,27 @@ mod tests {
 
         {
             let c = open_called.clone();
-            view.ui().on_open_or_focus_note(move || c.set(c.get() + 1));
+            view.ui().on_all_notes_open_or_focus(move || c.set(c.get() + 1));
         }
         {
             let c = close_called.clone();
-            view.ui().on_close_note(move || c.set(c.get() + 1));
+            view.ui().on_all_notes_close_note(move || c.set(c.get() + 1));
         }
         {
             let c = export_called.clone();
-            view.ui().on_export_note(move || c.set(c.get() + 1));
+            view.ui().on_all_notes_export_note(move || c.set(c.get() + 1));
         }
         {
             let c = req_del_called.clone();
-            view.ui().on_request_delete(move || c.set(c.get() + 1));
+            view.ui().on_all_notes_request_delete(move || c.set(c.get() + 1));
         }
         {
             let c = cancel_del_called.clone();
-            view.ui().on_cancel_delete(move || c.set(c.get() + 1));
+            view.ui().on_all_notes_cancel_delete(move || c.set(c.get() + 1));
         }
         {
             let c = confirm_del_called.clone();
-            view.ui().on_confirm_delete(move || c.set(c.get() + 1));
+            view.ui().on_all_notes_confirm_delete(move || c.set(c.get() + 1));
         }
 
         click(279.0, 489.0);
