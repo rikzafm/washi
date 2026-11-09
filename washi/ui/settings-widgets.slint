@@ -1,0 +1,177 @@
+// Controls shared by the Settings tabs: rows on the tilted Paper, the switch, the pill button, the
+// stat tile and the section heading.
+
+import { Frame, Tilt, TRect } from "toolbar.slint";
+
+/// A row on the tilted Paper: label (and optional hint) at the left inset, the control at the right
+/// inset, a hairline along the bottom. `v0` is the row's top measured from the Paper's top edge;
+/// `pw` / `ph` are the Paper's size (the frame `f` is the whole window's).
+export component SettingRow inherits Rectangle {
+    in property <Frame> f;
+    in property <float> pw;
+    in property <float> ph;
+    in property <float> v0;
+    in property <float> h: 64;
+    in property <string> label;
+    in property <string> hint;
+    in property <bool> rule: true;
+    in property <float> inset: 36;
+    in property <length> control-w: 52px;
+    in property <length> control-h: 30px;
+    property <float> top: -root.ph / 2.0 + root.v0;
+    property <float> mid: root.top + root.h / 2.0;
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+
+    Text {
+        x: Tilt.x(root.f, -root.pw / 2.0 + root.inset, root.mid - (root.hint == "" ? 15.0 : 26.0)) * 1px;
+        y: Tilt.y(root.f, -root.pw / 2.0 + root.inset, root.mid - (root.hint == "" ? 15.0 : 26.0)) * 1px;
+        text: root.label;
+        font-family: "Shadows Into Light";
+        font-size: 24px;
+        color: #2B2F36;
+    }
+
+    if root.hint != "" : Text {
+        x: Tilt.x(root.f, -root.pw / 2.0 + root.inset, root.mid + 2.0) * 1px;
+        y: Tilt.y(root.f, -root.pw / 2.0 + root.inset, root.mid + 2.0) * 1px;
+        text: root.hint;
+        font-family: "Shadows Into Light";
+        font-size: 18px;
+        color: #5B616B;
+    }
+
+    // The control: its right edge sits at the right inset, centred on the row.
+    Rectangle {
+        x: Tilt.x(root.f, root.pw / 2.0 - root.inset, root.mid) * 1px - root.control-w;
+        y: Tilt.y(root.f, root.pw / 2.0 - root.inset, root.mid) * 1px - root.control-h / 2;
+        width: root.control-w;
+        height: root.control-h;
+        @children
+    }
+
+    if root.rule : TRect {
+        f: root.f;
+        u0: -root.pw / 2.0 + root.inset;
+        v0: root.top + root.h - 1.0;
+        w: root.pw - 2.0 * root.inset;
+        h: 1.5;
+        fill: #C9CCD2;
+    }
+}
+
+/// The design's toggle: a 52x30 rounded track and a 20px knob. Level (not tilted): it is small.
+export component Switch inherits Rectangle {
+    in property <bool> checked;
+    in property <string> accessible-name;
+    callback toggled();
+    width: 52px;
+    height: 30px;
+    border-radius: 10px;
+    background: root.checked ? #2B2F36 : #E8E8E6;
+    border-width: root.checked ? 0px : 1.5px;
+    border-color: #8B919A;
+    accessible-role: switch;
+    accessible-checked: root.checked;
+    accessible-label: root.accessible-name;
+
+    Rectangle {
+        x: root.checked ? 27px : 5px;
+        y: 5px;
+        width: 20px;
+        height: 20px;
+        border-radius: 7px;
+        background: root.checked ? #FFFFFD : #8B919A;
+        animate x { duration: 150ms; easing: ease-out; }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(); }
+    }
+}
+
+/// A pill button: #F0F0EE, 44px tall, handwriting label.
+export component PillButton inherits Rectangle {
+    in property <string> text;
+    in property <string> accessible-name;
+    callback clicked();
+    width: 80px;
+    height: 44px;
+    border-radius: 10.8px;
+    background: area.pressed ? #E2E2DF : #F0F0EE;
+    accessible-role: button;
+    accessible-label: root.accessible-name;
+
+    Text {
+        text: root.text;
+        font-family: "Shadows Into Light";
+        font-size: 21px;
+        color: #2B2F36;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// A Resource use tile: a value over its caption.
+export component StatTile inherits Rectangle {
+    in property <string> value;
+    in property <string> caption;
+    background: #F0F0EE;
+    border-radius: 10.8px;
+    accessible-role: text;
+    accessible-label: root.caption + ": " + root.value;
+
+    Text {
+        x: 0px;
+        y: 10px;
+        width: 100%;
+        text: root.value;
+        font-family: "Shadows Into Light";
+        font-size: 26px;
+        color: #2B2F36;
+        horizontal-alignment: center;
+    }
+
+    Text {
+        x: 0px;
+        y: 44px;
+        width: 100%;
+        text: root.caption;
+        font-family: "Shadows Into Light";
+        font-size: 17px;
+        color: #5B616B;
+        horizontal-alignment: center;
+    }
+}
+
+/// A section heading ("Storage", "Resource use") at the left inset.
+export component SectionHeading inherits Rectangle {
+    in property <Frame> f;
+    in property <float> pw;
+    in property <float> ph;
+    in property <float> v0;
+    in property <string> text;
+    in property <float> inset: 36;
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+
+    Text {
+        x: Tilt.x(root.f, -root.pw / 2.0 + root.inset, -root.ph / 2.0 + root.v0) * 1px;
+        y: Tilt.y(root.f, -root.pw / 2.0 + root.inset, -root.ph / 2.0 + root.v0) * 1px;
+        text: root.text;
+        font-family: "Shadows Into Light";
+        font-size: 26px;
+        font-weight: 700;
+        color: #2B2F36;
+    }
+}

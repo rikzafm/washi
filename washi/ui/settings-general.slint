@@ -1,0 +1,110 @@
+// Settings › General: Start with Windows, Always on top (the default for new notes), the folders and
+// Resource use. Sizes come from `SettingsMetrics` through the properties below (so this file does not
+// import settings.slint).
+
+import { Frame, Tilt } from "toolbar.slint";
+import { SettingRow, Switch, PillButton, StatTile, SectionHeading } from "settings-widgets.slint";
+
+export component GeneralTab inherits Rectangle {
+    in property <Frame> f;
+    /// The Paper's size, and the first row's top measured from the Paper's top edge.
+    in property <float> pw;
+    in property <float> ph;
+    in property <float> top;
+    in property <float> row-h;
+    in property <float> gap;
+    in property <float> heading-h;
+    in property <float> tile-h;
+    in property <bool> start-with-windows;
+    in property <bool> new-notes-on-top;
+    in property <string> install-dir;
+    in property <string> data-dir;
+    in property <string> stat-memory;
+    in property <string> stat-cpu;
+    in property <string> stat-db;
+    in property <string> stat-notes;
+    callback toggle-startup();
+    callback toggle-on-top();
+    callback open-install-dir();
+    callback open-data-dir();
+
+    property <float> storage-v: root.top + 2 * root.row-h + root.gap;
+    property <float> resource-v: root.storage-v + root.heading-h + 2 * root.row-h + root.gap;
+    property <float> tiles-v: root.resource-v + root.heading-h;
+
+    x: 0px;
+    y: 0px;
+    width: 100%;
+    height: 100%;
+
+    SettingRow {
+        f: root.f; pw: root.pw; ph: root.ph;
+        v0: root.top; h: root.row-h;
+        label: "Start with Windows";
+        hint: "Open notes return after you sign in";
+        Switch {
+            checked: root.start-with-windows;
+            accessible-name: "Start with Windows";
+            toggled => { root.toggle-startup(); }
+        }
+    }
+
+    SettingRow {
+        f: root.f; pw: root.pw; ph: root.ph;
+        v0: root.top + root.row-h; h: root.row-h;
+        rule: false;
+        label: "Always on top";
+        hint: "New notes start above other windows";
+        Switch {
+            checked: root.new-notes-on-top;
+            accessible-name: "Always on top for new notes";
+            toggled => { root.toggle-on-top(); }
+        }
+    }
+
+    SectionHeading { f: root.f; pw: root.pw; ph: root.ph; v0: root.storage-v; text: "Storage"; }
+
+    SettingRow {
+        f: root.f; pw: root.pw; ph: root.ph;
+        v0: root.storage-v + root.heading-h; h: root.row-h;
+        control-w: 80px; control-h: 44px;
+        label: "Installed folder";
+        hint: root.install-dir;
+        PillButton {
+            text: "Open";
+            accessible-name: "Open installed folder";
+            clicked => { root.open-install-dir(); }
+        }
+    }
+
+    SettingRow {
+        f: root.f; pw: root.pw; ph: root.ph;
+        v0: root.storage-v + root.heading-h + root.row-h; h: root.row-h;
+        control-w: 80px; control-h: 44px;
+        rule: false;
+        label: "Database folder";
+        hint: root.data-dir;
+        PillButton {
+            text: "Open";
+            accessible-name: "Open database folder";
+            clicked => { root.open-data-dir(); }
+        }
+    }
+
+    SectionHeading { f: root.f; pw: root.pw; ph: root.ph; v0: root.resource-v; text: "Resource use"; }
+
+    // Four level tiles in a row, each placed on the tilt by its top-left corner.
+    for t[i] in [
+        { value: root.stat-memory, caption: "Memory" },
+        { value: root.stat-cpu, caption: "CPU" },
+        { value: root.stat-db, caption: "Database" },
+        { value: root.stat-notes, caption: "Open notes" },
+    ] : StatTile {
+        value: t.value;
+        caption: t.caption;
+        x: Tilt.x(root.f, -root.pw / 2.0 + 36.0 + i * 114.0, -root.ph / 2.0 + root.tiles-v) * 1px;
+        y: Tilt.y(root.f, -root.pw / 2.0 + 36.0 + i * 114.0, -root.ph / 2.0 + root.tiles-v) * 1px;
+        width: 106px;
+        height: root.tile-h * 1px;
+    }
+}

@@ -11,6 +11,8 @@
 
 pub mod anim;
 pub mod shortcuts;
+pub mod general;
+pub mod stats;
 
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
@@ -38,6 +40,8 @@ pub struct Hooks {
     pub now: Rc<dyn Fn() -> Duration>,
     /// Move and resize a native window in one call (physical px); false if the platform cannot.
     pub set_bounds: Rc<dyn Fn(Option<isize>, i32, i32, i32, i32) -> bool>,
+    /// What the General tab reads and changes.
+    pub general: general::GeneralDeps,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +96,7 @@ pub struct SettingsView {
     tab_to: Cell<RectF>,
     /// The tab the page is showing or heading to.
     tab: Cell<i32>,
+    general: Rc<general::General>,
 }
 
 impl SettingsView {
@@ -102,6 +107,7 @@ impl SettingsView {
         ui.set_pinned(pinned);
         ui.set_shortcuts(shortcuts::model());
         let now = (hooks.now)();
+        let general = general::General::new(&ui, hooks.general.clone(), hooks.now.clone());
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,
             hooks,
@@ -119,6 +125,7 @@ impl SettingsView {
             tab_from: Cell::new(RectF::default()),
             tab_to: Cell::new(RectF::default()),
             tab: Cell::new(0),
+            general,
         });
         view.wire(Rc::downgrade(&view));
         view.morph_to.set(view.open_paper());
@@ -205,6 +212,19 @@ impl SettingsView {
         self.tab.set(to);
         *self.phase.borrow_mut() = Phase::Tab { h: Tween::new(0.0, 1.0, now, TAB_SWITCH, Ease::InOutCubic), fade_start, to_tab: to, swapped: false };
         self.start_ticking();
+        self.sync_general();
+    }
+
+    /// Whether the stats refresh is running (only while General is showing).
+    pub fn is_refreshing_stats(&self) -> bool {
+        self.general.is_refreshing()
+    }
+
+    /// Resource use refreshes only while the page is at rest or switching tabs and General is the
+    /// tab the Sidebar lights: not mid-open, not once closing has begun, not on another tab.
+    fn sync_general(&self) {
+        let page_up = matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. });
+        self.general.set_showing(page_up && self.tab.get() == 0);
     }
 
     fn now(&self) -> Duration {
@@ -308,6 +328,7 @@ impl SettingsView {
                 self.tick.stop();
             }
         }
+        self.sync_general();
     }
 
     fn open_morph(&self, now: Duration) -> Phase {
@@ -343,6 +364,7 @@ impl SettingsView {
         };
         *self.phase.borrow_mut() = next;
         self.start_ticking();
+        self.sync_general();
     }
 
     /// Fix both ends of the close morph. The note end follows where the user dragged the page; the

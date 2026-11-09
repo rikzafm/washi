@@ -9,6 +9,8 @@ import { Paper, Tapes } from "paper.slint";
 import { Frame, Tilt, TRect } from "toolbar.slint";
 import { AllNotesMetrics } from "all-notes.slint";
 import { ShortcutRow, ShortcutsPage, PrivacyPage } from "settings-pages.slint";
+import { GeneralTab } from "settings-general.slint";
+
 export global SettingsMetrics {
     /// The strip the Sidebar adds left of the Paper (the same as All notes).
     out property <length> strip: AllNotesMetrics.sidebar-w;
@@ -218,6 +220,20 @@ export component SettingsWindow inherits Window {
     callback close-clicked();
     callback start-move();
 
+    // General tab (see settings-general.slint)
+    in property <bool> start-with-windows;
+    in property <bool> new-notes-on-top;
+    in property <string> install-dir;
+    in property <string> data-dir;
+    in property <string> stat-memory;
+    in property <string> stat-cpu;
+    in property <string> stat-db;
+    in property <string> stat-notes;
+    callback toggle-startup();
+    callback toggle-on-top();
+    callback open-install-dir();
+    callback open-data-dir();
+
     /// The Paper height a tab needs (Rust reads it for the tween target).
     public pure function paper-height-for(tab: int) -> length {
         return max(SettingsMetrics.paper-min-h, SettingsMetrics.pad-top + SettingsMetrics.title-h
@@ -289,14 +305,28 @@ export component SettingsWindow inherits Window {
             color: #2B2F36;
         }
 
-        for label[i] in (root.shown-tab == 0 ? ["Start with Windows", "Always on top", "Installed folder", "Database folder", "Resource use"] : []) : Text {
-            x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
-            y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
-            text: label;
+        if root.shown-tab == 0 : GeneralTab {
+            f: root.paper-frame;
+            pw: root.paper-w / 1px;
+            ph: root.paper-h / 1px;
+            top: (SettingsMetrics.pad-top + SettingsMetrics.title-h) / 1px;
+            row-h: SettingsMetrics.row2-h / 1px;
+            gap: SettingsMetrics.gap / 1px;
+            heading-h: SettingsMetrics.heading-h / 1px;
+            tile-h: SettingsMetrics.tile-h / 1px;
             opacity: root.content-opacity;
-            font-family: "Shadows Into Light";
-            font-size: 26px;
-            color: #2B2F36;
+            start-with-windows: root.start-with-windows;
+            new-notes-on-top: root.new-notes-on-top;
+            install-dir: root.install-dir;
+            data-dir: root.data-dir;
+            stat-memory: root.stat-memory;
+            stat-cpu: root.stat-cpu;
+            stat-db: root.stat-db;
+            stat-notes: root.stat-notes;
+            toggle-startup => { root.toggle-startup(); }
+            toggle-on-top => { root.toggle-on-top(); }
+            open-install-dir => { root.open-install-dir(); }
+            open-data-dir => { root.open-data-dir(); }
         }
 
         if root.shown-tab == 2 : ShortcutsPage {
