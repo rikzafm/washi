@@ -8,7 +8,7 @@ import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { Frame, Tilt, TRect } from "toolbar.slint";
 import { AllNotesMetrics } from "all-notes.slint";
-
+import { ShortcutRow, ShortcutsPage, PrivacyPage } from "settings-pages.slint";
 export global SettingsMetrics {
     /// The strip the Sidebar adds left of the Paper (the same as All notes).
     out property <length> strip: AllNotesMetrics.sidebar-w;
@@ -47,7 +47,8 @@ export global ShortcutsTabMetrics {
 }
 
 export global PrivacyTabMetrics {
-    out property <length> content-h: 0px;
+    // The lock line, 3 rows of 64px, the gap and the 72px note box.
+    out property <length> content-h: 56px + 3 * 64px + SettingsMetrics.gap + 72px;
 }
 
 /// One tab label in the Sidebar, drawn in the panel's tilted frame `f`; `v0` is its top.
@@ -210,6 +211,9 @@ export component SettingsWindow inherits Window {
     /// The Settings content (not the Paper or Sidebar): faded in while the note turns into the page.
     in property <float> content-opacity: 1;
 
+    /// The Shortcuts tab's rows.
+    in property <[ShortcutRow]> shortcuts;
+
     callback tab-clicked(int);
     callback close-clicked();
     callback start-move();
@@ -293,6 +297,27 @@ export component SettingsWindow inherits Window {
             font-family: "Shadows Into Light";
             font-size: 26px;
             color: #2B2F36;
+        }
+
+        if root.shown-tab == 2 : ShortcutsPage {
+            width: root.note-w;
+            height: root.height;
+            opacity: root.content-opacity;
+            f: root.paper-frame;
+            u0: -root.paper-w / 2px + SettingsMetrics.pad-x / 1px;
+            v0: -root.paper-h / 2px + (SettingsMetrics.pad-top + SettingsMetrics.title-h) / 1px;
+            content-w: (SettingsMetrics.paper-w - 2 * SettingsMetrics.pad-x) / 1px;
+            rows: root.shortcuts;
+        }
+
+        if root.shown-tab == 3 : PrivacyPage {
+            width: root.note-w;
+            height: root.height;
+            opacity: root.content-opacity;
+            f: root.paper-frame;
+            u0: -root.paper-w / 2px + SettingsMetrics.pad-x / 1px;
+            v0: -root.paper-h / 2px + (SettingsMetrics.pad-top + SettingsMetrics.title-h) / 1px;
+            content-w: (SettingsMetrics.paper-w - 2 * SettingsMetrics.pad-x) / 1px;
         }
 
         Tapes {
