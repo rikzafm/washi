@@ -291,6 +291,11 @@ impl App {
             NoteEvent::OpenDropdown => {
                 self.toggle_dropdown(id);
             }
+            NoteEvent::TextChanged => {
+                if self.is_all_notes_open() {
+                    self.refresh_all_notes(None);
+                }
+            }
         }
     }
 
@@ -457,8 +462,8 @@ impl App {
         if let Some(v) = self.all_notes() {
             v.ui().set_confirming_delete(false);
         }
-        self.new_note();
-        let new_id = self.note_ids().last().copied();
+        let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
+        let new_id = self.create_new_note(from);
         self.refresh_all_notes(new_id);
     }
 
@@ -469,7 +474,6 @@ impl App {
             v.ui().set_confirming_delete(false);
         }
         self.activate_note(selected_id);
-        self.refresh_all_notes(Some(selected_id));
     }
 
     /// Close the desktop window of the currently selected note in the All Notes window.
@@ -480,8 +484,9 @@ impl App {
         }
         if self.with_note(selected_id, |_| ()).is_some() {
             self.close_note(selected_id);
+        } else {
+            self.refresh_all_notes(Some(selected_id));
         }
-        self.refresh_all_notes(Some(selected_id));
     }
 
     /// Export the currently selected note in the All Notes window as Markdown.
@@ -505,22 +510,8 @@ impl App {
     /// Permanently delete the currently selected note in the All Notes window and select the next available note.
     pub fn all_notes_confirm_delete(&self) {
         let Some(selected_id) = self.all_notes_selected_id() else { return };
-        let old_rows = self.all_notes_rows();
-        let old_idx = old_rows.iter().position(|r| r.id == selected_id).unwrap_or(0);
-
         self.set_all_notes_confirming_delete(false);
-        self.0.remove_exit_candidate(selected_id);
         self.confirm_delete_note(selected_id);
-
-        let new_rows = self.all_notes_rows();
-        let next_id = new_rows
-            .get(old_idx)
-            .or_else(|| new_rows.last())
-            .map(|r| r.id);
-        if let Some(v) = self.all_notes() {
-            let now_ms = self.0.env.clock.unix_millis();
-            v.refresh(&new_rows, next_id, now_ms);
-        }
     }
 
     /// Invoke the select-note callback on the open All Notes window (for testing).
@@ -590,6 +581,11 @@ impl App {
     pub fn dismiss_all_notes(&self) {
         if let Some(v) = self.0.all_notes.borrow_mut().take() {
             v.close();
+            if self.0.notes.borrow().is_empty() {
+                self.0.restore_exit_candidates();
+                self.0.quit.set(true);
+                let _ = slint::quit_event_loop();
+            }
         }
     }
 
@@ -1056,6 +1052,9 @@ impl App {
         if was_empty && self.0.db.delete_note(id).is_ok() {
             self.0.save_stacking();
             self.remove_note(id);
+            if self.is_all_notes_open() {
+                self.refresh_all_notes(None);
+            }
             return;
         }
         self.with_note(id, |n| {
@@ -1070,6 +1069,9 @@ impl App {
             eprintln!("washi: could not mark note {id} closed: {e}");
         }
         self.remove_note(id);
+        if self.is_all_notes_open() {
+            self.refresh_all_notes(None);
+        }
     }
 
     /// Clone the handle to the open delete dialog, if any.
@@ -1184,46 +1186,74 @@ impl App {
 
     /// Delete a note for good from the database and remove its window.
     pub fn confirm_delete_note(&self, id: NoteId) {
+        let next_selection = if self.is_all_notes_open() {
+            if self.all_notes_selected_id() == Some(id) {
+                self.set_all_notes_confirming_delete(false);
+                let old_rows = self.all_notes_rows();
+                let old_idx = old_rows.iter().position(|r| r.id == id).unwrap_or(0);
+                Some(Some(old_idx))
+            } else {
+                Some(None)
+            }
+        } else {
+            None
+        };
+        self.0.remove_exit_candidate(id);
         if let Err(e) = self.0.db.delete_note(id) {
             self.0.env.dialogs.error(&format!("Washi could not delete the note: {e}"));
             return;
         }
         self.remove_note(id);
-    }
-
-    /// Open a fresh empty note. If an open note exists, offsets from it.
-    pub fn new_note(&self) {
-        let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
-        match from {
-            Some(id) => self.new_note_from(id),
-            None => {
-                let now = self.0.env.clock.unix_millis();
-                if let Ok(id) = self.0.db.create_note(now) {
-                    let _ = self.open_row(&NoteRow {
-                        id,
-                        content: String::new(),
-                        geometry: None,
-                        always_on_top: false,
-                    });
+        match next_selection {
+            Some(Some(old_idx)) => {
+                let new_rows = self.all_notes_rows();
+                let next_id = new_rows
+                    .get(old_idx)
+                    .or_else(|| new_rows.last())
+                    .map(|r| r.id);
+                if let Some(v) = self.all_notes() {
+                    let now_ms = self.0.env.clock.unix_millis();
+                    v.refresh(&new_rows, next_id, now_ms);
                 }
             }
+            Some(None) => self.refresh_all_notes(None),
+            None => {}
         }
     }
 
-    /// Open an empty note, offset from `from`.
-    pub fn new_note_from(&self, from: NoteId) {
-        let geometry = self
-            .with_note(from, |n| n.geometry())
+    fn create_new_note(&self, from: Option<NoteId>) -> Option<NoteId> {
+        let geometry = from
+            .and_then(|from_id| self.with_note(from_id, |n| n.geometry()))
             .map(|g| Geometry { x: g.x + NEW_NOTE_OFFSET, y: g.y + NEW_NOTE_OFFSET, ..g });
         let id = match self.0.db.create_note(self.0.env.clock.unix_millis()) {
             Ok(id) => id,
-            Err(e) => return self.0.env.dialogs.error(&format!("Washi could not create a note: {e}")),
+            Err(e) => {
+                self.0.env.dialogs.error(&format!("Washi could not create a note: {e}"));
+                return None;
+            }
         };
         if let Some(g) = geometry {
             let _ = self.0.db.save_geometry(id, g);
         }
         if let Err(e) = self.open_row(&NoteRow { id, content: String::new(), geometry, always_on_top: false }) {
             self.0.env.dialogs.error(&e.to_string());
+            return None;
+        }
+        Some(id)
+    }
+
+    /// Open a fresh empty note. If an open note exists, offsets from it.
+    pub fn new_note(&self) {
+        let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
+        if self.create_new_note(from).is_some() && self.is_all_notes_open() {
+            self.refresh_all_notes(None);
+        }
+    }
+
+    /// Open an empty note, offset from `from`.
+    pub fn new_note_from(&self, from: NoteId) {
+        if self.create_new_note(Some(from)).is_some() && self.is_all_notes_open() {
+            self.refresh_all_notes(None);
         }
     }
 
@@ -1238,6 +1268,9 @@ impl App {
             if let Err(e) = self.open_row(&row) {
                 self.0.env.dialogs.error(&e.to_string());
             }
+            if self.is_all_notes_open() {
+                self.refresh_all_notes(None);
+            }
         }
     }
 
@@ -1248,6 +1281,9 @@ impl App {
             let _ = note.ui().show();
             let hwnd = note.hwnd();
             self.0.env.window_control.bring_to_front(id, hwnd);
+            if self.is_all_notes_open() {
+                self.refresh_all_notes(None);
+            }
         } else {
             self.reopen_note(id);
         }

@@ -143,6 +143,8 @@ pub enum NoteEvent {
     OpenImage(usize),
     /// The top-right `...` button was clicked: open or toggle the dropdown menu.
     OpenDropdown,
+    /// The note's text content was edited.
+    TextChanged,
 }
 
 /// Side of a picture's resize grip, logical px.
@@ -1178,6 +1180,7 @@ pub struct Note {
     scroll_timer: Rc<Timer>,
     /// Everything that changes the text ends here (see `open`).
     changed: Rc<dyn Fn(Option<Caret>)>,
+    on_event: Rc<dyn Fn(NoteId, NoteEvent)>,
     clipboard: Rc<dyn ImageClipboard>,
     paste_image: Rc<dyn Fn(NoteId) -> bool>,
 }
@@ -1243,7 +1246,7 @@ impl Note {
         }
         // everything that changes the text ends here: relayout, stored text, title, autosave
         let changed: Rc<dyn Fn(Option<Caret>)> = {
-            let (autosave, timer, weak, doc) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone());
+            let (autosave, timer, weak, doc, on_event) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone(), on_event.clone());
             Rc::new(move |focus: Option<Caret>| {
                 let text = doc.text();
                 if let Some(ui) = weak.upgrade() {
@@ -1263,6 +1266,7 @@ impl Note {
                 autosave.dirty.set(true);
                 let a = autosave.clone();
                 timer.start(TimerMode::SingleShot, AUTOSAVE_DELAY, move || a.flush());
+                on_event(id, NoteEvent::TextChanged);
             })
         };
         {
@@ -1614,7 +1618,7 @@ impl Note {
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, clipboard, paste_image })
+        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, on_event, clipboard, paste_image })
     }
 
     /// Where an image added now goes: after the block that has the caret (or last had it).
@@ -1919,6 +1923,7 @@ impl Note {
         self.ui.set_text(self.doc.text().as_str().into());
         self.ui.set_window_title(window_title(text).into());
         self.autosave.dirty.set(true);
+        (self.on_event)(self.id, NoteEvent::TextChanged);
     }
 
     pub fn text(&self) -> String {

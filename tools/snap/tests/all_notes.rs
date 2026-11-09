@@ -102,8 +102,8 @@ fn write_png_rgb(path: &Path, width: u32, height: u32, rgb: &[u8]) {
     std::fs::write(path, out).expect("write png file");
 }
 
-/// Build a 3-panel `[Mockup | Rendered | Diff (4x amplified)]` side-by-side comparison image.
-fn write_side_by_side(path: &Path, width: u32, height: u32, mockup_rgb: &[u8], rendered_rgb: &[u8]) {
+/// Build a 3-panel `[Mockup | Rendered | Diff (4x amplified)]` side-by-side comparison image in memory.
+fn build_side_by_side_rgb(width: u32, height: u32, mockup_rgb: &[u8], rendered_rgb: &[u8]) -> (u32, u32, Vec<u8>) {
     let sep = 4u32;
     let out_w = width * 3 + sep * 2;
     let mut out = vec![0x2Bu8; (out_w * height * 3) as usize];
@@ -128,7 +128,7 @@ fn write_side_by_side(path: &Path, width: u32, height: u32, mockup_rgb: &[u8], r
             out[dst_d..dst_d + 3].copy_from_slice(&d);
         }
     }
-    write_png_rgb(path, out_w, height, &out);
+    (out_w, height, out)
 }
 
 #[test]
@@ -265,7 +265,54 @@ fn ink_bbox(rgb: &[u8], width: u32, x0: u32, x1: u32, y0: u32, y1: u32, thresh: 
 }
 
 #[test]
-fn all_notes_mockup_visual_fidelity_and_side_by_side_snapshots() {
+fn external_desktop_note_lifecycle_updates_open_all_notes_window_and_exits_when_all_closed() {
+    let mut h = setup_mockup_all_notes();
+    assert_eq!(h.all_notes_open_count(), Some(2));
+    assert_eq!(h.all_notes_closed_count(), Some(4));
+
+    let open_items = h.all_notes_open_items();
+    let endfield_id = open_items[0].id as i64;
+    assert_eq!(h.all_notes_selected_id(), Some(endfield_id));
+
+    // 1. Editing an open note's text from the desktop updates AllNotesWindow's sidebar title & preview
+    let endfield_idx = (0..h.open_note_count())
+        .find(|&i| h.note_id(i) == endfield_id)
+        .unwrap();
+    h.set_note_text(endfield_idx, "# Updated Endfield\nNew body line");
+    assert_eq!(h.all_notes_open_items()[0].title.as_str(), "Updated Endfield");
+    let preview_str: String = h.all_notes_preview_runs().iter().map(|r| r.text.as_str()).collect();
+    assert!(preview_str.contains("Updated Endfield"));
+    assert!(preview_str.contains("New body line"));
+
+    // 2. Creating a new note from a desktop note window updates AllNotesWindow's open count & list while keeping selection
+    h.right_click(endfield_idx, Some(&["New note"]));
+    assert_eq!(h.open_note_count(), 3);
+    assert_eq!(h.all_notes_open_count(), Some(3));
+    assert_eq!(h.all_notes_selected_id(), Some(endfield_id));
+    let new_idx = h.open_note_count() - 1;
+    h.set_note_text(new_idx, "# Fresh Desktop Note");
+    assert!(
+        h.all_notes_open_items()
+            .iter()
+            .any(|i| i.title.as_str() == "Fresh Desktop Note")
+    );
+
+    // 3. Closing all desktop notes while AllNotesWindow is open updates counts/lists and keeps the app alive
+    while h.open_note_count() > 0 {
+        h.close_note(0);
+    }
+    assert_eq!(h.all_notes_open_count(), Some(0));
+    assert_eq!(h.all_notes_closed_count(), Some(7));
+    assert!(!h.has_quit(), "app stays alive while AllNotesWindow is still open");
+
+    // 4. Closing AllNotesWindow after all desktop notes are closed quits the app
+    h.press_all_notes_escape();
+    assert!(!h.is_all_notes_open());
+    assert!(h.has_quit(), "closing AllNotesWindow when no desktop notes are open exits the app");
+}
+
+#[test]
+fn all_notes_side_by_side_mockup_fidelity() {
     let mut h = setup_mockup_all_notes();
 
     // Render 1.0x normal state (603 x 625)
@@ -289,25 +336,19 @@ fn all_notes_mockup_visual_fidelity_and_side_by_side_snapshots() {
     assert_eq!((nw, nh), (603, 625));
     assert_eq!((dw, dh), (603, 625));
 
-    // Save rendered & side-by-side images if scratch directory exists
-    let scratch_dir = Path::new(r"C:\Users\SNOW\.gemini\antigravity\brain\c9184cff-06f1-4d46-86f9-a5ba8242fae0\scratch");
-    if scratch_dir.exists() {
-        write_png_rgb(&scratch_dir.join("rendered_normal.png"), 603, 625, normal_1x.rgb());
-        write_png_rgb(&scratch_dir.join("rendered_delete.png"), 603, 625, delete_1x.rgb());
-        write_side_by_side(
-            &scratch_dir.join("side_by_side_normal.png"),
-            603,
-            625,
-            &ref_normal_rgb,
-            normal_1x.rgb(),
-        );
-        write_side_by_side(
-            &scratch_dir.join("side_by_side_delete.png"),
-            603,
-            625,
-            &ref_delete_rgb,
-            delete_1x.rgb(),
-        );
+    // Build side-by-side comparison images in memory on every test run
+    let (sbs_nw, sbs_nh, sbs_normal_rgb) = build_side_by_side_rgb(603, 625, &ref_normal_rgb, normal_1x.rgb());
+    let (sbs_dw, sbs_dh, sbs_delete_rgb) = build_side_by_side_rgb(603, 625, &ref_delete_rgb, delete_1x.rgb());
+    assert_eq!((sbs_nw, sbs_nh), (603 * 3 + 8, 625));
+    assert_eq!((sbs_dw, sbs_dh), (603 * 3 + 8, 625));
+
+    // Optionally dump rendered & side-by-side PNGs if WASHI_SNAP_OUT_DIR is set
+    if let Some(out_dir) = std::env::var_os("WASHI_SNAP_OUT_DIR") {
+        let out_dir = Path::new(&out_dir);
+        write_png_rgb(&out_dir.join("rendered_normal.png"), 603, 625, normal_1x.rgb());
+        write_png_rgb(&out_dir.join("rendered_delete.png"), 603, 625, delete_1x.rgb());
+        write_png_rgb(&out_dir.join("side_by_side_normal.png"), sbs_nw, sbs_nh, &sbs_normal_rgb);
+        write_png_rgb(&out_dir.join("side_by_side_delete.png"), sbs_dw, sbs_dh, &sbs_delete_rgb);
     }
 
     // 1. Assert overall Mean Absolute Error against reference mockups (< 3.0 out of 255)

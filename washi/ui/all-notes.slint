@@ -166,7 +166,7 @@ export component AllNotesWindow inherits Window {
         color: #2B2F36;
     }
 
-    Text {
+    open-count-label := Text {
         x: 33.8px;
         y: 162px;
         text: root.open-count + " open · ";
@@ -176,7 +176,7 @@ export component AllNotesWindow inherits Window {
     }
 
     Text {
-        x: 79.5px;
+        x: root.open-count < 10 ? 79.5px : (open-count-label.x + open-count-label.width + 2px);
         y: 161.2px;
         text: root.closed-count + " closed";
         font-family: "Shadows Into Light";
