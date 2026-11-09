@@ -305,3 +305,132 @@ fn the_frame_timer_stops_at_rest() {
     assert!(h.is_settings_open());
     assert!(!h.settings_ticking());
 }
+
+// ---- tabs and the height tween ----
+
+fn open_at_rest(h: &mut Harness) {
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    open_settings_from(h, 0);
+}
+
+/// The Sidebar is as tall as the window, and so is the Paper plus margin: both come from one height.
+fn paper_h(h: &Harness) -> u32 {
+    window_at(h).3 - 2 * MARGIN as u32
+}
+
+#[test]
+fn each_tab_ends_at_its_height_and_the_width_stays() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    let (x0, y0, _, _) = window_at(&h);
+    for (tab, paper) in [(1, 600), (0, 660), (2, 696), (3, 600)] {
+        h.settings_click_tab(tab);
+        h.advance_frames(ms(250));
+        let (x, y, w, _) = window_at(&h);
+        assert_eq!(paper_h(&h), paper, "tab {tab}");
+        assert_eq!(w, FULL_W, "tab {tab}");
+        assert_eq!((x, y), (x0, y0), "top-left stays anchored (tab {tab})");
+        assert_eq!(h.settings_selected_tab(), tab);
+        assert_eq!(h.settings_shown_tab(), tab);
+        assert_eq!(h.settings_content_opacity(), 1.0);
+        assert!(!h.settings_ticking());
+    }
+}
+
+#[test]
+fn the_height_tweens_over_about_200ms() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    h.settings_click_tab(1);
+    h.settings_click_tab(0);
+    h.advance_frames(ms(250));
+    assert_eq!(paper_h(&h), 660);
+    h.settings_click_tab(1);
+    h.advance_frames(ms(100));
+    let mid = paper_h(&h);
+    assert!(mid > 600 && mid < 660, "mid-tween: {mid}");
+    h.advance_frames(ms(48));
+    assert!(paper_h(&h) < 610, "nearly there at 3/4 of the time");
+    h.advance_frames(ms(100));
+    assert_eq!(paper_h(&h), 600);
+}
+
+#[test]
+fn switching_mid_tween_retargets_smoothly() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    h.settings_click_tab(2); // 696
+    h.advance_frames(ms(250));
+    h.settings_click_tab(0); // towards 660
+    h.advance_frames(ms(64));
+    h.settings_click_tab(1); // retarget to 600
+    let mut last_h = paper_h(&h) as i32;
+    let mut last_o = h.settings_content_opacity();
+    for _ in 0..20 {
+        h.advance_frames(ms(16));
+        let now_h = paper_h(&h) as i32;
+        assert!(now_h <= last_h, "monotonic: {now_h} after {last_h}");
+        last_h = now_h;
+        let o = h.settings_content_opacity();
+        assert!((o - last_o).abs() <= 0.2, "opacity does not jump: {last_o} -> {o}");
+        last_o = o;
+    }
+    assert_eq!(last_h, 600);
+    assert_eq!(h.settings_shown_tab(), 1);
+    assert_eq!(h.settings_content_opacity(), 1.0);
+}
+
+#[test]
+fn content_swaps_only_when_invisible() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    h.settings_click_tab(2);
+    assert_eq!(h.settings_selected_tab(), 2, "the Sidebar lights up at once");
+    assert_eq!(h.settings_shown_tab(), 0);
+    let mut swapped = false;
+    for _ in 0..20 {
+        h.advance_frames(ms(16));
+        if h.settings_shown_tab() == 2 {
+            assert!(h.settings_content_opacity() <= 0.2, "swapped while visible: {}", h.settings_content_opacity());
+            swapped = true;
+            break;
+        }
+    }
+    assert!(swapped);
+}
+
+#[test]
+fn a_taller_tab_lifts_the_page_near_the_bottom_of_the_screen() {
+    let mut h = Harness::new();
+    h.set_work_areas(vec![ScreenRect::new(0, 0, 1920, 800)]);
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    open_settings_from(&mut h, 0);
+    h.settings_click_tab(1);
+    h.advance_frames(ms(250));
+    let (_, y_short, _, hh) = window_at(&h);
+    assert_eq!(hh, 600 + 2 * MARGIN as u32);
+
+    h.settings_click_tab(2);
+    h.advance_frames(ms(250));
+    let (_, y, _, hh) = window_at(&h);
+    assert_eq!(hh, 696 + 2 * MARGIN as u32);
+    assert!(y + hh as i32 <= 800, "still on screen: {y} + {hh}");
+    assert!(y <= y_short);
+}
+
+#[test]
+fn closing_mid_tab_switch_still_puts_the_host_back() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    let note = h.note_geometry(0);
+    open_settings_from(&mut h, 0);
+    h.settings_click_tab(2);
+    h.advance_frames(ms(64));
+    close_settings(&mut h);
+    assert!(!h.is_settings_open());
+    assert!(h.note_visible(0));
+    assert_eq!(h.note_geometry(0), note);
+}

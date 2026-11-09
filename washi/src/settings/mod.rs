@@ -14,7 +14,7 @@ pub mod anim;
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
 use crate::storage::Geometry;
-use anim::{fit_on_screen, grow_pose, logical_areas, paper_of_note, window_bounds, Ease, Pose, RectF, Tween, GROW, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK};
+use anim::{fit_on_screen, grow_pose, logical_areas, paper_of_note, window_bounds, lerp_rect, tab_fade, tab_fade_resume, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK};
 use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -47,6 +47,9 @@ enum Phase {
     Swap { then: Box<Phase>, closing: bool },
     /// The note (e = 0) and the Settings page (e = 1).
     Morph { tween: Tween, closing: bool },
+    /// The Paper's height tweens to the tab's, and the content cross-fades. `fade_start` is when the fade
+    /// began (earlier than the tween when a switch retargets mid-fade, so the opacity stays continuous).
+    Tab { h: Tween, fade_start: Duration, to_tab: i32, swapped: bool },
     /// At rest (the tick timer is stopped).
     Open,
     /// Settings hidden again; the host fades its text back in.
@@ -82,6 +85,12 @@ pub struct SettingsView {
     close_target: Cell<Geometry>,
     /// The Sidebar strip last applied (logical px).
     strip: Cell<f32>,
+    /// The Paper last drawn, and the ends of the current tab tween.
+    paper: Cell<RectF>,
+    tab_from: Cell<RectF>,
+    tab_to: Cell<RectF>,
+    /// The tab the page is showing or heading to.
+    tab: Cell<i32>,
 }
 
 impl SettingsView {
@@ -104,6 +113,10 @@ impl SettingsView {
             morph_to: Cell::new(RectF::default()),
             close_target: Cell::new(host_window),
             strip: Cell::new(0.0),
+            paper: Cell::new(RectF::default()),
+            tab_from: Cell::new(RectF::default()),
+            tab_to: Cell::new(RectF::default()),
+            tab: Cell::new(0),
         });
         view.wire(Rc::downgrade(&view));
         view.morph_to.set(view.open_paper());
@@ -125,9 +138,9 @@ impl SettingsView {
     /// Draw `pose`: strip and content first, then the window's bounds in one step.
     fn apply(&self, pose: Pose) {
         self.strip.set(pose.strip);
-        let e = pose.strip / SIDEBAR_STRIP;
         self.ui.set_strip(pose.strip);
-        self.ui.set_content_opacity(e);
+        self.paper.set(pose.paper);
+        self.ui.set_content_opacity(pose.content);
         self.place(window_bounds(pose.paper, pose.strip));
     }
 
@@ -152,11 +165,44 @@ impl SettingsView {
                 }
             });
         }
-        self.ui.on_start_move(move || {
+        {
+            let me = me.clone();
+            self.ui.on_start_move(move || {
+                if let Some(v) = me.upgrade() {
+                    (v.hooks.begin_move)(v.hwnd());
+                }
+            });
+        }
+        self.ui.on_tab_clicked(move |to| {
             if let Some(v) = me.upgrade() {
-                (v.hooks.begin_move)(v.hwnd());
+                v.select_tab(to);
             }
         });
+    }
+
+    fn areas(&self) -> Vec<RectF> {
+        logical_areas(&(self.hooks.work_areas)(), self.ui.window().scale_factor())
+    }
+
+    /// A Sidebar tab was pressed: light it up at once, tween the Paper's height to the tab's and
+    /// cross-fade the content. Starting from wherever the last tween is, so a retarget is smooth.
+    pub fn select_tab(&self, to: i32) {
+        if !matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. }) || to == self.tab.get() {
+            return;
+        }
+        let now = self.now();
+        self.ui.set_selected_tab(to);
+        let resting = matches!(*self.phase.borrow(), Phase::Open);
+        // At rest the Paper is where the user left it; mid-tween it is where the last frame put it.
+        let from = if resting { self.actual_paper() } else { self.paper.get() };
+        let opacity = self.ui.get_content_opacity();
+        let fade_start = now.saturating_sub(TAB_SWITCH.mul_f32(tab_fade_resume(opacity)));
+        let want = RectF { h: self.ui.invoke_paper_height_for(to).max(PAPER_MIN_H), ..from };
+        self.tab_from.set(from);
+        self.tab_to.set(fit_on_screen(want, SIDEBAR_STRIP, &self.areas()));
+        self.tab.set(to);
+        *self.phase.borrow_mut() = Phase::Tab { h: Tween::new(0.0, 1.0, now, TAB_SWITCH, Ease::InOutCubic), fade_start, to_tab: to, swapped: false };
+        self.start_ticking();
     }
 
     fn now(&self) -> Duration {
@@ -232,6 +278,22 @@ impl SettingsView {
                     None
                 }
             }
+            Phase::Tab { h, fade_start, to_tab, swapped } => {
+                let (e, h_done) = h.sample(now);
+                let t = now.saturating_sub(fade_start).as_secs_f32() / TAB_SWITCH.as_secs_f32();
+                let (content, second_half) = tab_fade(t);
+                if second_half && !swapped {
+                    self.ui.set_shown_tab(to_tab);
+                }
+                self.apply(Pose { paper: lerp_rect(self.tab_from.get(), self.tab_to.get(), e), strip: SIDEBAR_STRIP, content });
+                if h_done && t >= 1.0 {
+                    Some(Phase::Open)
+                } else if second_half && !swapped {
+                    Some(Phase::Tab { h, fade_start, to_tab, swapped: true })
+                } else {
+                    None
+                }
+            }
             Phase::Open | Phase::Done => {
                 self.tick.stop();
                 None
@@ -271,7 +333,8 @@ impl SettingsView {
                 self.freeze_close(false);
                 Phase::Morph { tween: Tween::new(0.0, 0.0, now, TICK, Ease::Linear), closing: true }
             }
-            Phase::Open => {
+            Phase::Open | Phase::Tab { .. } => {
+                // Mid tab switch the page is where the last frame put it; the close morph takes over.
                 self.freeze_close(true);
                 Phase::Morph { tween: Tween::new(1.0, 0.0, now, GROW, Ease::OutCubic), closing: true }
             }
