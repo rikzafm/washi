@@ -29,6 +29,8 @@ fn main() {
         dialogs: dialogs.clone(),
         clipboard: Rc::new(Win32Clipboard),
         window_control: Rc::new(Win32WindowControl),
+        stats: Rc::new(Win32Stats),
+        shell: Rc::new(Win32Shell),
     };
     set_app_identity();
     match App::launch(env) {

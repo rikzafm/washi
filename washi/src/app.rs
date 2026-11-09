@@ -34,6 +34,8 @@ pub struct Env {
     pub dialogs: Rc<dyn Dialogs>,
     pub clipboard: Rc<dyn ImageClipboard>,
     pub window_control: Rc<dyn WindowControl>,
+    pub stats: Rc<dyn ProcessStats>,
+    pub shell: Rc<dyn Shell>,
 }
 
 #[derive(Debug)]
@@ -175,7 +177,11 @@ impl App {
         let mut rows = db.open_notes().map_err(StartError::Db)?;
         if rows.is_empty() {
             let id = db.create_note(now).map_err(StartError::Db)?;
-            rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: false });
+            let on_top = db.new_notes_on_top();
+            if on_top {
+                db.set_always_on_top(id, true).map_err(StartError::Db)?;
+            }
+            rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: on_top });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
         let inner = Rc::new(Inner {
@@ -526,6 +532,14 @@ impl App {
                 let app = app.clone();
                 move |hwnd, x, y, w, h| app().is_some_and(|a| a.0.env.window_control.set_bounds(hwnd, x, y, w, h))
             }),
+            general: crate::settings::general::GeneralDeps {
+                env: self.0.env.clone(),
+                db: self.0.db.clone(),
+                open_note_count: Rc::new({
+                    let app = app.clone();
+                    move || app().map_or(0, |a| a.note_ids().len())
+                }),
+            },
             closed: Rc::new({
                 let app = app.clone();
                 move || {
@@ -1542,7 +1556,11 @@ impl App {
         if let Some(g) = geometry {
             let _ = self.0.db.save_geometry(id, g);
         }
-        if let Err(e) = self.open_row(&NoteRow { id, content: String::new(), geometry, always_on_top: false }) {
+        let on_top = self.0.db.new_notes_on_top();
+        if on_top {
+            let _ = self.0.db.set_always_on_top(id, true);
+        }
+        if let Err(e) = self.open_row(&NoteRow { id, content: String::new(), geometry, always_on_top: on_top }) {
             self.0.env.dialogs.error(&e.to_string());
             return None;
         }

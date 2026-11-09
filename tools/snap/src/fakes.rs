@@ -285,6 +285,42 @@ impl StartupRegistration for FakeStartup {
     }
 }
 
+/// Stands in for the process numbers. `samples` counts how often memory was read: one per refresh.
+#[derive(Default)]
+pub struct FakeStats {
+    pub samples: Cell<u32>,
+    pub memory: Cell<u64>,
+    pub cpu: Cell<Duration>,
+}
+
+impl ProcessStats for FakeStats {
+    fn private_working_set(&self) -> u64 {
+        self.samples.set(self.samples.get() + 1);
+        self.memory.get()
+    }
+    fn cpu_time(&self) -> Duration {
+        self.cpu.get()
+    }
+    fn processors(&self) -> u32 {
+        4
+    }
+}
+
+/// Records which folders were opened in Explorer.
+#[derive(Default)]
+pub struct FakeShell {
+    pub opened: RefCell<Vec<PathBuf>>,
+}
+
+impl Shell for FakeShell {
+    fn install_dir(&self) -> PathBuf {
+        PathBuf::from(r"C:\Program Files\Washi")
+    }
+    fn open_folder(&self, path: &std::path::Path) {
+        self.opened.borrow_mut().push(path.to_path_buf());
+    }
+}
+
 /// Stands in for the named mutex and the wake-up event between Washi processes.
 #[derive(Default)]
 pub struct FakeInstance {

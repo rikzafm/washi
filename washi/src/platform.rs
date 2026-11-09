@@ -238,6 +238,24 @@ pub trait ImageClipboard {
     }
 }
 
+/// Numbers about Washi's own process, for Settings › Resource use.
+pub trait ProcessStats {
+    /// Private working set in bytes (what Task Manager shows as memory).
+    fn private_working_set(&self) -> u64;
+    /// User + kernel CPU time used so far.
+    fn cpu_time(&self) -> Duration;
+    /// Logical processors (CPU % is per machine, like Task Manager).
+    fn processors(&self) -> u32;
+}
+
+/// The Windows shell: folders and the install location.
+pub trait Shell {
+    /// The folder holding the running executable.
+    fn install_dir(&self) -> PathBuf;
+    /// Show a folder in Explorer.
+    fn open_folder(&self, path: &std::path::Path);
+}
+
 /// Message boxes and file pickers.
 pub trait Dialogs {
     fn confirm(&self, message: &str) -> bool;

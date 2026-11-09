@@ -20,6 +20,8 @@ pub struct Harness {
     pub startup: Rc<FakeStartup>,
     pub instance: Rc<FakeInstance>,
     pub control: Rc<FakeWindowControl>,
+    pub stats: Rc<FakeStats>,
+    pub shell: Rc<FakeShell>,
     app: Option<App>,
     last_ids: Vec<NoteId>,
 }
@@ -52,7 +54,11 @@ impl Harness {
         let startup = Rc::new(FakeStartup::default());
         let instance = Rc::new(FakeInstance::default());
         let control = Rc::new(FakeWindowControl::default());
+        let stats = Rc::new(FakeStats::default());
+        let shell = Rc::new(FakeShell::default());
         let env = Env {
+            stats: stats.clone(),
+            shell: shell.clone(),
             window_control: control.clone(),
             data_dir: dir.path().to_path_buf(),
             protector,
@@ -65,7 +71,7 @@ impl Harness {
             startup: startup.clone(),
             instance: instance.clone(),
         };
-        Harness { dir, env, signals, power, menu, dialogs, clipboard, startup, instance, control, app: None, last_ids: Vec::new() }
+        Harness { dir, env, signals, power, menu, dialogs, clipboard, startup, instance, control, stats, shell, app: None, last_ids: Vec::new() }
     }
 
     pub(crate) fn app(&self) -> &App {

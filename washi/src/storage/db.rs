@@ -181,6 +181,23 @@ impl Db {
         Ok(())
     }
 
+    /// The global default for new notes' Always on top (Settings › General). Off when never set.
+    pub fn new_notes_on_top(&self) -> bool {
+        self.conn
+            .query_row("SELECT value FROM meta WHERE key='new_notes_on_top'", [], |r| r.get::<_, String>(0))
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    }
+
+    pub fn set_new_notes_on_top(&self, on: bool) -> Result<(), DbError> {
+        self.conn.execute(
+            "INSERT INTO meta(key, value) VALUES ('new_notes_on_top', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [if on { "1" } else { "0" }],
+        )?;
+        Ok(())
+    }
+
     pub fn set_always_on_top(&self, id: NoteId, on: bool) -> Result<(), DbError> {
         self.conn
             .execute("UPDATE notes SET always_on_top = ?1 WHERE id = ?2", rusqlite::params![on as i64, id])?;
@@ -347,6 +364,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 1000).unwrap();
         (dir, db)
+    }
+
+    #[test]
+    fn new_notes_on_top_is_off_until_set_and_survives_reopening() {
+        let (dir, db) = test_db();
+        assert!(!db.new_notes_on_top());
+        db.set_new_notes_on_top(true).unwrap();
+        assert!(db.new_notes_on_top());
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert!(db.new_notes_on_top());
+        db.set_new_notes_on_top(false).unwrap();
+        assert!(!db.new_notes_on_top());
     }
 
     #[test]
