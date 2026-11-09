@@ -254,6 +254,10 @@ pub trait Shell {
     fn install_dir(&self) -> PathBuf;
     /// Show a folder in Explorer.
     fn open_folder(&self, path: &std::path::Path);
+    /// The uninstaller beside the executable (Inno Setup's `unins000.exe`), if there is one.
+    fn uninstaller(&self) -> Option<PathBuf>;
+    /// Start a program and return without waiting for it.
+    fn launch(&self, exe: &std::path::Path) -> Result<(), String>;
 }
 
 /// Message boxes and file pickers.

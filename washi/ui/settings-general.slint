@@ -27,10 +27,18 @@ export component GeneralTab inherits Rectangle {
     callback toggle-on-top();
     callback open-install-dir();
     callback open-data-dir();
+    /// An uninstaller exists beside the exe; `uninstall-confirming` shows the inline confirm step.
+    /// Rust owns both: it flips `confirming` on a click and back on Cancel, tab change and open.
+    in property <bool> uninstall-available;
+    in property <bool> uninstall-confirming;
+    callback uninstall-clicked();
+    callback uninstall-cancel();
+    callback uninstall-confirm();
 
     property <float> storage-v: root.top + 2 * root.row-h + root.gap;
     property <float> resource-v: root.storage-v + root.heading-h + 2 * root.row-h + root.gap;
     property <float> tiles-v: root.resource-v + root.heading-h;
+    property <float> uninstall-v: root.tiles-v + root.tile-h + root.gap;
 
     x: 0px;
     y: 0px;
@@ -92,6 +100,48 @@ export component GeneralTab inherits Rectangle {
     }
 
     SectionHeading { f: root.f; pw: root.pw; ph: root.ph; v0: root.resource-v; text: "Resource use"; }
+
+    if !root.uninstall-confirming : SettingRow {
+        f: root.f; pw: root.pw; ph: root.ph;
+        v0: root.uninstall-v; h: root.row-h;
+        control-w: 120px; control-h: 44px;
+        rule: false;
+        label: "Uninstall Washi Note";
+        hint: root.uninstall-available ? "Removes the app from this computer" : "Available when installed with the installer";
+        PillButton {
+            width: 120px;
+            text: "Uninstall…";
+            danger: true;
+            enabled: root.uninstall-available;
+            accessible-name: "Uninstall Washi Note";
+            clicked => { root.uninstall-clicked(); }
+        }
+    }
+
+    if root.uninstall-confirming : SettingRow {
+        f: root.f; pw: root.pw; ph: root.ph;
+        v0: root.uninstall-v; h: root.row-h;
+        control-w: 188px; control-h: 44px;
+        rule: false;
+        label-w: 236px; label-size: 20px; label-lines: 2;
+        label: "Remove Washi Note from this computer?";
+        hint: "";
+        HorizontalLayout {
+            spacing: 8px;
+            PillButton {
+                text: "Cancel";
+                accessible-name: "Cancel uninstall";
+                clicked => { root.uninstall-cancel(); }
+            }
+            PillButton {
+                width: 100px;
+                text: "Uninstall";
+                filled: true;
+                accessible-name: "Confirm uninstall";
+                clicked => { root.uninstall-confirm(); }
+            }
+        }
+    }
 
     // Four level tiles in a row, each placed on the tilt by its top-left corner.
     for t[i] in [

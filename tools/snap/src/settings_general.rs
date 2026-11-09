@@ -36,6 +36,31 @@ impl Harness {
         self.general_ui().invoke_open_data_dir();
     }
 
+    /// The Uninstall row's button is enabled (an uninstaller exists).
+    pub fn settings_uninstall_available(&self) -> bool {
+        self.general_ui().get_uninstall_available()
+    }
+
+    /// The Uninstall row is asking "Remove Washi Note from this computer?".
+    pub fn settings_uninstall_confirming(&self) -> bool {
+        self.general_ui().get_uninstall_confirming()
+    }
+
+    pub fn settings_press_uninstall(&mut self) {
+        self.general_ui().invoke_uninstall_clicked();
+        self.settle();
+    }
+
+    pub fn settings_press_uninstall_cancel(&mut self) {
+        self.general_ui().invoke_uninstall_cancel();
+        self.settle();
+    }
+
+    pub fn settings_press_uninstall_confirm(&mut self) {
+        self.general_ui().invoke_uninstall_confirm();
+        self.settle();
+    }
+
     /// The four Resource use tiles: memory, CPU, database, open notes.
     pub fn settings_stats(&self) -> [String; 4] {
         let ui = self.general_ui();

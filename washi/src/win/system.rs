@@ -58,6 +58,24 @@ impl Shell for Win32Shell {
         std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)).unwrap_or_default()
     }
 
+    fn uninstaller(&self) -> Option<PathBuf> {
+        // Inno Setup writes unins000.exe (unins001.exe, ... after a reinstall) beside the app.
+        std::fs::read_dir(self.install_dir())
+            .ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                    n.len() == 12 && n.starts_with("unins") && n.ends_with(".exe") && n[5..8].chars().all(|c| c.is_ascii_digit())
+                })
+            })
+            .min()
+    }
+
+    fn launch(&self, exe: &Path) -> Result<(), String> {
+        std::process::Command::new(exe).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
+
     fn open_folder(&self, path: &Path) {
         let (verb, target) = (wide("open"), wide(&path.to_string_lossy()));
         // SAFETY: NUL-terminated strings; the shell opens the folder itself, no command line is built.

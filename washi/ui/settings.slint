@@ -231,6 +231,11 @@ export component SettingsWindow inherits Window {
     callback toggle-on-top();
     callback open-install-dir();
     callback open-data-dir();
+    in property <bool> uninstall-available;
+    in property <bool> uninstall-confirming;
+    callback uninstall-clicked();
+    callback uninstall-cancel();
+    callback uninstall-confirm();
     // Font & Style choices: UI only. They live here, so they reset whenever Settings opens, and
     // nothing reads them (see style-tab.slint).
     in-out property <int> style-font <=> style.font;
@@ -346,6 +351,11 @@ export component SettingsWindow inherits Window {
             toggle-on-top => { root.toggle-on-top(); }
             open-install-dir => { root.open-install-dir(); }
             open-data-dir => { root.open-data-dir(); }
+            uninstall-available: root.uninstall-available;
+            uninstall-confirming: root.uninstall-confirming;
+            uninstall-clicked => { root.uninstall-clicked(); }
+            uninstall-cancel => { root.uninstall-cancel(); }
+            uninstall-confirm => { root.uninstall-confirm(); }
         }
 
         if root.shown-tab == 2 : ShortcutsPage {

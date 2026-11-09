@@ -18,6 +18,10 @@ export component SettingRow inherits Rectangle {
     in property <float> inset: 36;
     in property <length> control-w: 52px;
     in property <length> control-h: 30px;
+    /// A wrapping label: its width (0 = no wrapping), font size and number of lines.
+    in property <length> label-w: 0px;
+    in property <length> label-size: 24px;
+    in property <float> label-lines: 1;
     property <float> top: -root.ph / 2.0 + root.v0;
     property <float> mid: root.top + root.h / 2.0;
     x: 0px;
@@ -26,11 +30,13 @@ export component SettingRow inherits Rectangle {
     height: 100%;
 
     Text {
-        x: Tilt.x(root.f, -root.pw / 2.0 + root.inset, root.mid - (root.hint == "" ? 15.0 : 26.0)) * 1px;
-        y: Tilt.y(root.f, -root.pw / 2.0 + root.inset, root.mid - (root.hint == "" ? 15.0 : 26.0)) * 1px;
+        x: Tilt.x(root.f, -root.pw / 2.0 + root.inset, root.mid - (root.hint == "" ? 15.0 * root.label-lines : 26.0)) * 1px;
+        y: Tilt.y(root.f, -root.pw / 2.0 + root.inset, root.mid - (root.hint == "" ? 15.0 * root.label-lines : 26.0)) * 1px;
+        width: root.label-w > 0px ? root.label-w : self.preferred-width;
+        wrap: root.label-w > 0px ? TextWrap.word-wrap : TextWrap.no-wrap;
         text: root.label;
         font-family: "Shadows Into Light";
-        font-size: 24px;
+        font-size: root.label-size;
         color: #2B2F36;
     }
 
@@ -97,25 +103,32 @@ export component Switch inherits Rectangle {
 export component PillButton inherits Rectangle {
     in property <string> text;
     in property <string> accessible-name;
+    in property <bool> enabled: true;
+    /// Red text (the Uninstall entry), or a filled red button with light text (its confirm).
+    in property <bool> danger: false;
+    in property <bool> filled: false;
     callback clicked();
     width: 80px;
     height: 44px;
     border-radius: 10.8px;
-    background: area.pressed ? #E2E2DF : #F0F0EE;
+    background: root.filled ? (area.pressed ? #A8322A : #C0392F) : (area.pressed ? #E2E2DF : #F0F0EE);
+    opacity: root.enabled ? 1.0 : 0.45;
     accessible-role: button;
     accessible-label: root.accessible-name;
+    accessible-enabled: root.enabled;
 
     Text {
         text: root.text;
         font-family: "Shadows Into Light";
         font-size: 21px;
-        color: #2B2F36;
+        color: root.filled ? #FFFFFF : (root.danger ? #B3261E : #2B2F36);
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
     area := TouchArea {
-        mouse-cursor: pointer;
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.clicked(); }
     }
 }

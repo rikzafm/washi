@@ -539,6 +539,14 @@ impl App {
                     let app = app.clone();
                     move || app().map_or(0, |a| a.note_ids().len())
                 }),
+                quit_for_uninstall: Rc::new({
+                    let app = app.clone();
+                    move || {
+                        if let Some(a) = app() {
+                            a.quit_for_uninstall();
+                        }
+                    }
+                }),
             },
             closed: Rc::new({
                 let app = app.clone();
@@ -1855,6 +1863,15 @@ impl App {
                 let _ = slint::quit_event_loop();
             }
         }
+    }
+
+    /// Exit for the uninstaller that was just started: the same exit as closing the last note, so
+    /// open notes come back if Washi is installed again.
+    pub fn quit_for_uninstall(&self) {
+        self.0.save_all();
+        self.0.restore_exit_candidates();
+        self.0.quit.set(true);
+        let _ = slint::quit_event_loop();
     }
 
     /// Save everything immediately. Notes stay open, so the next start reopens them.

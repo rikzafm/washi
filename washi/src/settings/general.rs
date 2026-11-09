@@ -22,6 +22,8 @@ pub struct GeneralDeps {
     pub db: Rc<Db>,
     /// Notes currently open.
     pub open_note_count: Rc<dyn Fn() -> usize>,
+    /// Save everything and exit, so a started uninstaller can remove the exe.
+    pub quit_for_uninstall: Rc<dyn Fn()>,
 }
 
 pub struct General {
@@ -78,6 +80,53 @@ impl General {
                 g.deps.env.shell.open_folder(&g.deps.env.data_dir);
             }
         });
+        let me = self.me.clone();
+        ui.on_uninstall_clicked(move || {
+            if let Some(g) = me.upgrade() {
+                // a disabled button asks nothing
+                if g.deps.env.shell.uninstaller().is_some() {
+                    g.set_confirming(true);
+                }
+            }
+        });
+        let me = self.me.clone();
+        ui.on_uninstall_cancel(move || {
+            if let Some(g) = me.upgrade() {
+                g.set_confirming(false);
+            }
+        });
+        let me = self.me.clone();
+        ui.on_uninstall_confirm(move || {
+            if let Some(g) = me.upgrade() {
+                g.uninstall_confirmed();
+            }
+        });
+    }
+
+    fn set_confirming(&self, on: bool) {
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_uninstall_confirming(on);
+        }
+    }
+
+    /// Run the uninstaller beside the exe, then exit. Washi never deletes files itself.
+    fn uninstall_confirmed(&self) {
+        self.set_confirming(false);
+        let shell = &self.deps.env.shell;
+        let Some(exe) = shell.uninstaller() else {
+            self.refresh_uninstall(); // it has gone since the row was drawn
+            return;
+        };
+        match shell.launch(&exe) {
+            Ok(()) => (self.deps.quit_for_uninstall)(),
+            Err(e) => self.deps.env.dialogs.error(&format!("Washi could not start the uninstaller: {e}")),
+        }
+    }
+
+    fn refresh_uninstall(&self) {
+        if let Some(ui) = self.ui.upgrade() {
+            ui.set_uninstall_available(self.deps.env.shell.uninstaller().is_some());
+        }
     }
 
     /// Show what is really stored: the registry value and the database setting.
@@ -86,6 +135,7 @@ impl General {
             ui.set_start_with_windows(self.deps.env.startup.is_enabled());
             ui.set_new_notes_on_top(self.deps.db.new_notes_on_top());
         }
+        self.refresh_uninstall();
     }
 
     fn toggle_startup(&self) {
@@ -106,6 +156,9 @@ impl General {
 
     /// General is (or is no longer) on screen: start or stop the stats timer.
     pub fn set_showing(&self, showing: bool) {
+        if !showing {
+            self.set_confirming(false); // leaving General cancels the confirm step
+        }
         if showing == self.timer.running() {
             return;
         }
