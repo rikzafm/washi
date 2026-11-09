@@ -35,8 +35,8 @@ pub fn format_status_line(row: &AllNoteRow, now_ms: i64) -> String {
     }
 }
 
-fn layout_line_runs(
-    text: &str,
+#[derive(Clone, Copy)]
+struct LineStyle {
     u0: f64,
     v: f64,
     size: f64,
@@ -44,28 +44,30 @@ fn layout_line_runs(
     bold: bool,
     italic: bool,
     color: slint::Color,
-) -> Vec<PreviewRun> {
-    textflow::line_pieces(text, size, MAX_STEP_WIDTH)
+}
+
+fn layout_line_runs(text: &str, style: LineStyle) -> Vec<PreviewRun> {
+    textflow::line_pieces(text, style.size, MAX_STEP_WIDTH)
         .into_iter()
         .map(|(piece, at, w)| {
-            let u = u0 + at;
+            let u = style.u0 + at;
             let (dx, dy) = textflow::tilt_offset(
                 u + w / 2.0,
-                v + pitch / 2.0,
+                style.v + style.pitch / 2.0,
                 PREVIEW_PAPER_SIZE,
                 PREVIEW_TILT_DEG,
             );
             PreviewRun {
                 text: piece.into(),
                 u: u as f32,
-                v: v as f32,
+                v: style.v as f32,
                 dx: dx as f32,
                 dy: dy as f32,
                 width: w as f32,
-                size: size as f32,
-                bold,
-                italic,
-                color,
+                size: style.size as f32,
+                bold: style.bold,
+                italic: style.italic,
+                color: style.color,
             }
         })
         .collect()
@@ -163,7 +165,16 @@ pub fn layout_preview_runs(content: &str) -> Vec<PreviewRun> {
             }
             if !line.is_empty() {
                 runs.extend(layout_line_runs(
-                    &line, u0, v, size, pitch, bold, italic, ink_color,
+                    &line,
+                    LineStyle {
+                        u0,
+                        v,
+                        size,
+                        pitch,
+                        bold,
+                        italic,
+                        color: ink_color,
+                    },
                 ));
             }
             v += pitch;
@@ -181,13 +192,15 @@ fn apply_selected_note(ui: &AllNotesWindow, rows: &[AllNoteRow], selected_id: Op
             let status = format_status_line(row, now_ms);
             let status_runs = layout_line_runs(
                 &status,
-                24.5,
-                26.0,
-                12.65,
-                20.0,
-                false,
-                false,
-                slint::Color::from_rgb_u8(0x5B, 0x61, 0x6B),
+                LineStyle {
+                    u0: 24.5,
+                    v: 26.0,
+                    size: 12.65,
+                    pitch: 20.0,
+                    bold: false,
+                    italic: false,
+                    color: slint::Color::from_rgb_u8(0x5B, 0x61, 0x6B),
+                },
             );
             let preview_runs = layout_preview_runs(&row.content);
             ui.set_status_text(status.into());
@@ -415,6 +428,20 @@ mod tests {
     use crate::dropdown::init_test_platform;
     use std::cell::Cell;
 
+    fn test_platform() -> Rc<slint::platform::software_renderer::MinimalSoftwareWindow> {
+        let win = slint::platform::software_renderer::MinimalSoftwareWindow::new(
+            slint::platform::software_renderer::RepaintBufferType::NewBuffer,
+        );
+        struct RenderPlatform(Rc<slint::platform::software_renderer::MinimalSoftwareWindow>);
+        impl slint::platform::Platform for RenderPlatform {
+            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let _ = slint::platform::set_platform(Box::new(RenderPlatform(win.clone())));
+        win
+    }
+
     fn sample_rows() -> Vec<AllNoteRow> {
         vec![
             AllNoteRow {
@@ -561,16 +588,7 @@ mod tests {
 
     #[test]
     fn sidebar_renders_headers_tilted_selection_pill_and_handles_row_and_new_note_clicks() {
-        let win = slint::platform::software_renderer::MinimalSoftwareWindow::new(
-            slint::platform::software_renderer::RepaintBufferType::NewBuffer,
-        );
-        struct RenderPlatform(Rc<slint::platform::software_renderer::MinimalSoftwareWindow>);
-        impl slint::platform::Platform for RenderPlatform {
-            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
-                Ok(self.0.clone())
-            }
-        }
-        let _ = slint::platform::set_platform(Box::new(RenderPlatform(win.clone())));
+        let win = test_platform();
 
         let rows = vec![
             AllNoteRow { id: 1, content: "Endfield Note\nBody".into(), updated_at: 1000, is_open: true, z_order: 2 },
@@ -661,16 +679,7 @@ mod tests {
 
     #[test]
     fn preview_card_renders_tilted_paper_shadow_tapes_and_typography() {
-        let win = slint::platform::software_renderer::MinimalSoftwareWindow::new(
-            slint::platform::software_renderer::RepaintBufferType::NewBuffer,
-        );
-        struct RenderPlatform(Rc<slint::platform::software_renderer::MinimalSoftwareWindow>);
-        impl slint::platform::Platform for RenderPlatform {
-            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
-                Ok(self.0.clone())
-            }
-        }
-        let _ = slint::platform::set_platform(Box::new(RenderPlatform(win.clone())));
+        let win = test_platform();
 
         let mockup_content = "# Endfield Note\n## Thermite Cutter : POG & Akekuri\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";
         let rows = vec![AllNoteRow {
@@ -752,16 +761,7 @@ mod tests {
 
     #[test]
     fn bottom_bar_renders_normal_actions_and_delete_confirmation_and_handles_clicks() {
-        let win = slint::platform::software_renderer::MinimalSoftwareWindow::new(
-            slint::platform::software_renderer::RepaintBufferType::NewBuffer,
-        );
-        struct RenderPlatform(Rc<slint::platform::software_renderer::MinimalSoftwareWindow>);
-        impl slint::platform::Platform for RenderPlatform {
-            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
-                Ok(self.0.clone())
-            }
-        }
-        let _ = slint::platform::set_platform(Box::new(RenderPlatform(win.clone())));
+        let win = test_platform();
 
         let rows = sample_rows();
         let view = AllNotesView::open(1, &rows, 1_000, Rc::new(|| {})).expect("AllNotesView::open");
