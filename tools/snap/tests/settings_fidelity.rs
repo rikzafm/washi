@@ -1,0 +1,282 @@
+//! The Settings page against the mockup ("Setting Page" artboard) and against overflow.
+//!
+//! Each tab is rendered by the real app and compared with `docs/design/reference/settings-<tab>.png`,
+//! a render of the mockup's HTML at the same size (the window: the Sidebar's strip, the Paper at its
+//! natural height and the margins, at 1x on the desk color). The mockup's text is drawn by a browser
+//! (sub-pixel anti-aliasing, 1px differences in where a glyph sits), so the comparison is made on 8px
+//! blocks of luminance: layout, colors, shapes and text blocks have to line up, single glyph pixels do
+//! not. The Paper's height must be the mockup's (`min-height: 600`, 38/44 padding, the content's own
+//! height) and nothing may sit in its bottom padding.
+
+use snap::Harness;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use washi::storage::Geometry;
+
+fn ms(n: u64) -> Duration {
+    Duration::from_millis(n)
+}
+
+const TABS: [&str; 4] = ["general", "style", "shortcuts", "privacy"];
+/// The mockup's Paper heights (its DOM, 1x): the content's height plus 38 above and 44 below, at least 600.
+const MOCKUP_PAPER_H: [f32; 4] = [658.4, 603.2, 766.8, 600.0];
+const MARGIN: f32 = 42.0;
+const STRIP: f32 = 282.0;
+const PAPER_W: f32 = 520.0;
+
+fn reference_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/design/reference")
+}
+
+/// Settings open on `tab`, the transition and the tab switch finished.
+fn open_on(tab: i32) -> Harness {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_settings();
+    h.advance_frames(ms(600));
+    if tab != 0 {
+        h.settings_click_tab(tab);
+        h.advance_frames(ms(600));
+    }
+    h
+}
+
+fn load_png_rgb(path: &Path) -> (u32, u32, Vec<u8>) {
+    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("open {}: {e}", path.display()));
+    let mut reader = png::Decoder::new(file).read_info().expect("read png info");
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).expect("decode png frame");
+    let (w, h) = (info.width, info.height);
+    let rgb = match info.color_type {
+        png::ColorType::Rgb => buf[..(w * h * 3) as usize].to_vec(),
+        png::ColorType::Rgba => buf[..(w * h * 4) as usize].chunks_exact(4).flat_map(|c| [c[0], c[1], c[2]]).collect(),
+        other => panic!("unsupported png color type: {other:?}"),
+    };
+    (w, h, rgb)
+}
+
+fn write_png_rgb(path: &Path, width: u32, height: u32, rgb: &[u8]) {
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    let mut out = Vec::new();
+    {
+        let mut enc = png::Encoder::new(&mut out, width, height);
+        enc.set_color(png::ColorType::Rgb);
+        enc.set_depth(png::BitDepth::Eight);
+        let mut w = enc.write_header().expect("png header");
+        w.write_image_data(rgb).expect("png data");
+    }
+    std::fs::write(path, out).expect("write png file");
+}
+
+fn luma(rgb: &[u8], i: usize) -> f32 {
+    0.299 * rgb[i * 3] as f32 + 0.587 * rgb[i * 3 + 1] as f32 + 0.114 * rgb[i * 3 + 2] as f32
+}
+
+/// How far two same-width images are apart on 8px blocks of luminance, over the rows both have:
+/// (mean absolute difference, share of blocks that differ by more than 30 levels).
+fn block_difference(a: &(u32, u32, Vec<u8>), b: &(u32, u32, Vec<u8>)) -> (f32, f32) {
+    assert_eq!(a.0, b.0, "widths");
+    let (w, h) = (a.0 as usize, a.1.min(b.1) as usize);
+    let (bw, bh) = (w / 8, h / 8);
+    let (mut sum, mut far) = (0.0f32, 0usize);
+    for by in 0..bh {
+        for bx in 0..bw {
+            let (mut sa, mut sb) = (0.0f32, 0.0f32);
+            for y in by * 8..by * 8 + 8 {
+                for x in bx * 8..bx * 8 + 8 {
+                    sa += luma(&a.2, y * w + x);
+                    sb += luma(&b.2, y * w + x);
+                }
+            }
+            let d = (sa - sb).abs() / 64.0;
+            sum += d;
+            if d > 30.0 {
+                far += 1;
+            }
+        }
+    }
+    (sum / (bw * bh) as f32, far as f32 / (bw * bh) as f32)
+}
+
+fn rendered(h: &Harness) -> (u32, u32, Vec<u8>) {
+    let shot = h.render_settings();
+    (shot.width, shot.height, shot.rgb().to_vec())
+}
+
+fn reference(tab: &str) -> (u32, u32, Vec<u8>) {
+    load_png_rgb(&reference_dir().join(format!("settings-{tab}.png")))
+}
+
+/// The Paper's logical height as the window has it.
+fn paper_h(shot: &(u32, u32, Vec<u8>)) -> f32 {
+    shot.1 as f32 - 2.0 * MARGIN
+}
+
+/// How many pixels in the Paper's bottom padding (the 34px above its last 6, clear of the blue tape)
+/// are not paper-colored: content that ran past where the Paper ends.
+fn ink_in_bottom_padding(shot: &(u32, u32, Vec<u8>)) -> usize {
+    let (w, h, rgb) = (shot.0 as usize, shot.1 as usize, &shot.2);
+    let ph = paper_h(shot);
+    let tilt = 1.5f32.to_radians();
+    let (cs, sn) = (tilt.cos(), tilt.sin());
+    let (cx, cy) = (STRIP + MARGIN + PAPER_W / 2.0, h as f32 / 2.0);
+    let mut bad = 0;
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f32 - cx, y as f32 - cy);
+            let a = dx * cs + dy * sn + PAPER_W / 2.0;
+            let b = -dx * sn + dy * cs + ph / 2.0;
+            if (50.0..400.0).contains(&a) && (ph - 40.0..ph - 6.0).contains(&b) {
+                let p = &rgb[(y * w + x) * 3..(y * w + x) * 3 + 3];
+                if p[0] < 0xF2 || p[1] < 0xF2 || p[2] < 0xF0 {
+                    bad += 1;
+                }
+            }
+        }
+    }
+    bad
+}
+
+fn dump(name: &str, shot: &(u32, u32, Vec<u8>)) {
+    if let Some(dir) = std::env::var_os("WASHI_SNAP_OUT_DIR") {
+        write_png_rgb(&Path::new(&dir).join(name), shot.0, shot.1, &shot.2);
+    }
+}
+
+#[test]
+fn every_tab_looks_like_the_mockup() {
+    for (i, tab) in TABS.iter().enumerate() {
+        let mut h = open_on(i as i32);
+        h.settings_show_mockup_values();
+        let shot = rendered(&h);
+        dump(&format!("settings-{tab}.png"), &shot);
+        let want = reference(tab);
+        assert_eq!(shot.0, want.0, "{tab}: window width");
+        assert!((shot.1 as i32 - want.1 as i32).abs() <= 3, "{tab}: window height {} against the mockup's {}", shot.1, want.1);
+        let (mean, far) = block_difference(&shot, &want);
+        assert!(mean < 2.6, "{tab}: blocks differ by {mean:.2} levels on average");
+        assert!(far < 0.02, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+    }
+}
+
+#[test]
+fn the_comparison_can_fail() {
+    // The Shortcuts page is not the General reference.
+    let mut h = open_on(2);
+    h.settings_show_mockup_values();
+    let shot = rendered(&h);
+    let wrong = reference("general");
+    let (mean, far) = block_difference(&shot, &wrong);
+    assert!(mean >= 2.6 || far >= 0.02, "a different tab matched ({mean:.2}, {far:.3})");
+}
+
+#[test]
+fn each_paper_is_as_tall_as_its_content_needs() {
+    let mut h = open_on(0);
+    for (i, tab) in TABS.iter().enumerate() {
+        if i > 0 {
+            h.settings_click_tab(i as i32);
+            h.advance_frames(ms(600));
+        }
+        let (_, _, _, wh) = h.settings_window_geometry().unwrap();
+        let paper = wh as f32 - 2.0 * MARGIN;
+        let bottoms = h.settings_content_bottoms();
+        assert!(paper >= bottoms[i] + 44.0 - 0.5, "{tab}: Paper {paper} is shorter than its content {} plus the 44px padding", bottoms[i]);
+        assert!(paper >= 600.0, "{tab}: Paper {paper} is under the 600px minimum");
+        assert!((paper - MOCKUP_PAPER_H[i]).abs() <= 3.0, "{tab}: Paper {paper} against the mockup's {}", MOCKUP_PAPER_H[i]);
+    }
+}
+
+#[test]
+fn no_tab_puts_content_in_the_papers_bottom_padding() {
+    let mut h = open_on(0);
+    for (i, tab) in TABS.iter().enumerate() {
+        if i > 0 {
+            h.settings_click_tab(i as i32);
+            h.advance_frames(ms(600));
+        }
+        h.settings_show_mockup_values();
+        let shot = rendered(&h);
+        assert_eq!(ink_in_bottom_padding(&shot), 0, "{tab}: something is drawn in the bottom padding");
+    }
+}
+
+#[test]
+fn the_padding_check_can_fail() {
+    // A window the app failed to grow: the content runs into where the padding should be.
+    let mut h = open_on(2);
+    h.settings_squeeze_window(60.0);
+    let shot = rendered(&h);
+    assert!(ink_in_bottom_padding(&shot) > 100, "a squeezed Shortcuts page should overflow");
+}
+
+#[test]
+fn settings_opens_at_the_height_of_the_general_tab() {
+    // General is taller than 600: the page must not open at 600 and wait for a tab switch.
+    let h = open_on(0);
+    let (_, _, _, wh) = h.settings_window_geometry().unwrap();
+    assert!((wh as f32 - 2.0 * MARGIN - MOCKUP_PAPER_H[0]).abs() <= 3.0, "opened at window height {wh}");
+}
+
+#[test]
+fn switching_tabs_mid_tween_still_ends_at_the_right_height() {
+    let mut h = open_on(0);
+    h.settings_click_tab(2);
+    h.advance_frames(ms(80));
+    h.settings_click_tab(1);
+    h.advance_frames(ms(60));
+    h.settings_click_tab(3);
+    h.advance_frames(ms(60));
+    h.settings_click_tab(0);
+    h.advance_frames(ms(600));
+    let (_, _, _, wh) = h.settings_window_geometry().unwrap();
+    let paper = wh as f32 - 2.0 * MARGIN;
+    assert!((paper - MOCKUP_PAPER_H[0]).abs() <= 3.0, "ended at {paper}");
+    let shot = rendered(&h);
+    assert_eq!(ink_in_bottom_padding(&shot), 0);
+}
+
+#[test]
+fn a_bigger_preview_text_grows_the_paper_and_the_lists_stay_in_the_window() {
+    let mut h = open_on(1);
+    let (_, _, _, h0) = h.settings_window_geometry().unwrap();
+    // Text size Large (control 9): the preview wraps to more lines.
+    h.settings_style_click(9);
+    h.advance_frames(ms(100));
+    let (_, _, _, h1) = h.settings_window_geometry().unwrap();
+    assert!(h1 > h0 + 30, "the Paper went from {h0} to {h1}");
+    let shot = rendered(&h);
+    assert_eq!(ink_in_bottom_padding(&shot), 0, "the larger preview overflowed");
+    // The lists hang inside the window (the Paper plus its margin) whatever the size.
+    let ph = h1 as f32 - 2.0 * MARGIN;
+    assert!(h.settings_style_lists_bottom() <= ph + MARGIN - 14.0, "a list reaches {} of {ph}", h.settings_style_lists_bottom());
+    // And back to Small: the Paper shrinks again.
+    h.settings_style_click(7);
+    h.advance_frames(ms(100));
+    let (_, _, _, h2) = h.settings_window_geometry().unwrap();
+    assert!(h2 < h1, "{h2} should be under {h1}");
+    assert_eq!(ink_in_bottom_padding(&rendered(&h)), 0);
+}
+
+#[test]
+fn the_open_lists_fit_in_the_window_at_the_default_size() {
+    let mut h = open_on(1);
+    let (_, _, _, wh) = h.settings_window_geometry().unwrap();
+    let ph = wh as f32 - 2.0 * MARGIN;
+    let reach = h.settings_style_lists_bottom();
+    assert!(reach <= ph + MARGIN - 14.0, "a list reaches {reach} of a {ph} Paper");
+    // Open each list and compare it with the mockup's open dropdown.
+    for (button, name) in [(10, "style-tape-list"), (0, "style-font-list")] {
+        h.settings_style_click(button);
+        h.settings_pointer_away();
+        let shot = rendered(&h);
+        dump(&format!("settings-{name}.png"), &shot);
+        let want = reference(name);
+        assert_eq!(shot.0, want.0, "{name}: window width");
+        let (mean, far) = block_difference(&shot, &want);
+        assert!(mean < 2.6, "{name}: blocks differ by {mean:.2} levels on average");
+        assert!(far < 0.02, "{name}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+    }
+}

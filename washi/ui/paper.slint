@@ -34,8 +34,11 @@ export component Paper {
     in property <length> cy: root.height / 2;
     in property <length> paper-w: root.width - 2 * PaperTheme.margin;
     in property <length> paper-h: root.height - 2 * PaperTheme.margin;
+    /// Draw the note's stacked shadow (Settings draws its own).
+    in property <bool> shadow: true;
 
     for growth[i] in PaperTheme.shadow-growths: Path {
+        visible: root.shadow;
         width: root.width;
         height: root.height;
         viewbox-width: root.width / 1px;

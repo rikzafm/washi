@@ -149,6 +149,13 @@ fn settings_stays_on_screen_near_the_left_edge() {
 /// Width of the Settings window at rest.
 const FULL_W: u32 = STRIP as u32 + PAPER_W + 2 * MARGIN as u32;
 
+/// Each tab's Paper height: the laid-out content plus the Paper's padding, at least 600 (the mockup's
+/// 658, 603, 767 and 600; see settings_fidelity.rs), in whole logical px as the window has them.
+const GENERAL_H: u32 = 658;
+const STYLE_H: u32 = 605;
+const SHORTCUTS_H: u32 = 768;
+const PRIVACY_H: u32 = 600;
+
 fn window_at(h: &Harness) -> (i32, i32, u32, u32) {
     h.settings_window_geometry().unwrap()
 }
@@ -184,7 +191,7 @@ fn opening_fades_the_note_then_grows_left_and_closing_comes_back_exactly() {
     h.advance_frames(ms(300)); // done
     let (x, y, w, hh) = window_at(&h);
     assert_eq!((x + STRIP, y, w), (note.x, note.y, FULL_W));
-    assert_eq!(hh, 600 + 2 * MARGIN as u32);
+    assert_eq!(hh, GENERAL_H + 2 * MARGIN as u32, "opens at the General tab's height, not at 600");
 
     close_settings(&mut h);
     assert!(!h.is_settings_open());
@@ -324,7 +331,7 @@ fn each_tab_ends_at_its_height_and_the_width_stays() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
     let (x0, y0, _, _) = window_at(&h);
-    for (tab, paper) in [(1, 600), (0, 660), (2, 696), (3, 600)] {
+    for (tab, paper) in [(1, STYLE_H), (0, GENERAL_H), (2, SHORTCUTS_H), (3, PRIVACY_H)] {
         h.settings_click_tab(tab);
         h.advance_frames(ms(250));
         let (x, y, w, _) = window_at(&h);
@@ -345,26 +352,26 @@ fn the_height_tweens_over_about_200ms() {
     h.settings_click_tab(1);
     h.settings_click_tab(0);
     h.advance_frames(ms(250));
-    assert_eq!(paper_h(&h), 660);
+    assert_eq!(paper_h(&h), GENERAL_H);
     h.settings_click_tab(1);
     h.advance_frames(ms(100));
     let mid = paper_h(&h);
-    assert!(mid > 600 && mid < 660, "mid-tween: {mid}");
+    assert!(mid > STYLE_H && mid < GENERAL_H, "mid-tween: {mid}");
     h.advance_frames(ms(48));
-    assert!(paper_h(&h) < 610, "nearly there at 3/4 of the time");
+    assert!(paper_h(&h) < STYLE_H + 10, "nearly there at 3/4 of the time");
     h.advance_frames(ms(100));
-    assert_eq!(paper_h(&h), 600);
+    assert_eq!(paper_h(&h), STYLE_H);
 }
 
 #[test]
 fn switching_mid_tween_retargets_smoothly() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
-    h.settings_click_tab(2); // 696
+    h.settings_click_tab(2); // Shortcuts
     h.advance_frames(ms(250));
-    h.settings_click_tab(0); // towards 660
+    h.settings_click_tab(0); // towards General
     h.advance_frames(ms(64));
-    h.settings_click_tab(1); // retarget to 600
+    h.settings_click_tab(1); // retarget to Font & Style
     let mut last_h = paper_h(&h) as i32;
     let mut last_o = h.settings_content_opacity();
     for _ in 0..20 {
@@ -376,7 +383,7 @@ fn switching_mid_tween_retargets_smoothly() {
         assert!((o - last_o).abs() <= 0.2, "opacity does not jump: {last_o} -> {o}");
         last_o = o;
     }
-    assert_eq!(last_h, 600);
+    assert_eq!(last_h, STYLE_H as i32);
     assert_eq!(h.settings_shown_tab(), 1);
     assert_eq!(h.settings_content_opacity(), 1.0);
 }
@@ -403,20 +410,20 @@ fn content_swaps_only_when_invisible() {
 #[test]
 fn a_taller_tab_lifts_the_page_near_the_bottom_of_the_screen() {
     let mut h = Harness::new();
-    h.set_work_areas(vec![ScreenRect::new(0, 0, 1920, 800)]);
+    h.set_work_areas(vec![ScreenRect::new(0, 0, 1920, 900)]);
     h.start().unwrap();
     h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
     open_settings_from(&mut h, 0);
     h.settings_click_tab(1);
     h.advance_frames(ms(250));
     let (_, y_short, _, hh) = window_at(&h);
-    assert_eq!(hh, 600 + 2 * MARGIN as u32);
+    assert_eq!(hh, STYLE_H + 2 * MARGIN as u32);
 
     h.settings_click_tab(2);
     h.advance_frames(ms(250));
     let (_, y, _, hh) = window_at(&h);
-    assert_eq!(hh, 696 + 2 * MARGIN as u32);
-    assert!(y + hh as i32 <= 800, "still on screen: {y} + {hh}");
+    assert_eq!(hh, SHORTCUTS_H + 2 * MARGIN as u32);
+    assert!(y + hh as i32 <= 900, "still on screen: {y} + {hh}");
     assert!(y <= y_short);
 }
 

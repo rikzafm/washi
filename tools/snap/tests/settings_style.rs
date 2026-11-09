@@ -15,15 +15,15 @@ const fn font_item(i: i32) -> i32 {
     1 + i
 }
 const fn size_seg(i: i32) -> i32 {
-    5 + i
+    7 + i
 }
-const TAPE_BUTTON: i32 = 8;
+const TAPE_BUTTON: i32 = 10;
 const fn tape_item(i: i32) -> i32 {
-    9 + i
+    11 + i
 }
-const FADE: i32 = 13;
+const FADE: i32 = 15;
 const fn ui_seg(i: i32) -> i32 {
-    14 + i
+    16 + i
 }
 const BLANK_PAPER: i32 = 20;
 
@@ -78,6 +78,18 @@ fn font_and_tape_pickers_open_choose_and_close() {
     h.settings_style_click(tape_item(3));
     assert_eq!(h.settings_style_state().2, 3);
     assert_eq!(h.settings_style_state().5, -1);
+}
+
+#[test]
+fn the_font_list_has_the_mockups_six_fonts_and_the_tape_list_its_four_colorways() {
+    let mut h = started();
+    open_style_tab(&mut h);
+    h.settings_style_click(FONT_BUTTON);
+    h.settings_style_click(font_item(5));
+    assert_eq!(h.settings_style_state().0, 5, "the sixth font (Kalam) can be chosen");
+    h.settings_style_click(TAPE_BUTTON);
+    h.settings_style_click(tape_item(3));
+    assert_eq!(h.settings_style_state().2, 3, "the fourth colorway (Slate + rose) can be chosen");
 }
 
 #[test]
@@ -171,9 +183,10 @@ fn nothing_the_tab_does_reaches_any_note() {
 }
 
 #[test]
-fn the_tab_fits_the_minimum_page_height() {
+fn the_tab_is_as_tall_as_its_preview_and_rows_need() {
     let mut h = started();
     open_style_tab(&mut h);
     let (_, _, _, total) = h.settings_window_geometry().unwrap();
-    assert_eq!(total, 600 + 84);
+    // 603 in the mockup; at least the 600 minimum (see settings_fidelity.rs).
+    assert!((684..=690).contains(&total), "{total}");
 }

@@ -3,179 +3,127 @@
 // Every control here updates the preview note and nothing else: the state lives in properties of this
 // component (bound to the Settings window, which is created fresh each time Settings opens, so the
 // defaults come back), and no callback leaves it. Rust never reads these properties except in tests.
-// Like the rest of Settings the content is laid out in the Paper's tilted frame `f` so glyphs stay
-// upright on the tilted baseline; `u0`/`v0` is the content's top-left from the Paper's center.
+// Laid out like the mockup's CSS in the Paper's tilted frame `pf`: the preview card, then five rows;
+// `bottom` (paper coordinates) is where the last row ends.
+//
+// Only Shadows Into Light is bundled, so the other fonts in the list are labels: the preview and
+// every list entry are drawn in Shadows Into Light whichever one is chosen.
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
-import { Frame, Tilt } from "toolbar.slint";
+import { PX, PaperFrame, TapeShape, TapePalette, TextMetrics, PText, PBox, PRect, PShadow, UShadow, VTape, StripedShape, SettingRow, Switch, PillButton } from "settings-widgets.slint";
 
-/// One tape of the preview: its outline and stripes as path commands inside a `w` by `h` box
-/// (computed in `settings/tape.rs`).
-export struct TapeShape {
-    outline: string,
-    stripes: string,
-    w: length,
-    h: length,
-}
-
-export global StyleTabMetrics {
-    /// Preview 112, gap 14, then five rows of 56.
-    out property <length> content-h: 112px + 14px + 5 * 56px;
-}
-
-/// A closed dropdown: the chosen option and a chevron.
+/// A closed dropdown (the mockup's `.ddb`): the chosen option and a chevron, 236 by 44. With
+/// `chips`, two tape chips come before the label.
 component PickerButton inherits Rectangle {
     in property <string> text;
     in property <bool> open;
+    in property <bool> chips: false;
+    in property <TapeShape> chip-shape;
+    in property <color> chip-a-base;
+    in property <color> chip-a-stripe;
+    in property <color> chip-b-base;
+    in property <color> chip-b-stripe;
     callback clicked();
     width: 236px;
     height: 44px;
-    border-radius: 10px;
-    background: #FFFFFD;
-    border-width: 1.5px;
-    border-color: root.open ? #5B616B : #B9BFC8;
+    border-radius: 10.8px;
+    background: hit.has-hover ? #E6E6E3 : #F0F0EE;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-expanded: root.open;
+
+    if root.chips : StripedShape {
+        x: 12px;
+        y: (root.height - self.height) / 2;
+        shape: root.chip-shape;
+        base: root.chip-a-base;
+        stripe: root.chip-a-stripe;
+        shadow: false;
+    }
+
+    if root.chips : StripedShape {
+        x: 46px;
+        y: (root.height - self.height) / 2;
+        shape: root.chip-shape;
+        base: root.chip-b-base;
+        stripe: root.chip-b-stripe;
+        shadow: false;
+    }
 
     Text {
-        x: 14px;
-        width: root.width - 46px;
+        x: root.chips ? 80px : 12px;
+        width: root.width - self.x - 38px;
         height: root.height;
         text: root.text;
         font-family: "Shadows Into Light";
-        font-size: 22px;
+        font-size: 21px;
         color: #2B2F36;
         vertical-alignment: center;
         overflow: elide;
     }
 
+    // The chevron: a 24-unit icon drawn at 16px, stroke 2.2 units.
     Path {
         x: root.width - 28px;
-        y: 17px;
-        width: 14px;
-        height: 10px;
-        viewbox-width: 14;
-        viewbox-height: 10;
-        commands: root.open ? "M 2 8 L 7 2 L 12 8" : "M 2 2 L 7 8 L 12 2";
-        stroke: #5B616B;
-        stroke-width: 1.8px;
+        y: (root.height - 16px) / 2;
+        width: 16px;
+        height: 16px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 6 9 L 12 15 L 18 9";
+        stroke: #2B2F36;
+        stroke-width: 1.47px;
         stroke-line-cap: round;
         stroke-line-join: round;
     }
 
-    TouchArea {
+    hit := TouchArea {
         mouse-cursor: pointer;
-        accessible-role: button;
-        accessible-label: root.text;
         clicked => { root.clicked(); }
     }
 }
 
-/// A row of connected choices.
-component Segmented inherits Rectangle {
-    in property <[string]> labels;
-    in-out property <int> index;
-    callback picked(int);
-    width: 236px;
-    height: 40px;
-    border-radius: 10px;
-    background: #E9ECF0;
-
-    for label[i] in root.labels : Rectangle {
-        x: i * root.width / root.labels.length;
-        width: root.width / root.labels.length;
-        height: root.height;
-        border-radius: 10px;
-        background: i == root.index ? #FFFFFD : transparent;
-        border-width: i == root.index ? 1.5px : 0px;
-        border-color: #5B616B;
-
-        Text {
-            text: label;
-            font-family: "Shadows Into Light";
-            font-size: 22px;
-            font-weight: i == root.index ? 700 : 400;
-            color: #2B2F36;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-
-        TouchArea {
-            mouse-cursor: pointer;
-            accessible-role: radio-button;
-            accessible-label: label;
-            clicked => { root.index = i; root.picked(i); }
-        }
-    }
-}
-
-component Switch inherits Rectangle {
-    in-out property <bool> on;
-    callback toggled(bool);
-    width: 56px;
-    height: 30px;
-    border-radius: 15px;
-    background: root.on ? #5B616B : #C9CED6;
-
-    Rectangle {
-        x: root.on ? root.width - self.width - 3px : 3px;
-        y: 3px;
-        width: 24px;
-        height: 24px;
-        border-radius: 12px;
-        background: #FFFFFD;
-    }
-
-    TouchArea {
-        mouse-cursor: pointer;
-        accessible-role: switch;
-        accessible-checked: root.on;
-        clicked => { root.on = !root.on; root.toggled(root.on); }
-    }
-}
-
-/// A strip of washi tape: a base-color parallelogram with diagonal stripes.
-component MiniTape inherits Rectangle {
-    in property <TapeShape> shape;
-    in property <color> base;
-    in property <color> stripe;
-    width: root.shape.w;
-    height: root.shape.h;
-
-    Path {
-        width: root.width;
-        height: root.height;
-        viewbox-width: root.shape.w / 1px;
-        viewbox-height: root.shape.h / 1px;
-        commands: root.shape.outline;
-        fill: root.base;
-    }
-
-    Path {
-        width: root.width;
-        height: root.height;
-        viewbox-width: root.shape.w / 1px;
-        viewbox-height: root.shape.h / 1px;
-        commands: root.shape.stripes;
-        fill: root.stripe;
-    }
-}
-
-/// An option of an open list.
+/// An option of an open list (the mockup's `.ddi`, 42px tall).
 component ListItem inherits Rectangle {
     in property <string> text;
     in property <bool> chosen;
+    in property <bool> chips: false;
+    in property <TapeShape> chip-shape;
+    in property <color> chip-a-base;
+    in property <color> chip-a-stripe;
+    in property <color> chip-b-base;
+    in property <color> chip-b-stripe;
     callback clicked();
-    height: 44px;
+    height: 42px;
     border-radius: 8px;
-    background: item-hit.has-hover ? #E9ECF0 : transparent;
+    background: (item-hit.has-hover || root.chosen) ? #F0F0EE : transparent;
+
+    if root.chips : StripedShape {
+        x: 10px;
+        y: (root.height - self.height) / 2;
+        shape: root.chip-shape;
+        base: root.chip-a-base;
+        stripe: root.chip-a-stripe;
+        shadow: false;
+    }
+
+    if root.chips : StripedShape {
+        x: 46px;
+        y: (root.height - self.height) / 2;
+        shape: root.chip-shape;
+        base: root.chip-b-base;
+        stripe: root.chip-b-stripe;
+        shadow: false;
+    }
 
     Text {
-        x: 12px;
-        width: root.width - 24px;
+        x: root.chips ? 82px : 10px;
+        width: root.width - self.x - 10px;
         height: root.height;
         text: root.text;
         font-family: "Shadows Into Light";
-        font-size: 22px;
+        font-size: 21px;
         font-weight: root.chosen ? 700 : 400;
         color: #2B2F36;
         vertical-alignment: center;
@@ -189,10 +137,40 @@ component ListItem inherits Rectangle {
     }
 }
 
+/// The open list's panel (the mockup's `.ddl`): white, 10.8px corners, a soft double shadow, 6px padding.
+component ListPanel inherits Rectangle {
+    width: 260px;
+    border-radius: 10.8px;
+    background: #FFFFFD;
+
+    // The mockup's `0 14px 24px -8px` and `0 2px 5px` shadows.
+    UShadow {
+        r: 10.8;
+        dy: 14;
+        spread: -8;
+        blur: 24;
+        alpha: 0.4;
+    }
+
+    UShadow {
+        r: 10.8;
+        dy: 2;
+        blur: 5;
+        alpha: 0.15;
+    }
+
+    Rectangle {
+        border-radius: 10.8px;
+        background: #FFFFFD;
+    }
+
+    @children
+}
+
 export component StyleTab inherits Rectangle {
-    in property <Frame> f;
-    in property <float> u0;
-    in property <float> v0;
+    in property <PaperFrame> pf;
+    in property <float> top;
+    /// The tapes' shapes: 0 the big Paper tape, 1 the preview's mini tape, 2 a chip, 3 the dots.
     in property <[TapeShape]> tapes;
 
     in-out property <int> font: 0;
@@ -203,187 +181,184 @@ export component StyleTab inherits Rectangle {
     /// -1 none, 0 the font list, 1 the tape list.
     in-out property <int> open-list: -1;
     out property <length> preview-font-size: [19px, 24px, 30px][root.size];
+    out property <float> bottom: root.ui-row-y + ui-row.total;
 
-    property <[string]> fonts: ["Shadows Into Light", "Handwritten", "Typewriter", "Bookish serif"];
-    property <[string]> tape-names: ["Pink + blue", "Yellow + green", "Lavender + peach", "Slate + rose"];
-    property <[color]> tape-base: [#F4B6C8, #F6E08A, #C9B8EA, #8E9AAB];
-    property <[color]> tape-stripe: [#8FB8E8, #9ACB8A, #F5C09A, #E7A3B0];
+    property <[string]> fonts: ["Shadows Into Light", "Patrick Hand", "Caveat", "Gloria Hallelujah", "Indie Flower", "Kalam"];
 
-    // Layout, in px from the content's top-left.
-    property <float> content-w: 448.0;
-    property <float> ctl-u: 212.0;
-    property <float> ctl-w: 236.0;
+    // The preview card: 16px / 16px / 14px padding around the little paper (12px / 18px padding, the
+    // text on 1.4 lines).
+    property <float> text-h: preview-t.preferred-height / 1px;
+    property <float> card-h: 16.0 + (24.0 + root.text-h) + 14.0;
+    property <float> rows-y: root.top + root.card-h + 18.0;
+    // Each plain row is 56px and its 2px rule.
+    property <float> row-pitch: 58.0;
+    out property <float> font-row-y: root.rows-y;
+    out property <float> size-row-y: root.rows-y + root.row-pitch;
+    out property <float> tape-row-y: root.rows-y + 2.0 * root.row-pitch;
+    out property <float> fade-row-y: root.rows-y + 3.0 * root.row-pitch;
+    out property <float> ui-row-y: root.fade-row-y + fade-row.total;
+    /// The lowest point either open list reaches (paper coordinates): the lists hang 48px under their
+    /// button, 6px of padding around six or four 42px entries.
+    out property <float> lists-bottom: max(root.font-row-y + 6.0 + 48.0 + 12.0 + 6 * 42.0, root.tape-row-y + 6.0 + 48.0 + 12.0 + 4 * 42.0);
 
     x: 0px;
     y: 0px;
-    width: root.f.w * 1px;
-    height: root.f.h * 1px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
 
-    pure function px(u: float, v: float) -> length {
-        return Tilt.x(root.f, root.u0 + u, root.v0 + v) * 1px;
-    }
-    pure function py(u: float, v: float) -> length {
-        return Tilt.y(root.f, root.u0 + u, root.v0 + v) * 1px;
-    }
-    /// The top of row `i` (row 0 is the Font row), under the preview.
-    pure function row-top(i: int) -> float {
-        return 126.0 + i * 56.0;
-    }
-
-    /// Where the control `id` is, in the window's px, for tests and accessibility checks: 0 font
-    /// button, 1 to 4 font options, 5 to 7 text sizes, 8 tape button, 9 to 12 tape options, 13 the
-    /// fade switch, 14 and 15 the UI sizes, 20 the Text size label (a blank part of the paper).
+    /// Where the control `id` is, in the Paper frame's px, for tests: 0 font button, 1 to 6 font
+    /// options, 7 to 9 text sizes, 10 tape button, 11 to 14 tape options, 15 the fade switch, 16 and
+    /// 17 the UI sizes, 20 the Text size label (a blank part of the paper).
     public pure function hit-x(id: int) -> length {
-        return root.px(root.hit-u(id), root.hit-v(id));
+        return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
     }
     public pure function hit-y(id: int) -> length {
-        return root.py(root.hit-u(id), root.hit-v(id));
+        return PX.y(root.pf, root.hit-a(id), root.hit-b(id));
     }
-    pure function hit-u(id: int) -> float {
-        if (id >= 5 && id <= 7) {
-            return root.ctl-u + (id - 5 + 0.5) * root.ctl-w / 3.0;
+    pure function hit-a(id: int) -> float {
+        if (id >= 7 && id <= 9) {
+            return 484.0 - 226.4 + (id - 7 + 0.5) * 226.4 / 3.0;
         }
-        if (id == 13) {
-            return root.ctl-u + root.ctl-w - 28.0;
+        if (id == 15) {
+            return 484.0 - 26.0;
         }
-        if (id == 14 || id == 15) {
-            return root.ctl-u + (id - 14 + 0.5) * root.ctl-w / 2.0;
+        if (id == 16 || id == 17) {
+            return 484.0 - 143.0 + (id - 16 + 0.5) * 143.0 / 2.0;
         }
         if (id == 20) {
-            return 100.0;
+            return 140.0;
         }
-        return root.ctl-u + root.ctl-w / 2.0;
+        if ((id >= 1 && id <= 6) || (id >= 11 && id <= 14)) {
+            return 484.0 - 130.0;
+        }
+        return 484.0 - 118.0;
     }
-    pure function hit-v(id: int) -> float {
+    pure function hit-b(id: int) -> float {
         if (id == 0) {
-            return root.row-top(0) + 28.0;
+            return root.font-row-y + 28.0;
         }
-        if (id >= 1 && id <= 4) {
-            return root.row-top(0) + 58.0 + (id - 1) * 44.0 + 22.0;
+        if (id >= 1 && id <= 6) {
+            return root.font-row-y + 6.0 + 48.0 + 6.0 + (id - 1) * 42.0 + 21.0;
         }
-        if (id >= 5 && id <= 7) {
-            return root.row-top(1) + 28.0;
+        if ((id >= 7 && id <= 9) || id == 20) {
+            return root.size-row-y + 28.0;
         }
-        if (id == 8) {
-            return root.row-top(2) + 28.0;
+        if (id == 10) {
+            return root.tape-row-y + 28.0;
         }
-        if (id >= 9 && id <= 12) {
-            return root.row-top(2) + 58.0 + (id - 9) * 44.0 + 22.0;
+        if (id >= 11 && id <= 14) {
+            return root.tape-row-y + 6.0 + 48.0 + 6.0 + (id - 11) * 42.0 + 21.0;
         }
-        if (id == 13) {
-            return root.row-top(3) + 28.0;
+        if (id == 15) {
+            return root.fade-row-y + fade-row.content-h / 2.0;
         }
-        if (id == 14 || id == 15) {
-            return root.row-top(4) + 28.0;
-        }
-        return root.row-top(1) + 28.0;
+        return root.ui-row-y + 28.0;
     }
 
-    // ---- the preview note ----
-    Rectangle {
-        x: root.px(0.0, 0.0);
-        y: root.py(0.0, 0.0);
-        width: root.content-w * 1px;
-        height: 112px;
-        background: #FFFFFD;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: #E3E0D6;
-        drop-shadow-color: #00000030;
-        drop-shadow-blur: 8px;
-        drop-shadow-offset-y: 3px;
+    // ---- the preview card ----
+    PRect {
+        pf: root.pf;
+        a: 36.0;
+        b: root.top;
+        w: 448.0;
+        h: root.card-h;
+        r: 10.8;
+        fill: #F0F0EE;
+    }
 
-        Rectangle {
-            x: 24px;
-            y: 18px;
-            width: parent.width - 48px - (root.ui-size == 0 ? 30px : 22px);
-            height: 80px;
-            clip: true;
+    PShadow {
+        pf: root.pf;
+        a: 52.0;
+        b: root.top + 16.0;
+        w: 416.0;
+        h: 24.0 + root.text-h;
+        dy: 6;
+        spread: -6;
+        blur: 10;
+        alpha: 0.3;
+    }
 
-            Text {
-                width: parent.width;
-                text: "Washi keeps every note on a scrap of paper.";
-                wrap: word-wrap;
-                font-family: "Shadows Into Light";
-                font-size: root.preview-font-size;
-                color: #2B2F36;
-            }
-        }
+    PRect {
+        pf: root.pf;
+        a: 52.0;
+        b: root.top + 16.0;
+        w: 416.0;
+        h: 24.0 + root.text-h;
+        fill: #FFFFFD;
+    }
 
-        // Fade text edge: the text melts into the paper at the bottom.
-        if root.fade : Rectangle {
-            x: 1px;
-            y: parent.height - 38px;
-            width: parent.width - 2px;
-            height: 36px;
-            background: @linear-gradient(180deg, #FFFFFD00 0%, #FFFFFD 100%);
-        }
+    preview-t := PText {
+        pf: root.pf;
+        a: 70.0;
+        b: root.top + 28.0;
+        width: 380px;
+        text: "Currently POG no Weapon : Ideal for him are Never Rest or White Night Nova.";
+        font-size: root.preview-font-size;
+        wrap: word-wrap;
+        line-height-factor: 1.4 / TextMetrics.natural;
+    }
 
-        // The note's menu button: UI size makes it, and so the whole chrome, smaller.
-        Rectangle {
-            x: parent.width - self.width - 14px;
-            y: 14px;
-            width: root.ui-size == 0 ? 28px : 20px;
-            height: self.width;
-            border-radius: self.width / 2;
-            background: #E9ECF0;
-        }
+    // Mini tapes at the little paper's corners: -35 degrees in the paper, so the shapes carry the tilt.
+    VTape {
+        pf: root.pf;
+        a: 52.0 + 14.0;
+        b: root.top + 16.0 + 2.5;
+        shape: root.tapes[1];
+        base: TapePalette.a-light[root.tape];
+        stripe: TapePalette.a-deep[root.tape];
+    }
 
-        MiniTape {
-            x: -14px;
-            y: -10px;
-            shape: root.tapes[0];
-            base: root.tape-base[root.tape];
-            stripe: root.tape-stripe[root.tape];
-        }
+    VTape {
+        pf: root.pf;
+        a: 52.0 + 416.0 - 14.0;
+        b: root.top + 16.0 + 24.0 + root.text-h - 6.5;
+        shape: root.tapes[1];
+        base: TapePalette.b-light[root.tape];
+        stripe: TapePalette.b-deep[root.tape];
+    }
 
-        MiniTape {
-            x: parent.width - self.width + 14px;
-            y: parent.height - self.height + 8px;
-            shape: root.tapes[1];
-            base: root.tape-base[root.tape];
-            stripe: root.tape-stripe[root.tape];
+    // ---- the rows ----
+    size-row := SettingRow {
+        pf: root.pf;
+        dots: root.tapes[3];
+        row-y: root.size-row-y;
+        label: "Text size";
+        for label[i] in ["Small", "Medium", "Large"] : PillButton {
+            text: label;
+            chosen: i == root.size;
+            clicked => { root.size = i; root.open-list = -1; }
         }
     }
 
-    // ---- row labels ----
-    for label[i] in ["Font", "Text size", "Tape color", "Fade text edge", "UI size"] : Text {
-        x: root.px(0.0, root.row-top(i));
-        y: root.py(0.0, root.row-top(i));
-        width: 200px;
-        height: 56px;
-        text: label;
-        font-family: "Shadows Into Light";
-        font-size: 26px;
-        color: #2B2F36;
-        vertical-alignment: center;
+    fade-row := SettingRow {
+        pf: root.pf;
+        dots: root.tapes[3];
+        row-y: root.fade-row-y;
+        label: "Fade text edge";
+        hint: "Softens the bottom of a long note while more text is below";
+        Switch {
+            checked: root.fade;
+            accessible-name: "Fade text edge";
+            toggled => { root.fade = !root.fade; }
+        }
     }
 
-    // ---- rows that are not dropdowns ----
-    Segmented {
-        x: root.px(root.ctl-u, root.row-top(1) + 8.0);
-        y: root.py(root.ctl-u, root.row-top(1) + 8.0);
-        labels: ["Small", "Medium", "Large"];
-        index <=> root.size;
-        picked(i) => { root.open-list = -1; }
+    ui-row := SettingRow {
+        pf: root.pf;
+        dots: root.tapes[3];
+        row-y: root.ui-row-y;
+        rule: false;
+        label: "UI size";
+        hint: root.ui-size == 0 ? "New notes open at 363 × 384" : "New notes open at 360 × 360";
+        for label[i] in ["Normal", "Small"] : PillButton {
+            text: label;
+            chosen: i == root.ui-size;
+            clicked => { root.ui-size = i; root.open-list = -1; }
+        }
     }
 
-    Switch {
-        x: root.px(root.ctl-u + root.ctl-w - 56.0, root.row-top(3) + 13.0);
-        y: root.py(root.ctl-u + root.ctl-w - 56.0, root.row-top(3) + 13.0);
-        on <=> root.fade;
-    }
-
-    Segmented {
-        x: root.px(root.ctl-u, root.row-top(4) + 8.0);
-        y: root.py(root.ctl-u, root.row-top(4) + 8.0);
-        labels: ["Normal", "Small"];
-        index <=> root.ui-size;
-        picked(i) => { root.open-list = -1; }
-    }
-
-    // An outside click closes the open list. It sits under the dropdown buttons, so pressing the other
-    // button switches lists instead.
+    // An outside click closes the open list. The Font and Tape color rows come after it, so pressing
+    // the other button switches lists instead.
     if root.open-list >= 0 : TouchArea {
         x: 0px;
         y: 0px;
@@ -392,83 +367,79 @@ export component StyleTab inherits Rectangle {
         clicked => { root.open-list = -1; }
     }
 
-    // ---- the dropdowns ----
-    PickerButton {
-        x: root.px(root.ctl-u, root.row-top(0) + 6.0);
-        y: root.py(root.ctl-u, root.row-top(0) + 6.0);
-        text: root.fonts[root.font];
-        open: root.open-list == 0;
-        clicked => { root.open-list = root.open-list == 0 ? -1 : 0; }
-    }
-
-    PickerButton {
-        x: root.px(root.ctl-u, root.row-top(2) + 6.0);
-        y: root.py(root.ctl-u, root.row-top(2) + 6.0);
-        text: root.tape-names[root.tape];
-        open: root.open-list == 1;
-        clicked => { root.open-list = root.open-list == 1 ? -1 : 1; }
-    }
-
-    // The lists are drawn last, so they sit above the rows under them.
-    if root.open-list == 0 : Rectangle {
-        x: root.px(root.ctl-u, root.row-top(0) + 54.0);
-        y: root.py(root.ctl-u, root.row-top(0) + 54.0);
-        width: root.ctl-w * 1px;
-        height: 184px;
-        background: #FFFFFD;
-        border-radius: 10px;
-        border-width: 1.5px;
-        border-color: #B9BFC8;
-        drop-shadow-color: #00000030;
-        drop-shadow-blur: 10px;
-        drop-shadow-offset-y: 4px;
-
-        for name[i] in root.fonts : ListItem {
-            x: 4px;
-            y: 4px + i * 44px;
-            width: parent.width - 8px;
-            text: name;
-            chosen: i == root.font;
-            clicked => { root.font = i; root.open-list = -1; }
+    font-row := SettingRow {
+        pf: root.pf;
+        dots: root.tapes[3];
+        row-y: root.font-row-y;
+        label: "Font";
+        PickerButton {
+            text: root.fonts[root.font];
+            open: root.open-list == 0;
+            clicked => { root.open-list = root.open-list == 0 ? -1 : 0; }
         }
     }
 
-    if root.open-list == 1 : Rectangle {
-        x: root.px(root.ctl-u, root.row-top(2) + 54.0);
-        y: root.py(root.ctl-u, root.row-top(2) + 54.0);
-        width: root.ctl-w * 1px;
-        height: 184px;
-        background: #FFFFFD;
-        border-radius: 10px;
-        border-width: 1.5px;
-        border-color: #B9BFC8;
-        drop-shadow-color: #00000030;
-        drop-shadow-blur: 10px;
-        drop-shadow-offset-y: 4px;
+    tape-row := SettingRow {
+        pf: root.pf;
+        dots: root.tapes[3];
+        row-y: root.tape-row-y;
+        label: "Tape color";
+        PickerButton {
+            text: TapePalette.names[root.tape];
+            open: root.open-list == 1;
+            chips: true;
+            chip-shape: root.tapes[2];
+            chip-a-base: TapePalette.a-light[root.tape];
+            chip-a-stripe: TapePalette.a-deep[root.tape];
+            chip-b-base: TapePalette.b-light[root.tape];
+            chip-b-stripe: TapePalette.b-deep[root.tape];
+            clicked => { root.open-list = root.open-list == 1 ? -1 : 1; }
+        }
+    }
 
-        for name[i] in root.tape-names : ListItem {
-            x: 4px;
-            y: 4px + i * 44px;
-            width: parent.width - 8px;
-            text: name;
-            chosen: i == root.tape;
-            clicked => { root.tape = i; root.open-list = -1; }
+    // ---- the lists, last so they sit above the rows under them ----
+    if root.open-list == 0 : PBox {
+        pf: root.pf;
+        a: 484.0 - 260.0;
+        b: root.font-row-y + 6.0 + 48.0;
+        width: 260px;
+        height: 12px + 6 * 42px;
 
-            // Two flat chips tell the colorways apart.
-            Rectangle {
-                x: parent.width - 26px - 12px;
-                y: 11px;
-                width: 26px;
-                height: 11px;
-                background: root.tape-base[i];
+        ListPanel {
+            height: parent.height;
+            for name[i] in root.fonts : ListItem {
+                x: 6px;
+                y: 6px + i * 42px;
+                width: parent.width - 12px;
+                text: name;
+                chosen: i == root.font;
+                clicked => { root.font = i; root.open-list = -1; }
             }
+        }
+    }
 
-            Rectangle {
-                x: parent.width - 26px - 12px;
-                y: 22px;
-                width: 26px;
-                height: 11px;
-                background: root.tape-stripe[i];
+    if root.open-list == 1 : PBox {
+        pf: root.pf;
+        a: 484.0 - 260.0;
+        b: root.tape-row-y + 6.0 + 48.0;
+        width: 260px;
+        height: 12px + 4 * 42px;
+
+        ListPanel {
+            height: parent.height;
+            for i in 4 : ListItem {
+                x: 6px;
+                y: 6px + i * 42px;
+                width: parent.width - 12px;
+                text: TapePalette.names[i];
+                chosen: i == root.tape;
+                chips: true;
+                chip-shape: root.tapes[2];
+                chip-a-base: TapePalette.a-light[i];
+                chip-a-stripe: TapePalette.a-deep[i];
+                chip-b-base: TapePalette.b-light[i];
+                chip-b-stripe: TapePalette.b-deep[i];
+                clicked => { root.tape = i; root.open-list = -1; }
             }
         }
     }

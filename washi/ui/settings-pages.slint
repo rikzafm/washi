@@ -1,193 +1,128 @@
-// The read-only Settings pages: Shortcuts and Privacy. Each is laid out in the Paper's tilted frame
-// (like the rest of Settings): `f` is the frame, `u0`/`v0` the content's top-left in it (px from the
-// Paper's center), `content-w` its width. Glyphs stay upright; only positions follow the tilt.
+// The read-only Settings pages: Shortcuts and Privacy (mockup "Setting Page" artboard). Each is laid
+// out in the Paper's tilted frame `pf`; `top` is the first block's top in paper coordinates and
+// `bottom` the end of the last block, which the window adds the bottom padding to.
 
 import "../../fonts/ShadowsIntoLight.ttf";
-import { Frame, Tilt, TRect } from "toolbar.slint";
+import "../../fonts/ShadowsIntoLight-Bold.ttf";
+import { PX, PaperFrame, TapeShape, PText, PBox, PRect, PRule, SettingRow, KeyCap } from "settings-widgets.slint";
 
 export struct ShortcutRow {
     label: string,
     keys: [string],
 }
 
-/// A text placed at `(u, v)` of the tilted frame.
-component TText inherits Text {
-    in property <Frame> f;
-    in property <float> u;
-    in property <float> v;
-    x: Tilt.x(root.f, root.u, root.v) * 1px;
-    y: Tilt.y(root.f, root.u, root.v) * 1px;
-    font-family: "Shadows Into Light";
-    color: #2B2F36;
-}
-
-/// An upright box placed with its top-left at `(u, v)` of the tilted frame.
-component TBox inherits Rectangle {
-    in property <Frame> f;
-    in property <float> u;
-    in property <float> v;
-    x: Tilt.x(root.f, root.u, root.v) * 1px;
-    y: Tilt.y(root.f, root.u, root.v) * 1px;
-}
-
-/// The grey note box under a page's rows.
-component NoteBox inherits Rectangle {
-    in property <Frame> f;
-    in property <float> u;
-    in property <float> v;
-    in property <float> w;
-    in property <float> h;
-    in property <string> text;
-
-    TRect {
-        f: root.f;
-        u0: root.u;
-        v0: root.v;
-        w: root.w;
-        h: root.h;
-        r: 12.0;
-        fill: #F0F0EE;
-    }
-
-    TText {
-        f: root.f;
-        u: root.u + 16.0;
-        v: root.v + 6.0;
-        width: root.w * 1px - 32px;
-        height: root.h * 1px - 12px;
-        text: root.text;
-        wrap: word-wrap;
-        vertical-alignment: center;
-        font-size: 18px;
-        color: #5B616B;
-    }
-}
-
-component KeyCap inherits Rectangle {
-    in property <string> text;
-    height: 32px;
-    min-width: 32px;
-    border-radius: 8px;
-    background: #F0F0EE;
-
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        Text {
-            text: root.text;
-            font-family: "Shadows Into Light";
-            font-size: 20px;
-            color: #2B2F36;
-            vertical-alignment: center;
-            horizontal-alignment: center;
-        }
-    }
-}
-
 export component ShortcutsPage inherits Rectangle {
-    in property <Frame> f;
-    in property <float> u0;
-    in property <float> v0;
-    in property <float> content-w;
+    in property <PaperFrame> pf;
+    in property <TapeShape> dots;
+    in property <float> top;
     in property <[ShortcutRow]> rows;
 
-    for row[i] in root.rows : TBox {
-        f: root.f;
-        u: root.u0;
-        v: root.v0 + i * 44.0;
-        width: root.content-w * 1px;
-        height: 44px;
+    // 11 rows of 44px and a 2px dotted rule, then the footnote 18px below (the mockup's gap).
+    property <float> rows-bottom: root.top + root.rows.length * 46.0;
+    out property <float> bottom: root.rows-bottom + 18.0 + note.preferred-height / 1px;
+    x: 0px;
+    y: 0px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
+
+    for row[i] in root.rows : Rectangle {
         accessible-role: list-item;
         accessible-label: row.label;
 
-        Text {
-            x: 0px;
-            width: 200px;
-            height: 44px;
+        PText {
+            pf: root.pf;
+            a: 36.0;
+            b: root.top + i * 46.0 + 4.5;
+            width: 220px;
+            height: 35px;
             text: row.label;
-            font-family: "Shadows Into Light";
-            font-size: 24px;
-            color: #2B2F36;
+            font-size: 22px;
             vertical-alignment: center;
         }
 
+        PRule {
+            pf: root.pf;
+            a: 36.0;
+            b: root.top + i * 46.0 + 44.0;
+            shape: root.dots;
+        }
+
         HorizontalLayout {
-            alignment: end;
-            spacing: 6px;
-            padding-top: 6px;
-            padding-bottom: 6px;
+            spacing: 4px;
+            x: PX.x(root.pf, 484.0 - self.preferred-width / 2px, root.top + i * 46.0 + 22.5) - self.preferred-width / 2;
+            y: PX.y(root.pf, 484.0 - self.preferred-width / 2px, root.top + i * 46.0 + 22.5) - 18px;
+            width: self.preferred-width;
+            height: 36px;
             for key in row.keys : KeyCap {
                 text: key;
             }
         }
     }
 
-    NoteBox {
-        f: root.f;
-        u: root.u0;
-        v: root.v0 + root.rows.length * 44.0 + 18.0;
-        w: root.content-w;
-        h: 54.0;
-        text: "Shortcuts follow the keys' places, so they also work on keyboard layouts without Latin letters.";
+    note := PText {
+        pf: root.pf;
+        a: 36.0;
+        b: root.rows-bottom + 18.0;
+        width: 448px;
+        text: "Shortcuts use the letter your keyboard layout types, so they may not work with a non-Latin layout. The toolbar and the ⋯ menu always do.";
+        font-size: 19px;
+        color: #5B616B;
+        wrap: word-wrap;
+        line-height-factor: 30.0 / (19.0 * 1.6064);
+        nudge: 3.0;
     }
 }
 
-/// One Privacy line: what, a hint under it, and its value on the right.
-component PrivacyRow inherits TBox {
-    in property <string> label;
-    in property <string> hint;
+/// One Privacy line: what, a hint under it, and its value chip on the right.
+component PrivacyRow inherits SettingRow {
     in property <string> value;
+    in property <bool> dark: false;
 
-    Text {
-        x: 0px;
-        y: 4px;
-        text: root.label;
-        font-family: "Shadows Into Light";
-        font-size: 26px;
-        color: #2B2F36;
-    }
-
-    Text {
-        x: 0px;
-        y: 36px;
-        text: root.hint;
-        font-family: "Shadows Into Light";
-        font-size: 17px;
-        color: #5B616B;
-    }
-
-    Text {
-        x: parent.width - self.width;
-        y: 4px;
-        width: 140px;
+    KeyCap {
         text: root.value;
-        horizontal-alignment: right;
-        font-family: "Shadows Into Light";
-        font-size: 22px;
-        font-weight: 700;
-        color: #2B2F36;
+        dark: root.dark;
     }
 }
 
 export component PrivacyPage inherits Rectangle {
-    in property <Frame> f;
-    in property <float> u0;
-    in property <float> v0;
-    in property <float> content-w;
+    in property <PaperFrame> pf;
+    in property <TapeShape> dots;
+    in property <float> top;
 
-    // The lock (stroke 1.8), left of the page's lead line.
-    TBox {
-        f: root.f;
-        u: root.u0;
-        v: root.v0;
+    // The lead card: 16px padding around a 32px lock and two 27.5px lines.
+    property <float> card-h: 32.0 + max(32.0, 2.0 * 27.5);
+    property <float> rows-y: root.top + root.card-h + 18.0;
+    property <float> note-y: root.rows-y + r1.total + r2.total + r3.total + 18.0;
+    out property <float> bottom: root.note-y + 28.0 + 26.0 + note-t.preferred-height / 1px;
+    x: 0px;
+    y: 0px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
+
+    PRect {
+        pf: root.pf;
+        a: 36.0;
+        b: root.top;
+        w: 448.0;
+        h: root.card-h;
+        r: 10.8;
+        fill: #F0F0EE;
+    }
+
+    // The lock: a 24-unit icon drawn at 32px (stroke 1.8 units).
+    PBox {
+        pf: root.pf;
+        a: 54.0;
+        b: root.top + (root.card-h - 32.0) / 2.0;
         width: 32px;
         height: 32px;
+
         Path {
             width: 32px;
             height: 32px;
-            viewbox-width: 32;
-            viewbox-height: 32;
-            commands: "M 9 14 L 9 10 A 7 7 0 0 1 23 10 L 23 14 M 7 14 L 25 14 L 25 27 L 7 27 Z";
+            viewbox-width: 24;
+            viewbox-height: 24;
+            commands: "M 7 11 L 17 11 A 2 2 0 0 1 19 13 L 19 18 A 2 2 0 0 1 17 20 L 7 20 A 2 2 0 0 1 5 18 L 5 13 A 2 2 0 0 1 7 11 Z M 8 11 L 8 8 A 4 4 0 0 1 16 8 L 16 11";
             stroke: #2B2F36;
             stroke-width: 1.8px;
             stroke-line-join: round;
@@ -195,53 +130,104 @@ export component PrivacyPage inherits Rectangle {
         }
     }
 
-    TText {
-        f: root.f;
-        u: root.u0 + 44.0;
-        v: root.v0 + 2.0;
-        text: "Your notes are locked on disk.";
-        font-size: 24px;
+    PText {
+        pf: root.pf;
+        a: 100.0;
+        b: root.top + 16.0;
+        width: 340px;
+        height: 27.5px;
+        text: "Locked on disk";
+        font-size: 22px;
+        font-weight: 700;
+        vertical-alignment: center;
     }
 
-    PrivacyRow {
-        f: root.f;
-        u: root.u0;
-        v: root.v0 + 56.0;
-        width: root.content-w * 1px;
-        height: 64px;
+    PText {
+        pf: root.pf;
+        a: 100.0;
+        b: root.top + 16.0 + 27.5;
+        width: 340px;
+        height: 27.5px;
+        text: "Your notes are stored in an encrypted database.";
+        font-size: 18px;
+        color: #5B616B;
+        vertical-alignment: center;
+    }
+
+    r1 := PrivacyRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.rows-y;
         label: "Unlocks with your Windows account";
-        hint: "Only you, signed in to this PC, can read them.";
+        hint: "No password to remember or type";
         value: "Automatic";
+        dark: true;
     }
 
-    PrivacyRow {
-        f: root.f;
-        u: root.u0;
-        v: root.v0 + 120.0;
-        width: root.content-w * 1px;
-        height: 64px;
+    r2 := PrivacyRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.rows-y + r1.total;
         label: "Stays on this computer";
-        hint: "Washi has no network access and sends nothing.";
+        hint: "Nothing is sent anywhere";
         value: "Offline";
     }
 
-    PrivacyRow {
-        f: root.f;
-        u: root.u0;
-        v: root.v0 + 184.0;
-        width: root.content-w * 1px;
-        height: 64px;
+    r3 := PrivacyRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.rows-y + r1.total + r2.total;
+        rule: false;
         label: "Deleted notes";
-        hint: "They are gone for good, not kept in a bin.";
+        hint: "Delete asks first, then it is final";
         value: "Permanent";
     }
 
-    NoteBox {
-        f: root.f;
-        u: root.u0;
-        v: root.v0 + 266.0;
-        w: root.content-w;
-        h: 72.0;
-        text: "No backup of the key. If the Windows account is lost or reset, the notes cannot be opened again.";
+    // The key note (20px on 26px lines, 14px / 18px padding): a bold lead with the first words of the
+    // rest after it on the first line (one paragraph in the mockup, whose runs differ in weight and
+    // colour), then the rest wrapping under it.
+    PRect {
+        pf: root.pf;
+        a: 36.0;
+        b: root.note-y;
+        w: 448.0;
+        h: 28.0 + 26.0 + note-t.preferred-height / 1px;
+        r: 10.8;
+        fill: #F0F0EE;
+    }
+
+    lead-t := PText {
+        pf: root.pf;
+        a: 54.0;
+        b: root.note-y + 14.0;
+        height: 26px;
+        text: "No backup of the key.";
+        font-size: 20px;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+
+    PText {
+        pf: root.pf;
+        a: 54.0 + lead-t.preferred-width / 1px + 5.0;
+        b: root.note-y + 14.0;
+        height: 26px;
+        text: "It belongs to this Windows";
+        font-size: 19px;
+        color: #5B616B;
+        vertical-alignment: center;
+    }
+
+    note-t := PText {
+        pf: root.pf;
+        a: 54.0;
+        b: root.note-y + 14.0 + 26.0;
+        width: 412px;
+        text: "account. If the profile is reset, the notes cannot be opened. Export as Markdown to keep a copy.";
+        font-size: 19px;
+        color: #5B616B;
+        wrap: word-wrap;
+        nudge: 3.0;
+        line-height-factor: 26.0 / (19.0 * 1.6064);
     }
 }

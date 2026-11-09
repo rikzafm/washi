@@ -1,20 +1,15 @@
-// Settings › General: Start with Windows, Always on top (the default for new notes), the folders and
-// Resource use. Sizes come from `SettingsMetrics` through the properties below (so this file does not
-// import settings.slint).
+// Settings > General: Start with Windows, Always on top (the default for new notes), the folders,
+// Resource use and the Uninstall row. Laid out like the mockup's CSS: blocks 18px apart, rows with a
+// 2px dotted rule, every height measured from the rows themselves (`bottom` is the end of the last
+// block, in paper coordinates).
 
-import { Frame, Tilt } from "toolbar.slint";
-import { SettingRow, Switch, PillButton, StatTile, SectionHeading } from "settings-widgets.slint";
+import { PaperFrame, TapeShape, PText, PRect, PRule, PBox, SettingRow, Switch, PillButton, StatTile, SectionHeading } from "settings-widgets.slint";
 
 export component GeneralTab inherits Rectangle {
-    in property <Frame> f;
-    /// The Paper's size, and the first row's top measured from the Paper's top edge.
-    in property <float> pw;
-    in property <float> ph;
+    in property <PaperFrame> pf;
+    in property <TapeShape> dots;
+    /// The first block's top, from the Paper's top edge.
     in property <float> top;
-    in property <float> row-h;
-    in property <float> gap;
-    in property <float> heading-h;
-    in property <float> tile-h;
     in property <bool> start-with-windows;
     in property <bool> new-notes-on-top;
     in property <string> install-dir;
@@ -35,21 +30,23 @@ export component GeneralTab inherits Rectangle {
     callback uninstall-cancel();
     callback uninstall-confirm();
 
-    property <float> storage-v: root.top + 2 * root.row-h + root.gap;
-    property <float> resource-v: root.storage-v + root.heading-h + 2 * root.row-h + root.gap;
-    property <float> tiles-v: root.resource-v + root.heading-h;
-    property <float> uninstall-v: root.tiles-v + root.tile-h + root.gap;
-
+    property <float> storage-y: root.top + toggle-1.total + toggle-2.total + 18.0;
+    property <float> resource-y: root.storage-y + 38.0 + folder-1.total + folder-2.total + 18.0;
+    property <float> tiles-y: root.resource-y + 38.0 + 10.0;
+    property <float> uninstall-y: root.tiles-y + 75.6 + 18.0;
+    property <float> uninstall-h: root.uninstall-confirming ? confirm-row.total : uninstall-row.total;
+    out property <float> bottom: root.uninstall-y + 2.0 + root.uninstall-h;
     x: 0px;
     y: 0px;
-    width: 100%;
-    height: 100%;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
 
-    SettingRow {
-        f: root.f; pw: root.pw; ph: root.ph;
-        v0: root.top; h: root.row-h;
+    toggle-1 := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.top;
         label: "Start with Windows";
-        hint: "Open notes return after you sign in";
+        hint: "Open notes return after you sign in. Off by default";
         Switch {
             checked: root.start-with-windows;
             accessible-name: "Start with Windows";
@@ -57,12 +54,13 @@ export component GeneralTab inherits Rectangle {
         }
     }
 
-    SettingRow {
-        f: root.f; pw: root.pw; ph: root.ph;
-        v0: root.top + root.row-h; h: root.row-h;
+    toggle-2 := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.top + toggle-1.total;
         rule: false;
         label: "Always on top";
-        hint: "New notes start above other windows";
+        hint: "Keeps notes above other windows. Off by default";
         Switch {
             checked: root.new-notes-on-top;
             accessible-name: "Always on top for new notes";
@@ -70,12 +68,18 @@ export component GeneralTab inherits Rectangle {
         }
     }
 
-    SectionHeading { f: root.f; pw: root.pw; ph: root.ph; v0: root.storage-v; text: "Storage"; }
+    SectionHeading {
+        pf: root.pf;
+        a: 36.0;
+        b: root.storage-y;
+        text: "Storage";
+    }
 
-    SettingRow {
-        f: root.f; pw: root.pw; ph: root.ph;
-        v0: root.storage-v + root.heading-h; h: root.row-h;
-        control-w: 80px; control-h: 44px;
+    folder-1 := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.storage-y + 38.0;
+        break-all: true;
         label: "Installed folder";
         hint: root.install-dir;
         PillButton {
@@ -85,11 +89,12 @@ export component GeneralTab inherits Rectangle {
         }
     }
 
-    SettingRow {
-        f: root.f; pw: root.pw; ph: root.ph;
-        v0: root.storage-v + root.heading-h + root.row-h; h: root.row-h;
-        control-w: 80px; control-h: 44px;
+    folder-2 := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.storage-y + 38.0 + folder-1.total;
         rule: false;
+        break-all: true;
         label: "Database folder";
         hint: root.data-dir;
         PillButton {
@@ -99,62 +104,78 @@ export component GeneralTab inherits Rectangle {
         }
     }
 
-    SectionHeading { f: root.f; pw: root.pw; ph: root.ph; v0: root.resource-v; text: "Resource use"; }
+    SectionHeading {
+        pf: root.pf;
+        a: 36.0;
+        b: root.resource-y;
+        text: "Resource use";
+    }
 
-    if !root.uninstall-confirming : SettingRow {
-        f: root.f; pw: root.pw; ph: root.ph;
-        v0: root.uninstall-v; h: root.row-h;
-        control-w: 120px; control-h: 44px;
+    // Four tiles in a row (a 4-column grid, 8px apart), each placed on the tilt by its top-left corner.
+    for t[i] in [
+        { value: root.stat-memory, caption: "Memory" },
+        { value: root.stat-cpu, caption: "CPU" },
+        { value: root.stat-db, caption: "Database" },
+        { value: root.stat-notes, caption: "Open notes" },
+    ] : PBox {
+        pf: root.pf;
+        a: 36.0 + i * 114.0;
+        b: root.tiles-y;
+        width: 106px;
+        height: 75.6px;
+
+        StatTile {
+            value: t.value;
+            caption: t.caption;
+        }
+    }
+
+    // The Uninstall row: a dotted rule above it, 4px of padding, then the row.
+    PRule {
+        pf: root.pf;
+        a: 36.0;
+        b: root.uninstall-y;
+        shape: root.dots;
+    }
+
+    uninstall-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.uninstall-y + 2.0;
+        pad-top: 4.0;
         rule: false;
+        visible: !root.uninstall-confirming;
         label: "Uninstall Washi Note";
         hint: root.uninstall-available ? "Removes the app from this computer" : "Available when installed with the installer";
         PillButton {
-            width: 120px;
             text: "Uninstall…";
-            danger: true;
+            outlined: true;
             enabled: root.uninstall-available;
             accessible-name: "Uninstall Washi Note";
             clicked => { root.uninstall-clicked(); }
         }
     }
 
-    if root.uninstall-confirming : SettingRow {
-        f: root.f; pw: root.pw; ph: root.ph;
-        v0: root.uninstall-v; h: root.row-h;
-        control-w: 188px; control-h: 44px;
+    confirm-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.uninstall-y + 2.0;
+        pad-top: 4.0;
         rule: false;
-        label-w: 236px; label-size: 20px; label-lines: 2;
+        visible: root.uninstall-confirming;
+        label-size: 21;
+        lh: 25.2;
         label: "Remove Washi Note from this computer?";
-        hint: "";
-        HorizontalLayout {
-            spacing: 8px;
-            PillButton {
-                text: "Cancel";
-                accessible-name: "Cancel uninstall";
-                clicked => { root.uninstall-cancel(); }
-            }
-            PillButton {
-                width: 100px;
-                text: "Uninstall";
-                filled: true;
-                accessible-name: "Confirm uninstall";
-                clicked => { root.uninstall-confirm(); }
-            }
+        PillButton {
+            text: "Cancel";
+            accessible-name: "Cancel uninstall";
+            clicked => { root.uninstall-cancel(); }
         }
-    }
-
-    // Four level tiles in a row, each placed on the tilt by its top-left corner.
-    for t[i] in [
-        { value: root.stat-memory, caption: "Memory" },
-        { value: root.stat-cpu, caption: "CPU" },
-        { value: root.stat-db, caption: "Database" },
-        { value: root.stat-notes, caption: "Open notes" },
-    ] : StatTile {
-        value: t.value;
-        caption: t.caption;
-        x: Tilt.x(root.f, -root.pw / 2.0 + 36.0 + i * 114.0, -root.ph / 2.0 + root.tiles-v) * 1px;
-        y: Tilt.y(root.f, -root.pw / 2.0 + 36.0 + i * 114.0, -root.ph / 2.0 + root.tiles-v) * 1px;
-        width: 106px;
-        height: root.tile-h * 1px;
+        PillButton {
+            text: "Uninstall";
+            filled: true;
+            accessible-name: "Confirm uninstall";
+            clicked => { root.uninstall-confirm(); }
+        }
     }
 }

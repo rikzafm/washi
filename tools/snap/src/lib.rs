@@ -7,6 +7,7 @@ pub mod fakes;
 mod harness;
 mod images;
 mod settings_general;
+mod settings_shots;
 pub mod platform;
 pub mod shot;
 

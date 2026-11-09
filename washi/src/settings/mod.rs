@@ -141,7 +141,7 @@ impl SettingsView {
     /// as keeping the window (with the Sidebar's strip out) on screen needs.
     fn open_paper(&self) -> RectF {
         let note = paper_of_note(self.host_window);
-        let want = RectF { x: note.x, y: note.y, w: PAPER_W, h: PAPER_MIN_H };
+        let want = RectF { x: note.x, y: note.y, w: PAPER_W, h: self.ui.invoke_paper_height_for(self.tab.get()).max(PAPER_MIN_H) };
         let areas = logical_areas(&(self.hooks.work_areas)(), self.ui.window().scale_factor());
         fit_on_screen(want, SIDEBAR_STRIP, &areas)
     }
@@ -184,11 +184,35 @@ impl SettingsView {
                 }
             });
         }
+        {
+            let me = me.clone();
+            self.ui.on_paper_height_changed(move || {
+                if let Some(v) = me.upgrade() {
+                    v.refit_height();
+                }
+            });
+        }
         self.ui.on_tab_clicked(move |to| {
             if let Some(v) = me.upgrade() {
                 v.select_tab(to);
             }
         });
+    }
+
+    /// The shown tab's content changed height while the page rests (the preview note grew with the
+    /// text size): resize the Paper to fit, keeping its top left. Mid-transition the tween is already
+    /// heading for the tab's height.
+    fn refit_height(&self) {
+        if !matches!(*self.phase.borrow(), Phase::Open) {
+            return;
+        }
+        let now = self.actual_paper();
+        let h = self.ui.invoke_paper_height_for(self.tab.get()).max(PAPER_MIN_H);
+        if (h - now.h).abs() < 0.5 {
+            return;
+        }
+        let fit = fit_on_screen(RectF { h, ..now }, SIDEBAR_STRIP, &self.areas());
+        self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, content: 1.0 });
     }
 
     fn areas(&self) -> Vec<RectF> {

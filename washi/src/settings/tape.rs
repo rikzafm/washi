@@ -55,15 +55,43 @@ fn clip(poly: Vec<P>, nx: f32, ny: f32, d: f32) -> Vec<P> {
     out
 }
 
-/// Give the Font & Style preview its two tapes (size and tilt are the preview's, fixed).
+/// The Paper's tilt in the Settings page (`PaperTheme.paper-tilt`), degrees.
+const PAPER_TILT: f32 = 1.5;
+/// The mockup's tapes lean -35 degrees inside the Paper, so on screen they lean this much.
+const TAPE_ANGLE: f32 = -35.0 + PAPER_TILT;
+/// A CSS `repeating-linear-gradient(45deg, a 0 p, b p 2p)` band `p` wide, as `stripe_path`'s pitch:
+/// the bands are measured along the gradient line, `stripe_path` along x - y (a factor of 2 root 2).
+fn css_pitch(p: f32) -> f32 {
+    p * 2.0 * std::f32::consts::SQRT_2
+}
+
+/// A dotted rule of `len` px along the Paper's tilt: the mockup's `2px dotted` (round dots 2px wide,
+/// 2px apart), as circles in a box that has 2px of room on every side (the rule's top-left is at
+/// (2, 2) in the box).
+pub fn dotted_rule(len: f32, tilt_deg: f32) -> (String, f32, f32) {
+    let (s, c) = tilt_deg.to_radians().sin_cos();
+    let mut path = String::new();
+    let n = (len / 4.0).floor() as i32;
+    for k in 0..n {
+        let (u, v) = (2.0 + 4.0 * k as f32, 1.0);
+        let (x, y) = (2.0 + u * c - v * s, 2.0 + u * s + v * c);
+        path.push_str(&format!("M {:.2} {:.2} a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 Z ", x - 1.0, y));
+    }
+    (path, len * c + 4.0, len * s + 6.0)
+}
+
+/// The Settings page's tapes: 0 the Paper's 113 by 33 strips, 1 the preview's 56 by 17 ones, 2 a
+/// 26 by 11 chip of the Tape color picker, 3 the dotted row rule.
 pub fn set_preview_tapes(ui: &crate::note_window::SettingsWindow) {
     use crate::note_window::TapeShape;
-    let shape = |angle: f32| {
-        let (w, h) = (74.0, 24.0);
+    let tape = |w: f32, h: f32, angle: f32, band: f32| {
         let (bw, bh) = tape_box(w, h, angle);
-        TapeShape { outline: outline_path(w, h, angle).into(), stripes: stripe_path(w, h, angle, 12.0).into(), w: bw, h: bh }
+        TapeShape { outline: outline_path(w, h, angle).into(), stripes: stripe_path(w, h, angle, css_pitch(band)).into(), w: bw, h: bh }
     };
-    ui.set_preview_tapes(slint::ModelRc::new(slint::VecModel::from(vec![shape(-8.0), shape(6.0)])));
+    let (dots, dw, dh) = dotted_rule(448.0, PAPER_TILT);
+    let rule = TapeShape { outline: dots.into(), stripes: "".into(), w: dw, h: dh };
+    let shapes = vec![tape(113.0, 33.0, TAPE_ANGLE, 8.0), tape(56.0, 17.0, TAPE_ANGLE, 5.0), tape(26.0, 11.0, 0.0, 4.0), rule];
+    ui.set_preview_tapes(slint::ModelRc::new(slint::VecModel::from(shapes)));
 }
 
 /// Rotate `pts` and place them in the tape's box.

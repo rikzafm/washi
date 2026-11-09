@@ -1,16 +1,16 @@
 // The Settings page: the Paper at its Settings size with the Sidebar in the strip left of it.
-// Like All notes, the content is laid out in the Paper's tilted frame (`Frame` / `Tilt` / `TRect`)
-// so glyphs stay upright on the tilted baseline.
+// Like All notes, the content is laid out in the Paper's tilted frame (`PaperFrame`) so glyphs stay
+// upright on the tilted baseline. The numbers follow the mockup ("Setting Page" artboard) 1:1.
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PaperTheme } from "paper-theme.slint";
-import { Paper, Tapes } from "paper.slint";
-import { Frame, Tilt, TRect } from "toolbar.slint";
+import { Paper } from "paper.slint";
 import { AllNotesMetrics } from "all-notes.slint";
 import { ShortcutRow, ShortcutsPage, PrivacyPage } from "settings-pages.slint";
 import { GeneralTab } from "settings-general.slint";
-import { StyleTab, StyleTabMetrics, TapeShape } from "style-tab.slint";
+import { StyleTab } from "style-tab.slint";
+import { PX, PaperFrame, TapeShape, TapePalette, PText, PRect, PShadow, VTape } from "settings-widgets.slint";
 export { TapeShape }
 
 export global SettingsMetrics {
@@ -18,78 +18,74 @@ export global SettingsMetrics {
     out property <length> strip: AllNotesMetrics.sidebar-w;
     out property <length> paper-w: 520px;
     out property <length> paper-min-h: 600px;
-    out property <length> pad-top: 38px;
-    out property <length> pad-x: 36px;
+    /// The Paper's padding is 38 / 36 / 44 and the title is a 52.8px line; blocks start 18px under it.
     out property <length> pad-bottom: 44px;
-    /// The title's row: a 48px title and the gap under it.
-    out property <length> title-h: 58px;
-    out property <length> gap: 18px;
-    out property <length> row2-h: 64px;
-    out property <length> heading-h: 36px;
-    out property <length> tile-h: 74px;
-    out property <length> note-h: 54px;
+    out property <float> content-top: 38.0 + 52.8 + 18.0;
 }
 
-// Each tab's content height is a pure sum of the row metrics, so the tween target is known before the
-// tab is shown. Tabs without content yet show their layout shell (nothing to add up).
-export global GeneralTabMetrics {
-    // 2 toggles with hints, "Storage" + 2 folder rows, "Resource use" + tiles, uninstall row.
-    out property <length> content-h:
-        2 * SettingsMetrics.row2-h
-        + SettingsMetrics.gap + SettingsMetrics.heading-h + 2 * SettingsMetrics.row2-h
-        + SettingsMetrics.gap + SettingsMetrics.heading-h + SettingsMetrics.tile-h
-        + SettingsMetrics.gap + SettingsMetrics.row2-h;
-}
-
-export global ShortcutsTabMetrics {
-    // 11 shortcut rows of 44px, a note box and the gap above it.
-    out property <length> content-h: 11 * 44px + SettingsMetrics.note-h + SettingsMetrics.gap;
-}
-
-export global PrivacyTabMetrics {
-    // The lock line, 3 rows of 64px, the gap and the 72px note box.
-    out property <length> content-h: 56px + 3 * 64px + SettingsMetrics.gap + 72px;
-}
-
-/// One tab label in the Sidebar, drawn in the panel's tilted frame `f`; `v0` is its top.
+/// One tab label in the Sidebar (the mockup's `.tab`: 48px tall, 24px text, 16px left padding),
+/// drawn in the panel's tilted frame `pf`; `b` is its top in the panel.
 component SidebarTab inherits Rectangle {
     in property <string> text;
     in property <bool> selected: false;
-    in property <Frame> f;
-    in property <float> v0;
+    in property <PaperFrame> pf;
+    in property <float> b;
     callback clicked();
 
     x: 0px;
     y: 0px;
-    width: root.f.w * 1px;
-    height: root.f.h * 1px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
 
-    if root.selected : TRect {
-        f: root.f;
-        u0: -123.0;
-        v0: root.v0;
+    if root.selected : PShadow {
+        pf: root.pf;
+        a: 12.0;
+        b: root.b;
+        w: 246.0;
+        h: 48.0;
+        r: 10.8;
+        dy: 6;
+        spread: -6;
+        blur: 12;
+        alpha: 0.3;
+    }
+
+    if root.selected : PRect {
+        pf: root.pf;
+        a: 12.0;
+        b: root.b;
         w: 246.0;
         h: 48.0;
         r: 10.8;
         fill: #FFFFFD;
     }
 
-    Text {
-        x: Tilt.x(root.f, -107.0, root.v0) * 1px;
-        y: Tilt.y(root.f, -107.0, root.v0) * 1px;
+    if !root.selected && hit.has-hover : PRect {
+        pf: root.pf;
+        a: 12.0;
+        b: root.b;
+        w: 246.0;
+        h: 48.0;
+        r: 10.8;
+        fill: rgba(255, 255, 253, 0.55);
+    }
+
+    PText {
+        pf: root.pf;
+        a: 29.0;
+        b: root.b;
+        nudge: -1.0;
         width: 214px;
         height: 48px;
         text: root.text;
-        font-family: "Shadows Into Light";
         font-size: 24px;
         font-weight: root.selected ? 700 : 400;
-        color: #2B2F36;
         vertical-alignment: center;
     }
 
-    TouchArea {
-        x: Tilt.x(root.f, 0.0, root.v0 + 24.0) * 1px - 123px;
-        y: Tilt.y(root.f, 0.0, root.v0 + 24.0) * 1px - 24px;
+    hit := TouchArea {
+        x: PX.x(root.pf, 12.0, root.b);
+        y: PX.y(root.pf, 12.0, root.b);
         width: 246px;
         height: 48px;
         mouse-cursor: pointer;
@@ -107,24 +103,26 @@ component SettingsSidebar inherits Rectangle {
     callback start-move();
 
     property <[string]> labels: ["General", "Font & Style", "Shortcuts", "Privacy"];
-    // The panel, in window px: as All notes' (270 wide at x = 8, as tall as the Paper).
-    property <float> pw: 270.0;
-    property <float> ph: max(240.0, root.height / 1px - 84.0);
-    property <float> top-v: -root.ph / 2.0;
-    property <Frame> pf: {
-        w: AllNotesMetrics.sidebar-w / 1px,
-        h: root.height / 1px,
-        cx: 143.0,
-        cy: root.height / 1px / 2.0,
-        cs: Math.cos(-1.0deg),
-        sn: Math.sin(-1.0deg),
+    // The panel (the mockup's `nav`): 270 by 600, 26px from the window's left, centred vertically,
+    // turned -1 degree. Coordinates in it are `a` from its left and `b` from its top.
+    property <PaperFrame> pf: {
+        f: {
+            w: SettingsMetrics.strip / 1px,
+            h: root.height / 1px,
+            cx: 161.0,
+            cy: root.height / 1px / 2.0,
+            cs: Math.cos(-1.0deg),
+            sn: Math.sin(-1.0deg),
+        },
+        pw: 270.0,
+        ph: 600.0,
     };
 
     // Dragging the Sidebar's empty parts moves the whole window.
     TouchArea {
         x: 0px;
         y: 0px;
-        width: AllNotesMetrics.sidebar-w;
+        width: SettingsMetrics.strip;
         height: root.height;
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
@@ -133,46 +131,58 @@ component SettingsSidebar inherits Rectangle {
         }
     }
 
-    TRect {
-        f: root.pf;
-        u0: -root.pw / 2.0;
-        v0: root.top-v;
-        w: root.pw;
-        h: root.ph;
+    PRect {
+        pf: root.pf;
+        a: 0.0;
+        b: 0.0;
+        w: 270.0;
+        h: 600.0;
         r: 22.0;
         fill: #D6DBE2;
     }
 
-    Text {
-        x: Tilt.x(root.pf, -113.0, root.top-v + 8.0) * 1px;
-        y: Tilt.y(root.pf, -113.0, root.top-v + 8.0) * 1px;
+    // "Settings": 44px on its natural line, 6px in from the 12px padding, 14px down.
+    PText {
+        pf: root.pf;
+        a: 19.0;
+        b: 14.0;
+        nudge: -1.0;
+        width: 240px;
+        height: 71px;
         text: "Settings";
-        font-family: "Shadows Into Light";
         font-size: 44px;
-        color: #2B2F36;
+        vertical-alignment: center;
     }
 
-    // Close (x) at the panel's top right.
+    // Close (x): a 44px button 10px in from the panel's top right corner, with a 20px icon.
+    if close-hit.has-hover : PRect {
+        pf: root.pf;
+        a: 216.0;
+        b: 10.0;
+        w: 44.0;
+        h: 44.0;
+        r: 10.8;
+        fill: rgba(255, 255, 253, 0.55);
+    }
+
     Rectangle {
-        x: Tilt.x(root.pf, 91.0, root.top-v + 10.0) * 1px;
-        y: Tilt.y(root.pf, 91.0, root.top-v + 10.0) * 1px;
-        width: 36px;
-        height: 36px;
-        border-radius: 18px;
-        background: close-hit.has-hover ? #00000012 : transparent;
+        x: PX.x(root.pf, 238.0, 32.0) - 22px;
+        y: PX.y(root.pf, 238.0, 32.0) - 22px;
+        width: 44px;
+        height: 44px;
         accessible-role: button;
         accessible-label: "Close settings";
 
         Path {
-            x: 10px;
-            y: 10px;
-            width: 16px;
-            height: 16px;
-            viewbox-width: 16;
-            viewbox-height: 16;
-            commands: "M 2 2 L 14 14 M 14 2 L 2 14";
+            x: 17px;
+            y: 17px;
+            width: 10px;
+            height: 10px;
+            viewbox-width: 10;
+            viewbox-height: 10;
+            commands: "M 0 0 L 10 10 M 10 0 L 0 10";
             stroke: #5B616B;
-            stroke-width: 1.8px;
+            stroke-width: 1.5px;
             stroke-line-cap: round;
         }
 
@@ -182,9 +192,10 @@ component SettingsSidebar inherits Rectangle {
         }
     }
 
+    // The tabs: 14 + 71 + 2 + 2 = 89px down, 50px apart.
     for label[i] in root.labels : SidebarTab {
-        f: root.pf;
-        v0: root.top-v + 72.0 + i * 52.0;
+        pf: root.pf;
+        b: 89.0 + i * 50.0;
         text: label;
         selected: i == root.selected-tab;
         clicked => { root.tab-clicked(i); }
@@ -217,6 +228,9 @@ export component SettingsWindow inherits Window {
     callback tab-clicked(int);
     callback close-clicked();
     callback start-move();
+    /// The height the shown tab needs changed while the page was at rest (the preview note grew or
+    /// shrank): Rust resizes the Paper to `paper-height-for(selected-tab)`.
+    callback paper-height-changed();
 
     // General tab (see settings-general.slint)
     in property <bool> start-with-windows;
@@ -245,6 +259,10 @@ export component SettingsWindow inherits Window {
     in-out property <int> style-ui-size <=> style.ui-size;
     in-out property <int> style-open-list <=> style.open-list;
     out property <length> style-preview-font-size: style.preview-font-size;
+    /// The lowest point the open Font or Tape color list can reach, from the Paper's top edge.
+    out property <length> style-lists-bottom: style.lists-bottom * 1px;
+    /// The shapes of the tapes, chips and dotted rules (see `settings/tape.rs`): 0 the Paper's tape,
+    /// 1 the preview's, 2 a chip, 3 the dotted rule.
     in property <[TapeShape]> preview-tapes;
     public pure function style-hit-x(id: int) -> length {
         return root.strip + style.hit-x(id);
@@ -253,26 +271,33 @@ export component SettingsWindow inherits Window {
         return style.hit-y(id);
     }
 
-    /// The Paper height a tab needs (Rust reads it for the tween target).
+    /// Where each tab's content ends, measured from the laid-out rows (paper coordinates), and the
+    /// Paper height that gives (the mockup's `min-height: 600` and 44px bottom padding). Every tab is
+    /// laid out all the time (only the shown one is drawn), so a tab's height is known before it shows.
+    out property <[float]> content-bottoms: [general.bottom, style.bottom, shortcuts.bottom, privacy.bottom];
     public pure function paper-height-for(tab: int) -> length {
-        return max(SettingsMetrics.paper-min-h, SettingsMetrics.pad-top + SettingsMetrics.title-h
-            + (tab == 0 ? GeneralTabMetrics.content-h : tab == 1 ? StyleTabMetrics.content-h
-                : tab == 2 ? ShortcutsTabMetrics.content-h : PrivacyTabMetrics.content-h)
-            + SettingsMetrics.pad-bottom);
+        return max(SettingsMetrics.paper-min-h, root.content-bottoms[tab] * 1px + SettingsMetrics.pad-bottom);
     }
+    /// The Paper height the Sidebar's lit tab needs.
+    out property <length> wanted-height: root.paper-height-for(root.selected-tab);
+    changed wanted-height => { root.paper-height-changed(); }
 
     property <length> margin: PaperTheme.margin;
     property <length> note-w: root.width - root.strip;
     property <length> paper-w: root.note-w - 2 * root.margin;
     property <length> paper-h: root.height - 2 * root.margin;
     // The Paper's tilted frame in the note area's coordinates.
-    property <Frame> paper-frame: {
-        w: root.note-w / 1px,
-        h: root.height / 1px,
-        cx: (root.margin + root.paper-w / 2) / 1px,
-        cy: (root.margin + root.paper-h / 2) / 1px,
-        cs: Math.cos(PaperTheme.paper-tilt),
-        sn: Math.sin(PaperTheme.paper-tilt),
+    property <PaperFrame> pf: {
+        f: {
+            w: root.note-w / 1px,
+            h: root.height / 1px,
+            cx: (root.margin + root.paper-w / 2) / 1px,
+            cy: (root.margin + root.paper-h / 2) / 1px,
+            cs: Math.cos(PaperTheme.paper-tilt),
+            sn: Math.sin(PaperTheme.paper-tilt),
+        },
+        pw: root.paper-w / 1px,
+        ph: root.paper-h / 1px,
     };
 
     forward-focus: fs;
@@ -309,6 +334,30 @@ export component SettingsWindow inherits Window {
         width: root.note-w;
         height: root.height;
 
+        // The mockup's `0 18px 26px -10px` and `0 2px 5px` shadows.
+        PShadow {
+            pf: root.pf;
+            a: 0.0;
+            b: 0.0;
+            w: root.pf.pw;
+            h: root.pf.ph;
+            dy: 18;
+            spread: -10;
+            blur: 26;
+            alpha: 0.32;
+        }
+
+        PShadow {
+            pf: root.pf;
+            a: 0.0;
+            b: 0.0;
+            w: root.pf.pw;
+            h: root.pf.ph;
+            dy: 2;
+            blur: 5;
+            alpha: 0.12;
+        }
+
         Paper {
             width: root.note-w;
             height: root.height;
@@ -316,29 +365,29 @@ export component SettingsWindow inherits Window {
             cy: root.height / 2;
             paper-w: root.paper-w;
             paper-h: root.paper-h;
+            shadow: false;
         }
 
-        // General (static for now): the title and the row labels, on the tilted baseline.
-        Text {
-            x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
-            y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
+        // The title: 48px on a 52.8px line at the padding's corner.
+        PText {
+            pf: root.pf;
+            a: 36.0;
+            b: 38.0;
+            width: 448px;
+            height: 52.8px;
             text: ["General", "Font & Style", "Shortcuts", "Privacy"][root.shown-tab];
             opacity: root.content-opacity;
-            font-family: "Shadows Into Light";
             font-size: 48px;
-            color: #2B2F36;
+            vertical-alignment: center;
+            line-height-factor: 1.1 / 1.6064;
         }
 
-        if root.shown-tab == 0 : GeneralTab {
-            f: root.paper-frame;
-            pw: root.paper-w / 1px;
-            ph: root.paper-h / 1px;
-            top: (SettingsMetrics.pad-top + SettingsMetrics.title-h) / 1px;
-            row-h: SettingsMetrics.row2-h / 1px;
-            gap: SettingsMetrics.gap / 1px;
-            heading-h: SettingsMetrics.heading-h / 1px;
-            tile-h: SettingsMetrics.tile-h / 1px;
+        general := GeneralTab {
+            visible: root.shown-tab == 0;
             opacity: root.content-opacity;
+            pf: root.pf;
+            dots: root.preview-tapes[3];
+            top: SettingsMetrics.content-top;
             start-with-windows: root.start-with-windows;
             new-notes-on-top: root.new-notes-on-top;
             install-dir: root.install-dir;
@@ -358,41 +407,51 @@ export component SettingsWindow inherits Window {
             uninstall-confirm => { root.uninstall-confirm(); }
         }
 
-        if root.shown-tab == 2 : ShortcutsPage {
-            width: root.note-w;
-            height: root.height;
-            opacity: root.content-opacity;
-            f: root.paper-frame;
-            u0: -root.paper-w / 2px + SettingsMetrics.pad-x / 1px;
-            v0: -root.paper-h / 2px + (SettingsMetrics.pad-top + SettingsMetrics.title-h) / 1px;
-            content-w: (SettingsMetrics.paper-w - 2 * SettingsMetrics.pad-x) / 1px;
-            rows: root.shortcuts;
-        }
-
-        if root.shown-tab == 3 : PrivacyPage {
-            width: root.note-w;
-            height: root.height;
-            opacity: root.content-opacity;
-            f: root.paper-frame;
-            u0: -root.paper-w / 2px + SettingsMetrics.pad-x / 1px;
-            v0: -root.paper-h / 2px + (SettingsMetrics.pad-top + SettingsMetrics.title-h) / 1px;
-            content-w: (SettingsMetrics.paper-w - 2 * SettingsMetrics.pad-x) / 1px;
-        }
-
         // Font & Style (UI only). Kept alive on every tab so the choices last until Settings closes;
         // it only draws on its own tab.
         style := StyleTab {
             visible: root.shown-tab == 1;
             opacity: root.content-opacity;
-            f: root.paper-frame;
-            u0: -root.paper-w / 2px + SettingsMetrics.pad-x / 1px;
-            v0: -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + SettingsMetrics.title-h / 1px;
+            pf: root.pf;
+            top: SettingsMetrics.content-top;
             tapes: root.preview-tapes;
         }
 
-        Tapes {
-            width: root.note-w;
-            height: root.height;
+        shortcuts := ShortcutsPage {
+            visible: root.shown-tab == 2;
+            opacity: root.content-opacity;
+            pf: root.pf;
+            dots: root.preview-tapes[3];
+            top: SettingsMetrics.content-top;
+            rows: root.shortcuts;
+        }
+
+        privacy := PrivacyPage {
+            visible: root.shown-tab == 3;
+            opacity: root.content-opacity;
+            pf: root.pf;
+            dots: root.preview-tapes[3];
+            top: SettingsMetrics.content-top;
+        }
+
+        // The Paper's two tapes follow the chosen Tape color (the mockup's 113 by 33 strips, pinned
+        // 20px / 11px off the top left corner and 20px / 8px off the bottom right one).
+        VTape {
+            pf: root.pf;
+            a: 36.5;
+            b: 5.5;
+            shape: root.preview-tapes[0];
+            base: TapePalette.a-light[style.tape];
+            stripe: TapePalette.a-deep[style.tape];
+        }
+
+        VTape {
+            pf: root.pf;
+            a: root.pf.pw - 36.5;
+            b: root.pf.ph - 8.5;
+            shape: root.preview-tapes[0];
+            base: TapePalette.b-light[style.tape];
+            stripe: TapePalette.b-deep[style.tape];
         }
     }
 }
