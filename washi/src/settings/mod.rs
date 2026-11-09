@@ -13,6 +13,7 @@ pub mod anim;
 pub mod shortcuts;
 pub mod general;
 pub mod stats;
+pub mod tape;
 
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
@@ -106,6 +107,7 @@ impl SettingsView {
         ui.set_app_icon(app_icon());
         ui.set_pinned(pinned);
         ui.set_shortcuts(shortcuts::model());
+        tape::set_preview_tapes(&ui);
         let now = (hooks.now)();
         let general = general::General::new(&ui, hooks.general.clone(), hooks.now.clone());
         let view = Rc::new_cyclic(|me| SettingsView {

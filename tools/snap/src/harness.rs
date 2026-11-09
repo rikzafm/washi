@@ -1384,3 +1384,34 @@ impl Harness {
         self.dir.path().join(name)
     }
 }
+
+/// Font & Style tab helpers (Settings).
+impl Harness {
+    fn settings_ui(&self) -> washi::note_window::SettingsWindow {
+        self.app.as_ref().and_then(|a| a.settings()).expect("Settings is open").ui().clone_strong()
+    }
+
+    /// Click the Font & Style control `id` (see `hit-x` in style-tab.slint).
+    pub fn settings_style_click(&mut self, id: i32) {
+        let ui = self.settings_ui();
+        let position = slint::LogicalPosition::new(ui.invoke_style_hit_x(id), ui.invoke_style_hit_y(id));
+        if let Some(app) = &self.app {
+            let button = slint::platform::PointerEventButton::Left;
+            app.dispatch_settings_event(WindowEvent::PointerMoved { position });
+            app.dispatch_settings_event(WindowEvent::PointerPressed { position, button });
+            app.dispatch_settings_event(WindowEvent::PointerReleased { position, button });
+        }
+        self.settle();
+    }
+
+    /// The Font & Style choices: (font, text size, tape, fade, UI size, open list).
+    pub fn settings_style_state(&self) -> (i32, i32, i32, bool, i32, i32) {
+        let ui = self.settings_ui();
+        (ui.get_style_font(), ui.get_style_size(), ui.get_style_tape(), ui.get_style_fade(), ui.get_style_ui_size(), ui.get_style_open_list())
+    }
+
+    /// The preview note's text size, logical px.
+    pub fn settings_style_preview_font_size(&self) -> f32 {
+        self.settings_ui().get_style_preview_font_size()
+    }
+}
