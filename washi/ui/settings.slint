@@ -8,6 +8,8 @@ import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { Frame, Tilt, TRect } from "toolbar.slint";
 import { AllNotesMetrics } from "all-notes.slint";
+import { StyleTab, StyleTabMetrics, TapeShape } from "style-tab.slint";
+export { TapeShape }
 
 export global SettingsMetrics {
     /// The strip the Sidebar adds left of the Paper (the same as All notes).
@@ -35,10 +37,6 @@ export global GeneralTabMetrics {
         + SettingsMetrics.gap + SettingsMetrics.heading-h + 2 * SettingsMetrics.row2-h
         + SettingsMetrics.gap + SettingsMetrics.heading-h + SettingsMetrics.tile-h
         + SettingsMetrics.gap + SettingsMetrics.row2-h;
-}
-
-export global StyleTabMetrics {
-    out property <length> content-h: 0px;
 }
 
 export global ShortcutsTabMetrics {
@@ -214,6 +212,23 @@ export component SettingsWindow inherits Window {
     callback close-clicked();
     callback start-move();
 
+    // Font & Style choices: UI only. They live here, so they reset whenever Settings opens, and
+    // nothing reads them (see style-tab.slint).
+    in-out property <int> style-font <=> style.font;
+    in-out property <int> style-size <=> style.size;
+    in-out property <int> style-tape <=> style.tape;
+    in-out property <bool> style-fade <=> style.fade;
+    in-out property <int> style-ui-size <=> style.ui-size;
+    in-out property <int> style-open-list <=> style.open-list;
+    out property <length> style-preview-font-size: style.preview-font-size;
+    in property <[TapeShape]> preview-tapes;
+    public pure function style-hit-x(id: int) -> length {
+        return root.strip + style.hit-x(id);
+    }
+    public pure function style-hit-y(id: int) -> length {
+        return style.hit-y(id);
+    }
+
     /// The Paper height a tab needs (Rust reads it for the tween target).
     public pure function paper-height-for(tab: int) -> length {
         return max(SettingsMetrics.paper-min-h, SettingsMetrics.pad-top + SettingsMetrics.title-h
@@ -240,6 +255,11 @@ export component SettingsWindow inherits Window {
     fs := FocusScope {
         key-pressed(e) => {
             if (e.text == Key.Escape) {
+                // An open dropdown closes first.
+                if (style.open-list >= 0) {
+                    style.open-list = -1;
+                    return accept;
+                }
                 root.close-clicked();
                 return accept;
             }
@@ -293,6 +313,17 @@ export component SettingsWindow inherits Window {
             font-family: "Shadows Into Light";
             font-size: 26px;
             color: #2B2F36;
+        }
+
+        // Font & Style (UI only). Kept alive on every tab so the choices last until Settings closes;
+        // it only draws on its own tab.
+        style := StyleTab {
+            visible: root.shown-tab == 1;
+            opacity: root.content-opacity;
+            f: root.paper-frame;
+            u0: -root.paper-w / 2px + SettingsMetrics.pad-x / 1px;
+            v0: -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + SettingsMetrics.title-h / 1px;
+            tapes: root.preview-tapes;
         }
 
         Tapes {
