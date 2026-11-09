@@ -1,0 +1,14 @@
+// The Sidebar's panel shape, shared by the All notes Sidebar and the Settings page's Sidebar so the
+// two cannot drift apart: only what is drawn on the panel differs. Window px, in the strip the
+// Sidebar adds left of the Paper.
+
+export global SidebarPanel {
+    /// The strip the Sidebar adds to the left of the Paper.
+    out property <length> strip: 282px;
+    /// The panel: 270 wide, centred at x = 143 in the strip (left edge 8, right edge 278).
+    out property <float> width: 270.0;
+    out property <float> cx: 143.0;
+    out property <float> radius: 22.0;
+    out property <angle> tilt: -1.0deg;
+    out property <color> fill: #D6DBE2;
+}

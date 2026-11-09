@@ -8,10 +8,11 @@
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { Frame, Tilt, TRect } from "toolbar.slint";
+import { SidebarPanel } from "sidebar-panel.slint";
 
 export global AllNotesMetrics {
     /// Width of the strip the sidebar adds to the left of the note window.
-    out property <length> sidebar-w: 282px;
+    out property <length> sidebar-w: SidebarPanel.strip;
 }
 
 export struct AllNoteItem {
@@ -99,10 +100,11 @@ export component AllNotesSidebar inherits Rectangle {
     /// The user pressed the sidebar itself (not a row or the button): the platform drags the window.
     callback start-move();
 
-    // The panel, in window px: 210 wide at x = 8, as tall as the paper (the window minus the margin).
-    property <float> pw: 270.0;
+    // The panel, in window px (its shape from `SidebarPanel`), as tall as the paper (the window
+    // minus the margin).
+    property <float> pw: SidebarPanel.width;
     property <float> ph: max(240.0, root.height / 1px - 84.0);
-    property <float> pcx: 143.0;
+    property <float> pcx: SidebarPanel.cx;
     property <float> pcy: root.height / 1px / 2.0;
     property <float> header-h: 104.0;
     property <float> row-pitch: 54.0;
@@ -136,8 +138,8 @@ export component AllNotesSidebar inherits Rectangle {
         h: root.height / 1px,
         cx: root.pcx,
         cy: root.pcy,
-        cs: Math.cos(-1.0deg),
-        sn: Math.sin(-1.0deg),
+        cs: Math.cos(SidebarPanel.tilt),
+        sn: Math.sin(SidebarPanel.tilt),
     };
     property <float> clip-y: root.pcy - root.ph / 2.0 + root.header-h - 6.0;
     property <Frame> lf: {
@@ -145,8 +147,8 @@ export component AllNotesSidebar inherits Rectangle {
         h: root.vp-h + 12.0,
         cx: root.pcx,
         cy: root.pcy - root.clip-y,
-        cs: Math.cos(-1.0deg),
-        sn: Math.sin(-1.0deg),
+        cs: Math.cos(SidebarPanel.tilt),
+        sn: Math.sin(SidebarPanel.tilt),
     };
     // The top of the panel from its center, for `v` values.
     property <float> top-v: -root.ph / 2.0;
@@ -172,8 +174,8 @@ export component AllNotesSidebar inherits Rectangle {
         v0: root.top-v;
         w: root.pw;
         h: root.ph;
-        r: 22.0;
-        fill: #D6DBE2;
+        r: SidebarPanel.radius;
+        fill: SidebarPanel.fill;
     }
 
     Text {
