@@ -195,6 +195,11 @@ pub trait WindowControl {
     fn begin_resize(&self, note: NoteId, hwnd: Option<isize>, edge: ResizeEdge);
     /// Raise a note's window to the top of the z-order and give it focus.
     fn bring_to_front(&self, _note: NoteId, _hwnd: Option<isize>) {}
+    /// Move and resize a window in one native step (physical px). Returns false when the platform
+    /// has no window to move, so the caller sets position and size itself.
+    fn set_bounds(&self, _hwnd: Option<isize>, _x: i32, _y: i32, _w: i32, _h: i32) -> bool {
+        false
+    }
     /// Work areas (screens minus taskbars) of all connected monitors, primary first.
     fn work_areas(&self) -> Vec<ScreenRect>;
     /// The given notes (id and native handle, if any) ordered by their windows' stacking on the

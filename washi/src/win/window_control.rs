@@ -82,6 +82,18 @@ unsafe extern "system" fn collect(monitor: HMONITOR, _dc: HDC, _rect: *mut RECT,
     1
 }
 
+/// Move and resize a window in one step (physical px), without activating it or changing its
+/// z-order. Two separate calls (position, then size) would show one frame with the old size at the
+/// new place.
+pub fn set_window_bounds(hwnd: isize, x: i32, y: i32, w: i32, h: i32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER};
+    // SAFETY: a plain call on a window of this thread; a stale handle just fails. Never SWP_NOREDRAW:
+    // the frame must repaint.
+    unsafe {
+        SetWindowPos(hwnd as HWND, std::ptr::null_mut(), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    }
+}
+
 impl WindowControl for Win32WindowControl {
     fn begin_move(&self, _note: NoteId, hwnd: Option<isize>) {
         start_native_drag(hwnd, HTCAPTION);
@@ -102,6 +114,12 @@ impl WindowControl for Win32WindowControl {
                 SetForegroundWindow(hwnd);
             }
         }
+    }
+
+    fn set_bounds(&self, hwnd: Option<isize>, x: i32, y: i32, w: i32, h: i32) -> bool {
+        let Some(hwnd) = hwnd else { return false };
+        set_window_bounds(hwnd, x, y, w, h);
+        true
     }
 
     fn stacking_order(&self, notes: &[(NoteId, Option<isize>)]) -> Vec<NoteId> {

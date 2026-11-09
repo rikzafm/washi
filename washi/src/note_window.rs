@@ -1839,6 +1839,11 @@ impl Note {
         self.saves_geometry.set(on);
     }
 
+    /// Fade the note's own content (text, toolbar, menu button, scrollbar) while it turns into Settings.
+    pub fn set_content_opacity(&self, o: f32) {
+        self.ui.set_content_opacity(o);
+    }
+
     /// Show or hide the window without touching the note.
     pub fn set_visible(&self, visible: bool) {
         if visible {

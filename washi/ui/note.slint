@@ -136,6 +136,9 @@ export component NoteWindow inherits Window {
     in property <bool> suspended: false;
     changed suspended => { if (root.suspended) { root.picker-open = false; } }
     in property <float> pitch-scale: 1;
+    /// The note's own content (text, toolbar, menu button, scrollbar): faded out while the note turns
+    /// into the Settings page. The paper, shadow and tapes stay.
+    in property <float> content-opacity: 1;
     in-out property <int> text-resync: 0;
     /// Block `i` was edited to this text.
     callback block-edited(int, string, int);
@@ -345,6 +348,7 @@ export component NoteWindow inherits Window {
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             text-view := Rectangle {
+                opacity: root.content-opacity;
                 x: root.margin;
                 // The tilted paper's top edge rises by half the paper width times sin(tilt) at the left.
                 // The clip starts at the highest point of the tilted top edge so images and text can reach the tilted edge.
@@ -438,6 +442,7 @@ export component NoteWindow inherits Window {
 
         // The scrollbar: drawn in the paper's frame (like the toolbar), hugging its right edge.
         scrollbar := ScrollBar {
+            opacity: root.content-opacity;
             x: 0px;
             y: 0px;
             width: root.note-w;
@@ -479,7 +484,7 @@ export component NoteWindow inherits Window {
                 root.picker-open = false;
                 if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
             }
-            opacity: (paper-touch.has-hover || self.any-pressed || root.dropdown-open) ? 1 : 0;
+            opacity: root.content-opacity * ((paper-touch.has-hover || self.any-pressed || root.dropdown-open) ? 1 : 0);
             visible: !root.all-notes-open && self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }
@@ -491,7 +496,7 @@ export component NoteWindow inherits Window {
             dv: -(root.height - 2 * root.margin) / 2px + ToolbarMetrics.menu-button-top-inset / 1px;
             active: root.dropdown-open;
             clicked => { root.open-dropdown(); }
-            opacity: (paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open) ? 1 : 0;
+            opacity: root.content-opacity * ((paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open) ? 1 : 0);
             visible: self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
         }

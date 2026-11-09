@@ -2,6 +2,7 @@
 
 use crate::platform::ScreenRect;
 use crate::storage::Geometry;
+use std::time::Duration;
 
 /// A rectangle in logical px.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -69,9 +70,107 @@ pub fn fit_on_screen(paper: RectF, strip: f32, areas: &[RectF]) -> RectF {
     RectF { x: paper.x.min(max_x).max(min_x), y: paper.y.min(max_y).max(min_y), ..paper }
 }
 
+/// Fade of the host note's text out (and back in), ms.
+pub const NOTE_FADE: Duration = Duration::from_millis(90);
+/// The Paper's growth to the Settings size (and back), ms.
+pub const GROW: Duration = Duration::from_millis(240);
+/// One frame of the transition.
+pub const TICK: Duration = Duration::from_millis(16);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Ease {
+    Linear,
+    OutCubic,
+}
+
+impl Ease {
+    fn at(self, t: f32) -> f32 {
+        match self {
+            Ease::Linear => t,
+            Ease::OutCubic => 1.0 - (1.0 - t).powi(3),
+        }
+    }
+}
+
+/// A value moving from `from` to `to` over `dur`, started at `start` on the monotonic clock.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tween {
+    from: f32,
+    to: f32,
+    start: Duration,
+    dur: Duration,
+    ease: Ease,
+}
+
+impl Tween {
+    pub fn new(from: f32, to: f32, start: Duration, dur: Duration, ease: Ease) -> Self {
+        Tween { from, to, start, dur, ease }
+    }
+
+    /// The value at `now`, and whether the tween has finished.
+    pub fn sample(&self, now: Duration) -> (f32, bool) {
+        let t = if self.dur.is_zero() { 1.0 } else { (now.saturating_sub(self.start).as_secs_f32() / self.dur.as_secs_f32()).min(1.0) };
+        (self.from + (self.to - self.from) * self.ease.at(t), t >= 1.0)
+    }
+
+    /// The same tween with its clock restarted at `now`.
+    pub fn restarted(&self, now: Duration) -> Self {
+        Tween { start: now, ..*self }
+    }
+}
+
+/// How far along the page is: the Paper's box and how much of the Sidebar's strip is out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pose {
+    pub paper: RectF,
+    pub strip: f32,
+}
+
+fn lerp(a: f32, b: f32, e: f32) -> f32 {
+    a + (b - a) * e
+}
+
+/// The Paper at `e` (0 is the note, 1 is the Settings page); the Paper's top-left moves only as far
+/// as keeping it on screen needs, the Sidebar's strip grows with `e`.
+pub fn grow_pose(from: RectF, to: RectF, e: f32) -> Pose {
+    Pose {
+        paper: RectF { x: lerp(from.x, to.x, e), y: lerp(from.y, to.y, e), w: lerp(from.w, to.w, e), h: lerp(from.h, to.h, e) },
+        strip: SIDEBAR_STRIP * e,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    #[test]
+    fn tween_eases_out_and_finishes() {
+        let t = Tween::new(0.0, 1.0, ms(100), ms(200), Ease::OutCubic);
+        assert_eq!(t.sample(ms(50)), (0.0, false));
+        let (mid, done) = t.sample(ms(200));
+        assert!(!done && mid > 0.5 && mid < 1.0, "ease-out is past halfway at half time: {mid}");
+        assert_eq!(t.sample(ms(300)), (1.0, true));
+        assert_eq!(t.sample(ms(900)), (1.0, true));
+    }
+
+    #[test]
+    fn tween_runs_backwards() {
+        let t = Tween::new(0.6, 0.0, ms(0), ms(240), Ease::OutCubic);
+        assert_eq!(t.sample(ms(0)).0, 0.6);
+        assert_eq!(t.sample(ms(240)), (0.0, true));
+    }
+
+    #[test]
+    fn grow_pose_ends_are_the_note_and_the_page() {
+        let note = RectF { x: 342.0, y: 142.0, w: 363.0, h: 384.0 };
+        let page = RectF { x: 400.0, y: 100.0, w: PAPER_W, h: PAPER_MIN_H };
+        assert_eq!(grow_pose(note, page, 0.0), Pose { paper: note, strip: 0.0 });
+        assert_eq!(grow_pose(note, page, 1.0), Pose { paper: page, strip: SIDEBAR_STRIP });
+    }
 
     #[test]
     fn note_paper_and_window_round_trip() {

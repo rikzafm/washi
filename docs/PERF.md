@@ -68,3 +68,20 @@ Cuts and findings, in order:
 Binary size (G5, not met, product decision: measured only): `.text` 7.3 MB and `.rdata` 5.3 MB. About 3 MB of `.rdata` is ICU data pulled by Slint's `std` feature (parley/icu_segmenter), about 1 MB is OpenSSL for SQLCipher. Experiments: `opt-level = "z"` 13.07 MB; plus no `accessibility` 12.88 MB. Reaching 8 MB needs a fork or patch of Slint/parley.
 
 Not done: Sticky Notes side-by-side (`-StickyNotes`), live capture at 150% (this machine is 100% and display scale was not changed).
+
+## Settings transition (ticket 02 of the Settings page)
+
+The open/close transition sets the Settings window bounds about every 16 ms for 240 ms (after a 90 ms
+fade of the host text), with one native SetWindowPos per frame (move and resize together, no activate,
+no z-order change, always repainting). The frame work is SettingsView::step, bracketed by the
+`settings-frame` trace mark (WASHI_TRACE).
+
+Status: **frame cost NOT yet measured on a real display.** The headless harness cannot measure it and this
+change was built without driving the real app. The window-resizing approach is in place; the fixed-large-window
+fallback (Settings window at its final bounds, transparent, only the drawing animating inside it) is not built.
+To close this out: run a release build with WASHI_TRACE set, open and close Settings at 100% and 150% display
+scale (window 447x468 -> 886x684 logical), check the worst frame is <= 16 ms with no tearing, and record it here.
+Switch to the fallback only if it is not.
+
+Verified in tests: the timer stops at rest (no idle CPU), the transition is wall-clock based (a late frame
+skips ahead instead of stretching), and end states equal the ticket 01 geometry.
