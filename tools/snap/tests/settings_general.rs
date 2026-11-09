@@ -1,6 +1,6 @@
 //! Settings › General: Start with Windows, the new-note Always on top default, folders, Resource use.
 
-use snap::Harness;
+use snap::{tab, Harness};
 use std::time::Duration;
 use washi::storage::Geometry;
 
@@ -142,13 +142,13 @@ fn stats_refresh_only_while_the_general_tab_shows() {
     h.advance_frames(ms(3000));
     assert_eq!(h.stats.samples.get(), at_rest + 3, "one a second");
 
-    h.settings_click_tab(2);
+    h.settings_click_tab(tab::SHORTCUTS);
     h.advance_frames(ms(300));
     let off = h.stats.samples.get();
     h.advance_frames(ms(3000));
     assert_eq!(h.stats.samples.get(), off, "no refresh on another tab");
 
-    h.settings_click_tab(0);
+    h.settings_click_tab(tab::GENERAL);
     h.advance_frames(ms(300));
     assert!(h.stats.samples.get() > off, "General refreshes again at once");
     let back = h.stats.samples.get();

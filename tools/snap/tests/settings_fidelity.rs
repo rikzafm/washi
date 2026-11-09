@@ -8,7 +8,7 @@
 //! not. The Paper's height must be the mockup's (`min-height: 600`, 38/44 padding, the content's own
 //! height) and nothing may sit in its bottom padding.
 
-use snap::Harness;
+use snap::{tab, Harness};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use washi::storage::Geometry;
@@ -17,19 +17,50 @@ fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
-const TABS: [&str; 4] = ["general", "style", "shortcuts", "privacy"];
-/// The mockup's Paper heights (its DOM, 1x): the content's height plus 38 above and 44 below, at least 600.
-const MOCKUP_PAPER_H: [f32; 4] = [658.4, 603.2, 766.8, 600.0];
+/// Every tab in Sidebar order (the index is its `snap::tab` number), by its reference image's name.
+const TABS: [&str; 5] = ["general", "appearance", "style", "shortcuts", "privacy"];
+/// The tabs the mockup has (Appearance came after it).
+const MOCKUP_TABS: [i32; 4] = [tab::GENERAL, tab::STYLE, tab::SHORTCUTS, tab::PRIVACY];
+/// The mockup's Paper heights (its DOM, 1x): the content's height plus 38 above and 44 below, at least
+/// 600. Appearance is not in the mockup; its one row is far under the minimum.
+const MOCKUP_PAPER_H: [f32; 5] = [658.4, 600.0, 603.2, 766.8, 600.0];
 /// The General row added after the mockup ("Notes left in All Notes"): its height with the rule.
 const PARK_ROW_H: f32 = 82.0;
-/// General's rows above that one end about here in the window: only this much of General's Paper
-/// can be held against its mockup (everything below moved down by the new row, and the Sidebar,
-/// centred on the taller window, moved down by half of it).
+/// The Font & Style rows taken out since the mockup: Fade text edge (80, its hint on two lines, and its
+/// 2px rule) and UI size (the 56 minimum, the last row; the Tape color row above it loses its 2px rule
+/// instead).
+const STYLE_REMOVED_H: f32 = 82.0 + 56.0 + 2.0;
+/// General's rows above the new one end about here in the window: only this much of General's Paper
+/// can be held against its mockup (everything below moved down by the new row).
 const GENERAL_COMPARED_H: u32 = 248;
+/// Font & Style's rows above the removed ones end about here in the window (the Tape color row's
+/// bottom, less its old rule): only this much of its Paper can be held against the mockup.
+const STYLE_COMPARED_H: u32 = 430;
+/// The Sidebar's header and first tab end about here in a window as tall as the mockup's: the tabs
+/// under it are not the mockup's since Appearance came in second. (On General and Font & Style the
+/// window is not the mockup's height, and the Sidebar, centred on it, is not where the mockup has it.)
+const SIDEBAR_COMPARED_H: u32 = 256;
 
-/// The Paper height a tab should have: the mockup's, plus the row added to General since.
+/// The Paper height a tab should have: the mockup's, plus the row added to General since, less the
+/// rows taken out of Font & Style, at least the 600 minimum.
 fn want_paper_h(i: usize) -> f32 {
-    MOCKUP_PAPER_H[i] + if i == 0 { PARK_ROW_H } else { 0.0 }
+    let changed = match i as i32 {
+        tab::GENERAL => PARK_ROW_H,
+        tab::STYLE => -STYLE_REMOVED_H,
+        _ => 0.0,
+    };
+    (MOCKUP_PAPER_H[i] + changed).max(600.0)
+}
+
+/// The top `rows` of an image, inside the Sidebar's strip.
+fn strip_top_rows(img: &(u32, u32, Vec<u8>), rows: u32) -> (u32, u32, Vec<u8>) {
+    let w = STRIP as u32;
+    let mut out = Vec::with_capacity((w * rows * 3) as usize);
+    for y in 0..rows {
+        let start = ((y * img.0) * 3) as usize;
+        out.extend_from_slice(&img.2[start..start + (w * 3) as usize]);
+    }
+    (w, rows, out)
 }
 
 /// The top `rows` of an image, right of the Sidebar's strip.
@@ -170,8 +201,9 @@ fn dump(name: &str, shot: &(u32, u32, Vec<u8>)) {
 
 #[test]
 fn every_tab_looks_like_the_mockup() {
-    for (i, tab) in TABS.iter().enumerate() {
-        let mut h = open_on(i as i32);
+    for t in MOCKUP_TABS {
+        let (i, tab) = (t as usize, TABS[t as usize]);
+        let mut h = open_on(t);
         h.settings_show_mockup_values();
         let shot = rendered(&h);
         dump(&format!("settings-{tab}.png"), &shot);
@@ -179,21 +211,40 @@ fn every_tab_looks_like_the_mockup() {
         assert_eq!(shot.0, want.0, "{tab}: window width");
         let extra = (want_paper_h(i) - MOCKUP_PAPER_H[i]).round() as i32;
         assert!((shot.1 as i32 - want.1 as i32 - extra).abs() <= 3, "{tab}: window height {} against the mockup's {} + {extra}", shot.1, want.1);
-        let (shot, want) = if i == 0 { (paper_top_rows(&shot, GENERAL_COMPARED_H), paper_top_rows(&want, GENERAL_COMPARED_H)) } else { (shot, want) };
-        let (mean, far) = block_difference(&shot, &want);
-        assert!(mean < 2.6, "{tab}: blocks differ by {mean:.2} levels on average");
-        assert!(far < 0.02, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+        let mut parts = vec![match t {
+            tab::GENERAL => (paper_top_rows(&shot, GENERAL_COMPARED_H), paper_top_rows(&want, GENERAL_COMPARED_H)),
+            tab::STYLE => (paper_top_rows(&shot, STYLE_COMPARED_H), paper_top_rows(&want, STYLE_COMPARED_H)),
+            _ => (paper_top_rows(&shot, shot.1), paper_top_rows(&want, want.1)),
+        }];
+        if extra == 0 {
+            parts.push((strip_top_rows(&shot, SIDEBAR_COMPARED_H), strip_top_rows(&want, SIDEBAR_COMPARED_H)));
+        }
+        for (shot, want) in parts {
+            let (mean, far) = block_difference(&shot, &want);
+            assert!(mean < 2.6, "{tab}: blocks differ by {mean:.2} levels on average");
+            assert!(far < 0.02, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+        }
     }
+}
+
+#[test]
+fn the_appearance_tab_fits_its_paper() {
+    // Not in the mockup: only its height and its bottom padding are checked.
+    let h = open_on(tab::APPEARANCE);
+    let shot = rendered(&h);
+    dump("settings-appearance.png", &shot);
+    assert!((paper_h(&shot) - want_paper_h(tab::APPEARANCE as usize)).abs() <= 3.0, "Paper {}", paper_h(&shot));
+    assert_eq!(ink_in_bottom_padding(&shot), 0);
 }
 
 #[test]
 fn the_comparison_can_fail() {
     // The Shortcuts page is not the General reference.
-    let mut h = open_on(2);
+    let mut h = open_on(tab::SHORTCUTS);
     h.settings_show_mockup_values();
     let shot = rendered(&h);
     let wrong = reference("general");
-    let (mean, far) = block_difference(&shot, &wrong);
+    let (mean, far) = block_difference(&paper_top_rows(&shot, shot.1), &paper_top_rows(&wrong, wrong.1));
     assert!(mean >= 2.6 || far >= 0.02, "a different tab matched ({mean:.2}, {far:.3})");
 }
 
@@ -231,7 +282,7 @@ fn no_tab_puts_content_in_the_papers_bottom_padding() {
 #[test]
 fn the_padding_check_can_fail() {
     // A window the app failed to grow: the content runs into where the padding should be.
-    let mut h = open_on(2);
+    let mut h = open_on(tab::SHORTCUTS);
     h.settings_squeeze_window(60.0);
     let shot = rendered(&h);
     assert!(ink_in_bottom_padding(&shot) > 100, "a squeezed Shortcuts page should overflow");
@@ -248,13 +299,15 @@ fn settings_opens_at_the_height_of_the_general_tab() {
 #[test]
 fn switching_tabs_mid_tween_still_ends_at_the_right_height() {
     let mut h = open_on(0);
-    h.settings_click_tab(2);
+    h.settings_click_tab(tab::SHORTCUTS);
     h.advance_frames(ms(80));
-    h.settings_click_tab(1);
+    h.settings_click_tab(tab::STYLE);
     h.advance_frames(ms(60));
-    h.settings_click_tab(3);
+    h.settings_click_tab(tab::PRIVACY);
     h.advance_frames(ms(60));
-    h.settings_click_tab(0);
+    h.settings_click_tab(tab::APPEARANCE);
+    h.advance_frames(ms(60));
+    h.settings_click_tab(tab::GENERAL);
     h.advance_frames(ms(600));
     let (_, _, _, wh) = h.settings_window_geometry().unwrap();
     let paper = wh as f32 - 2.0 * MARGIN;
@@ -264,30 +317,31 @@ fn switching_tabs_mid_tween_still_ends_at_the_right_height() {
 }
 
 #[test]
-fn a_bigger_preview_text_grows_the_paper_and_the_lists_stay_in_the_window() {
-    let mut h = open_on(1);
-    let (_, _, _, h0) = h.settings_window_geometry().unwrap();
+fn a_bigger_preview_text_stays_on_the_paper_and_the_lists_stay_in_the_window() {
+    let mut h = open_on(tab::STYLE);
+    let before = h.settings_content_bottoms()[tab::STYLE as usize];
     // Text size Large (control 9): the preview wraps to more lines.
     h.settings_style_click(9);
     h.advance_frames(ms(100));
-    let (_, _, _, h1) = h.settings_window_geometry().unwrap();
-    assert!(h1 > h0 + 30, "the Paper went from {h0} to {h1}");
+    let after = h.settings_content_bottoms()[tab::STYLE as usize];
+    assert!(after > before + 30.0, "the content went from {before} to {after}");
+    let (_, _, _, wh) = h.settings_window_geometry().unwrap();
+    let ph = wh as f32 - 2.0 * MARGIN;
+    assert!(ph >= after + 44.0 - 0.5, "the Paper {ph} holds the content {after} and its padding");
     let shot = rendered(&h);
     assert_eq!(ink_in_bottom_padding(&shot), 0, "the larger preview overflowed");
     // The lists hang inside the window (the Paper plus its margin) whatever the size.
-    let ph = h1 as f32 - 2.0 * MARGIN;
     assert!(h.settings_style_lists_bottom() <= ph + MARGIN - 14.0, "a list reaches {} of {ph}", h.settings_style_lists_bottom());
-    // And back to Small: the Paper shrinks again.
+    // And back to Small: the content is shorter again.
     h.settings_style_click(7);
     h.advance_frames(ms(100));
-    let (_, _, _, h2) = h.settings_window_geometry().unwrap();
-    assert!(h2 < h1, "{h2} should be under {h1}");
+    assert!(h.settings_content_bottoms()[tab::STYLE as usize] < after);
     assert_eq!(ink_in_bottom_padding(&rendered(&h)), 0);
 }
 
 #[test]
 fn the_open_lists_fit_in_the_window_at_the_default_size() {
-    let mut h = open_on(1);
+    let mut h = open_on(tab::STYLE);
     let (_, _, _, wh) = h.settings_window_geometry().unwrap();
     let ph = wh as f32 - 2.0 * MARGIN;
     let reach = h.settings_style_lists_bottom();
@@ -300,7 +354,8 @@ fn the_open_lists_fit_in_the_window_at_the_default_size() {
         dump(&format!("settings-{name}.png"), &shot);
         let want = reference(name);
         assert_eq!(shot.0, want.0, "{name}: window width");
-        let (mean, far) = block_difference(&shot, &want);
+        // The Paper above the rows taken out since the mockup (see `STYLE_COMPARED_H`).
+        let (mean, far) = block_difference(&paper_top_rows(&shot, STYLE_COMPARED_H), &paper_top_rows(&want, STYLE_COMPARED_H));
         assert!(mean < 2.6, "{name}: blocks differ by {mean:.2} levels on average");
         assert!(far < 0.02, "{name}: {:.1}% of the blocks are far from the mockup", far * 100.0);
     }

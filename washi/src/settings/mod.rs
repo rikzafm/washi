@@ -17,6 +17,7 @@
 //! moves and grows inside it, and once the page rests the window is trimmed to it.
 
 pub mod anim;
+pub mod appearance;
 pub mod shortcuts;
 pub mod general;
 pub mod stats;
@@ -110,6 +111,7 @@ pub struct SettingsView {
     /// The tab the page is showing or heading to.
     tab: Cell<i32>,
     general: Rc<general::General>,
+    _appearance: Rc<appearance::Appearance>,
 }
 
 impl SettingsView {
@@ -122,6 +124,7 @@ impl SettingsView {
         tape::set_preview_tapes(&ui);
         let now = (hooks.now)();
         let general = general::General::new(&ui, hooks.general.clone(), hooks.now.clone());
+        let appearance = appearance::Appearance::new(&ui, hooks.general.db.clone());
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,
             hooks,
@@ -146,6 +149,7 @@ impl SettingsView {
             tab_to: Cell::new(RectF::default()),
             tab: Cell::new(0),
             general,
+            _appearance: appearance,
         });
         view.wire(Rc::downgrade(&view));
         view.morph_to.set(view.open_paper());

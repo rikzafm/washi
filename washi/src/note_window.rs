@@ -25,6 +25,16 @@ pub const GEOMETRY_DELAY: Duration = Duration::from_millis(500);
 /// How long the scrollbar stays shown after scrolling stops.
 pub const SCROLLBAR_HOLD: Duration = Duration::from_millis(600);
 
+/// A new note's Paper at UI size Large (`PaperTheme.paper-default-*`); its window adds the margins.
+pub const DEFAULT_PAPER: (f32, f32) = (363.0, 384.0);
+
+/// The window a new note opens with at the UI size `scale`: the default Paper and its margins, all
+/// times the scale (logical px).
+pub fn new_note_window_size(scale: f32) -> (u32, u32) {
+    let m = 2.0 * crate::settings::anim::MARGIN;
+    (((DEFAULT_PAPER.0 + m) * scale).round() as u32, ((DEFAULT_PAPER.1 + m) * scale).round() as u32)
+}
+
 /// A minimized window reports a position around (-32000, -32000); that is not where the note lives.
 fn is_minimized_position(x: i32, y: i32) -> bool {
     x <= -30000 && y <= -30000
@@ -1229,6 +1239,8 @@ impl Note {
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
         ui.set_app_icon(app_icon());
+        // before the window shows: it opens at the preferred size, which follows the UI size
+        ui.set_ui_scale(db.ui_scale());
         if let Some(g) = geometry {
             ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
             ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));

@@ -1,6 +1,6 @@
 //! Settings › General › Uninstall row: confirm step, launching the uninstaller, exiting cleanly.
 
-use snap::Harness;
+use snap::{tab, Harness};
 use std::path::PathBuf;
 use std::time::Duration;
 use washi::storage::Geometry;
@@ -104,9 +104,9 @@ fn confirm_resets_on_tab_change() {
     h.settings_press_uninstall();
     assert!(h.settings_uninstall_confirming());
 
-    h.settings_click_tab(1);
+    h.settings_click_tab(tab::STYLE);
     h.advance_frames(ms(600));
-    h.settings_click_tab(0);
+    h.settings_click_tab(tab::GENERAL);
     h.advance_frames(ms(600));
     assert!(!h.settings_uninstall_confirming());
 }

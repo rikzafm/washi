@@ -1045,7 +1045,7 @@ impl Harness {
         }
     }
 
-    /// Click a Sidebar tab (0 General, 1 Font & Style, 2 Shortcuts, 3 Privacy).
+    /// Click a Sidebar tab (see `snap::tab`: 0 General, 1 Appearance, 2 Font & Style, 3 Shortcuts, 4 Privacy).
     pub fn settings_click_tab(&mut self, tab: i32) {
         if let Some(s) = self.app.as_ref().and_then(|a| a.settings()) {
             s.ui().invoke_tab_clicked(tab);
@@ -1466,10 +1466,10 @@ impl Harness {
         self.settle();
     }
 
-    /// The Font & Style choices: (font, text size, tape, fade, UI size, open list).
-    pub fn settings_style_state(&self) -> (i32, i32, i32, bool, i32, i32) {
+    /// The Font & Style choices: (font, text size, tape, open list).
+    pub fn settings_style_state(&self) -> (i32, i32, i32, i32) {
         let ui = self.settings_ui();
-        (ui.get_style_font(), ui.get_style_size(), ui.get_style_tape(), ui.get_style_fade(), ui.get_style_ui_size(), ui.get_style_open_list())
+        (ui.get_style_font(), ui.get_style_size(), ui.get_style_tape(), ui.get_style_open_list())
     }
 
     /// The preview note's text size, logical px.

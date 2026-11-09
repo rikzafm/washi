@@ -34,7 +34,7 @@ fn right_click_anywhere_opens_the_menu() {
     }
     assert_eq!(h.menu.shown.borrow().len(), 3);
     let items = h.last_menu();
-    assert_eq!(labels(&items), ["Paste", "Paste image", "New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows", "Fade text edge", "Export as Markdown\u{2026}"]);
+    assert_eq!(labels(&items), ["Paste", "Paste image", "New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows", "Export as Markdown\u{2026}"]);
     assert!(!menu_item(&items, "Paste").enabled, "no clipboard content yet");
     assert!(!menu_item(&items, "Paste image").enabled, "no image on clipboard");
     assert!(!menu_item(&items, "Open note").enabled, "no closed notes yet, so nothing to open");

@@ -6,6 +6,7 @@
 pub mod fakes;
 mod harness;
 mod images;
+mod settings_appearance;
 mod settings_general;
 mod settings_shots;
 pub mod platform;
@@ -13,3 +14,4 @@ pub mod shot;
 
 pub use fakes::WindowCommand;
 pub use harness::Harness;
+pub use settings_appearance::tab;

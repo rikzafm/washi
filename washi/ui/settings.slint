@@ -10,10 +10,13 @@ import { AllNotesMetrics } from "all-notes.slint";
 import { ShortcutRow, ShortcutsPage, PrivacyPage } from "settings-pages.slint";
 import { GeneralTab } from "settings-general.slint";
 import { StyleTab } from "style-tab.slint";
+import { AppearanceTab } from "appearance-tab.slint";
 import { PX, PaperFrame, TapeShape, TapePalette, PText, PRect, PShadow, VTape } from "settings-widgets.slint";
 export { TapeShape }
 
 export global SettingsMetrics {
+    /// The Tabs in Sidebar order (the index is the tab number everywhere).
+    out property <[string]> tabs: ["General", "Appearance", "Font & Style", "Shortcuts", "Privacy"];
     /// The strip the Sidebar adds left of the Paper (the same as All notes).
     out property <length> strip: AllNotesMetrics.sidebar-w;
     out property <length> paper-w: 520px;
@@ -102,7 +105,7 @@ component SettingsSidebar inherits Rectangle {
     /// The user pressed the Sidebar itself: the platform drags the window.
     callback start-move();
 
-    property <[string]> labels: ["General", "Font & Style", "Shortcuts", "Privacy"];
+    property <[string]> labels: SettingsMetrics.tabs;
     // The panel (the mockup's `nav`): 270 by 600, 26px from the window's left, centred vertically,
     // turned -1 degree. Coordinates in it are `a` from its left and `b` from its top.
     property <PaperFrame> pf: {
@@ -216,6 +219,8 @@ export component SettingsWindow inherits Window {
     /// content then settles in, see `content-dy`).
     in property <int> selected-tab: 0;
     in property <int> shown-tab: 0;
+    /// The Tab labels, in Sidebar order.
+    out property <[string]> tab-names: SettingsMetrics.tabs;
     /// How much of the Sidebar's strip is out (0 to `SettingsMetrics.strip`): the window grows left
     /// by this much and the Sidebar slides out from behind the Paper's left edge.
     in property <length> strip: SettingsMetrics.strip;
@@ -264,13 +269,24 @@ export component SettingsWindow inherits Window {
     callback uninstall-clicked();
     callback uninstall-cancel();
     callback uninstall-confirm();
+    // Appearance (see appearance-tab.slint): Rust owns the values (app-wide preferences).
+    /// 0 Small, 1 Medium, 2 Large.
+    in property <int> ui-size: 2;
+    callback set-ui-size(int);
+    out property <string> ui-size-label: appearance.ui-size-label;
+    in-out property <int> appearance-open-list <=> appearance.open-list;
+    out property <length> appearance-lists-bottom: appearance.lists-bottom * 1px;
+    public pure function appearance-hit-x(id: int) -> length {
+        return root.page-x + root.strip + appearance.hit-x(id);
+    }
+    public pure function appearance-hit-y(id: int) -> length {
+        return root.page-y + appearance.hit-y(id);
+    }
     // Font & Style choices: UI only. They live here, so they reset whenever Settings opens, and
     // nothing reads them (see style-tab.slint).
     in-out property <int> style-font <=> style.font;
     in-out property <int> style-size <=> style.size;
     in-out property <int> style-tape <=> style.tape;
-    in-out property <bool> style-fade <=> style.fade;
-    in-out property <int> style-ui-size <=> style.ui-size;
     in-out property <int> style-open-list <=> style.open-list;
     out property <length> style-preview-font-size: style.preview-font-size;
     /// The lowest point the open Font or Tape color list can reach, from the Paper's top edge.
@@ -288,9 +304,16 @@ export component SettingsWindow inherits Window {
     /// Where each tab's content ends, measured from the laid-out rows (paper coordinates), and the
     /// Paper height that gives (the mockup's `min-height: 600` and 44px bottom padding). Every tab is
     /// laid out all the time (only the shown one is drawn), so a tab's height is known before it shows.
-    out property <[float]> content-bottoms: [general.bottom, style.bottom, shortcuts.bottom, privacy.bottom];
+    out property <[float]> content-bottoms: [general.bottom, appearance.bottom, style.bottom, shortcuts.bottom, privacy.bottom];
+    /// The lowest point each tab's dropdown lists can reach (paper coordinates; 0 for a tab without
+    /// one). An open list may hang into the Paper's bottom padding and margin, but must end at least
+    /// 14px inside the window (16 here, a pixel of slack each way for rounding).
+    out property <[float]> list-bottoms: [0, appearance.lists-bottom, style.lists-bottom, 0, 0];
     public pure function paper-height-for(tab: int) -> length {
-        return max(SettingsMetrics.paper-min-h, root.content-bottoms[tab] * 1px + SettingsMetrics.pad-bottom);
+        return max(
+            SettingsMetrics.paper-min-h,
+            root.content-bottoms[tab] * 1px + SettingsMetrics.pad-bottom,
+            root.list-bottoms[tab] * 1px + 16px - PaperTheme.margin);
     }
     /// The Paper height the Sidebar's lit tab needs.
     out property <length> wanted-height: root.paper-height-for(root.selected-tab);
@@ -319,8 +342,9 @@ export component SettingsWindow inherits Window {
         key-pressed(e) => {
             if (e.text == Key.Escape) {
                 // An open dropdown closes first.
-                if (style.open-list >= 0) {
+                if (style.open-list >= 0 || appearance.open-list >= 0) {
                     style.open-list = -1;
+                    appearance.open-list = -1;
                     return accept;
                 }
                 root.close-clicked();
@@ -389,7 +413,7 @@ export component SettingsWindow inherits Window {
             b: 38.0 + root.content-dy;
             width: 448px;
             height: 52.8px;
-            text: ["General", "Font & Style", "Shortcuts", "Privacy"][root.shown-tab];
+            text: SettingsMetrics.tabs[root.shown-tab];
             opacity: root.content-opacity;
             font-size: 48px;
             vertical-alignment: center;
@@ -423,10 +447,20 @@ export component SettingsWindow inherits Window {
             uninstall-confirm => { root.uninstall-confirm(); }
         }
 
+        appearance := AppearanceTab {
+            visible: root.shown-tab == 1;
+            opacity: root.content-opacity;
+            pf: root.pf;
+            dots: root.preview-tapes[3];
+            top: SettingsMetrics.content-top + root.content-dy;
+            ui-size: root.ui-size;
+            set-ui-size(i) => { root.set-ui-size(i); }
+        }
+
         // Font & Style (UI only). Kept alive on every tab so the choices last until Settings closes;
         // it only draws on its own tab.
         style := StyleTab {
-            visible: root.shown-tab == 1;
+            visible: root.shown-tab == 2;
             opacity: root.content-opacity;
             pf: root.pf;
             top: SettingsMetrics.content-top + root.content-dy;
@@ -434,7 +468,7 @@ export component SettingsWindow inherits Window {
         }
 
         shortcuts := ShortcutsPage {
-            visible: root.shown-tab == 2;
+            visible: root.shown-tab == 3;
             opacity: root.content-opacity;
             pf: root.pf;
             dots: root.preview-tapes[3];
@@ -443,7 +477,7 @@ export component SettingsWindow inherits Window {
         }
 
         privacy := PrivacyPage {
-            visible: root.shown-tab == 3;
+            visible: root.shown-tab == 4;
             opacity: root.content-opacity;
             pf: root.pf;
             dots: root.preview-tapes[3];
