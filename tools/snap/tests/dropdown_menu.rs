@@ -63,6 +63,28 @@ fn dropdown_delete_note_dismisses_and_deletes_current_note() {
 }
 
 #[test]
+fn dropdown_close_note_dismisses_and_closes_current_note_without_deleting_it() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.right_click(0, Some(&["New note"]));
+    assert_eq!(h.open_note_count(), 2);
+    let id1 = h.note_id(1);
+    h.set_note_text(1, "# Keep me");
+
+    h.toggle_dropdown(1);
+    assert!(h.is_dropdown_open());
+    h.invoke_dropdown_close_note();
+
+    assert!(!h.is_dropdown_open());
+    assert!(!h.is_delete_dialog_open());
+    assert_eq!(h.open_note_count(), 1);
+
+    // the closed note is kept: it is listed in the other note's menu
+    h.toggle_dropdown(0);
+    assert!(h.dropdown_notes().iter().any(|item| item.id == id1 as i32));
+}
+
+#[test]
 fn dropdown_new_note_dismisses_and_creates_new_note() {
     let mut h = Harness::new();
     h.start().unwrap();
@@ -452,11 +474,7 @@ fn all_notes_sidebar_selection_and_new_note_button() {
         h.all_notes_status_text().as_deref(),
         Some("Open on your desktop · edited today")
     );
-    let open_preview: String = h
-        .all_notes_preview_runs()
-        .iter()
-        .map(|r| r.text.as_str())
-        .collect();
+    let open_preview = h.all_notes_editor_text().unwrap();
     assert!(open_preview.contains("Endfield Note"));
     assert!(open_preview.contains("Thermite Cutter"));
 
@@ -478,11 +496,7 @@ fn all_notes_sidebar_selection_and_new_note_button() {
         h.all_notes_status_text().as_deref(),
         Some("Closed · edited today")
     );
-    let closed_preview: String = h
-        .all_notes_preview_runs()
-        .iter()
-        .map(|r| r.text.as_str())
-        .collect();
+    let closed_preview = h.all_notes_editor_text().unwrap();
     assert!(closed_preview.contains("Meeting ideas"));
     assert!(closed_preview.contains("Roadmap"));
 
@@ -495,14 +509,14 @@ fn all_notes_sidebar_selection_and_new_note_button() {
     assert_eq!(h.all_notes_selected_id(), Some(new_id));
     assert_eq!(h.all_notes_confirming_delete(), Some(false));
 
-    // Verify rendering of All Notes window (603 x 625)
+    // The editor window is the note's window plus the sidebar's strip on the left
     let (w, h_px, pixels) = h.render_all_notes().expect("render all notes");
-    assert_eq!((w, h_px), (603, 625));
-    // Desk background at top-left (10, 10) is #D6DBE2 (214, 219, 226)
-    let bg = pixels[(10 * w + 10) as usize];
-    assert_eq!((bg.r, bg.g, bg.b), (214, 219, 226));
-    // Preview card paper center at (411, 311) is #FFFFFD
-    let paper = pixels[(311 * w + 411) as usize];
+    assert_eq!((w, h_px), (447 + 282, 468));
+    // the sidebar's slate backing at the middle of its left edge area
+    let backing = pixels[(240 * w + 14) as usize];
+    assert_eq!((backing.r, backing.g, backing.b), (214, 219, 226));
+    // the paper, right of the strip: the middle of the paper is #FFFFFD
+    let paper = pixels[(250 * w + 282 + 200) as usize];
     assert!(paper.r >= 252 && paper.g >= 252 && paper.b >= 250);
 }
 

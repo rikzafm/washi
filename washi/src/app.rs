@@ -292,10 +292,53 @@ impl App {
                 self.toggle_dropdown(id);
             }
             NoteEvent::TextChanged => {
-                if self.is_all_notes_open() {
+                if let Some(v) = self.all_notes() {
+                    // the editor shows this note too: it follows the desktop window
+                    if v.editor_note_id() == id {
+                        if let Some(text) = self.with_note(id, |n| n.text()) {
+                            if text != v.editor_text() {
+                                v.set_editor_text(&text);
+                            }
+                        }
+                    }
                     self.refresh_all_notes(None);
                 }
             }
+        }
+    }
+
+    /// What the All Notes editor asks the app to do.
+    fn handle_editor_event(&self, ev: NoteEvent) {
+        let hwnd = self.all_notes().and_then(|v| v.hwnd());
+        match ev {
+            NoteEvent::WindowClosed => self.dismiss_all_notes(),
+            NoteEvent::Close => self.all_notes_close_note(),
+            NoteEvent::New => self.all_notes_new_note(),
+            NoteEvent::Delete => self.all_notes_request_delete(),
+            NoteEvent::PointerMoved => self.0.suspend.poke(),
+            NoteEvent::PointerDown => self.dismiss_dropdown(),
+            NoteEvent::StartMove => {
+                self.dismiss_dropdown();
+                self.0.env.window_control.begin_move(0, hwnd);
+            }
+            NoteEvent::StartResize(edge) => {
+                // the window's left edge is the sidebar's: only the paper's other edges resize
+                if !matches!(edge, ResizeEdge::SouthWest | ResizeEdge::West | ResizeEdge::NorthWest) {
+                    self.0.env.window_control.begin_resize(0, hwnd, edge);
+                }
+            }
+            NoteEvent::TextChanged => {
+                let Some(v) = self.all_notes() else { return };
+                let id = v.editor_note_id();
+                let text = v.editor_text();
+                // the desktop window of the same note follows the editor
+                if self.with_note(id, |n| n.text()).is_some_and(|t| t != text) {
+                    self.with_note(id, |n| n.set_text(&text));
+                }
+                self.refresh_all_notes(None);
+            }
+            NoteEvent::OpenDropdown => self.toggle_editor_dropdown(),
+            NoteEvent::ContextMenu { .. } | NoteEvent::InsertImage | NoteEvent::OpenImage(_) => {}
         }
     }
 
@@ -376,6 +419,13 @@ impl App {
         }
     }
 
+    /// Invoke the close note callback on the active dropdown (for testing).
+    pub fn invoke_dropdown_close_note(&self) {
+        if let Some(d) = self.dropdown() {
+            d.invoke_close_note();
+        }
+    }
+
     /// Invoke the new note callback on the active dropdown (for testing).
     pub fn invoke_dropdown_new_note(&self) {
         if let Some(d) = self.dropdown() {
@@ -428,11 +478,6 @@ impl App {
     /// Status line text in the open All Notes window, if any.
     pub fn all_notes_status_text(&self) -> Option<String> {
         self.all_notes().map(|v| v.status_text())
-    }
-
-    /// Preview text runs in the open All Notes window.
-    pub fn all_notes_preview_runs(&self) -> Vec<crate::note_window::PreviewRun> {
-        self.all_notes().map(|v| v.preview_runs()).unwrap_or_default()
     }
 
     /// Whether the inline delete confirmation bar is active in All Notes.
@@ -577,15 +622,20 @@ impl App {
         }
     }
 
-    /// Close the open All Notes window, if any.
+    /// Close All Notes: the window gives the sidebar's strip back and the host note keeps the
+    /// place and size its paper has now.
     pub fn dismiss_all_notes(&self) {
-        if let Some(v) = self.0.all_notes.borrow_mut().take() {
-            v.close();
-            if self.0.notes.borrow().is_empty() {
-                self.0.restore_exit_candidates();
-                self.0.quit.set(true);
-                let _ = slint::quit_event_loop();
-            }
+        let Some(v) = self.0.all_notes.borrow_mut().take() else { return };
+        let (host, paper) = (v.host_note_id(), v.paper_geometry());
+        v.close();
+        if self.with_note(host, |n| n.place(paper)).is_some() {
+            let hwnd = self.with_note(host, |n| n.hwnd()).flatten();
+            self.0.env.window_control.bring_to_front(host, hwnd);
+        }
+        if self.0.notes.borrow().is_empty() {
+            self.0.restore_exit_candidates();
+            self.0.quit.set(true);
+            let _ = slint::quit_event_loop();
         }
     }
 
@@ -595,9 +645,15 @@ impl App {
         }
         self.0.save_stacking();
         let mut rows = self.0.db.all_notes().unwrap_or_default();
+        let editing = self.all_notes().map(|v| (v.editor_note_id(), v.editor_text()));
         for r in &mut rows {
             if let Some(live) = self.with_note(r.id, |n| n.text()) {
                 r.content = live;
+            }
+            if let Some((id, text)) = &editing {
+                if r.id == *id {
+                    r.content = text.clone();
+                }
             }
         }
         rows
@@ -612,7 +668,7 @@ impl App {
         }
     }
 
-    /// Open the All Notes window with `initial_selected_id` selected.
+    /// Open All Notes from note `initial_selected_id`: its window grows to the left for the list.
     pub fn open_all_notes(&self, initial_selected_id: NoteId) {
         let rows = self.all_notes_rows();
         let now_ms = self.0.env.clock.unix_millis();
@@ -622,83 +678,100 @@ impl App {
             self.0.env.window_control.bring_to_front(0, v.hwnd());
             return;
         }
+        let Some(host) = self.with_note(initial_selected_id, |n| n.geometry()) else { return };
 
         let weak = Rc::downgrade(&self.0);
-        let on_close = Rc::new(move || {
-            if let Some(inner) = weak.upgrade() {
-                App(inner).dismiss_all_notes();
-            }
-        });
+        let (db, clock, clipboard) = (self.0.db.clone(), self.0.env.clock.clone(), self.0.env.clipboard.clone());
+        let make_editor: Rc<dyn Fn(NoteId, &str, Geometry) -> Result<Note, slint::PlatformError>> = {
+            let weak = weak.clone();
+            Rc::new(move |id, content, geometry| {
+                let weak = weak.clone();
+                let on_event: Rc<dyn Fn(NoteId, NoteEvent)> = Rc::new(move |_id, ev| {
+                    if let Some(inner) = weak.upgrade() {
+                        App(inner).handle_editor_event(ev);
+                    }
+                });
+                // pictures are pasted in the note's desktop window, not here
+                let paste_image: Rc<dyn Fn(NoteId) -> bool> = Rc::new(|_| false);
+                Note::open(id, content, db.clone(), clock.clone(), Some(geometry), false, on_event, paste_image, clipboard.clone())
+            })
+        };
+        let wire: Rc<dyn Fn(&crate::note_window::NoteWindow)> = {
+            let weak = weak.clone();
+            Rc::new(move |ui| {
+                macro_rules! on {
+                    ($setter:ident, $method:ident) => {{
+                        let weak = weak.clone();
+                        ui.$setter(move || {
+                            if let Some(inner) = weak.upgrade() {
+                                App(inner).$method();
+                            }
+                        });
+                    }};
+                }
+                {
+                    let weak = weak.clone();
+                    ui.on_all_notes_select_note(move |id| {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).select_all_notes_note(id as NoteId);
+                        }
+                    });
+                }
+                {
+                    let weak = weak.clone();
+                    ui.on_all_notes_open_note(move |id| {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).all_notes_open_note(id as NoteId);
+                        }
+                    });
+                }
+                on!(on_all_notes_new_note, all_notes_new_note);
+                on!(on_all_notes_open_or_focus, all_notes_open_or_focus);
+                on!(on_all_notes_close_note, all_notes_close_note);
+                on!(on_all_notes_export_note, all_notes_export_note);
+                on!(on_all_notes_request_delete, all_notes_request_delete);
+                on!(on_all_notes_cancel_delete, all_notes_cancel_delete);
+                on!(on_all_notes_confirm_delete, all_notes_confirm_delete);
+                on!(on_all_notes_close_view, dismiss_all_notes);
+            })
+        };
+        let desktop_visible: Rc<dyn Fn(NoteId, bool)> = {
+            let weak = weak.clone();
+            Rc::new(move |id, visible| {
+                if let Some(inner) = weak.upgrade() {
+                    App(inner).with_note(id, |n| n.set_visible(visible));
+                }
+            })
+        };
+        let hooks = crate::all_notes::Hooks { make_editor, wire, desktop_visible };
+        match AllNotesView::open(initial_selected_id, host, &rows, now_ms, &self.0.env.window_control.work_areas(), hooks) {
+            Ok(view) => *self.0.all_notes.borrow_mut() = Some(Rc::new(view)),
+            Err(e) => eprintln!("washi: could not open All Notes: {e}"),
+        }
+    }
 
-        match AllNotesView::open(initial_selected_id, &rows, now_ms, on_close) {
-            Ok(view) => {
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_select_note(move |selected_id| {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).select_all_notes_note(selected_id as NoteId);
-                        }
-                    });
-                }
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_new_note(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).all_notes_new_note();
-                        }
-                    });
-                }
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_open_or_focus(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).all_notes_open_or_focus();
-                        }
-                    });
-                }
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_close_note(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).all_notes_close_note();
-                        }
-                    });
-                }
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_export_note(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).all_notes_export_note();
-                        }
-                    });
-                }
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_request_delete(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).all_notes_request_delete();
-                        }
-                    });
-                }
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_cancel_delete(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).all_notes_cancel_delete();
-                        }
-                    });
-                }
-                {
-                    let weak = Rc::downgrade(&self.0);
-                    view.ui().on_all_notes_confirm_delete(move || {
-                        if let Some(inner) = weak.upgrade() {
-                            App(inner).all_notes_confirm_delete();
-                        }
-                    });
-                }
-                *self.0.all_notes.borrow_mut() = Some(Rc::new(view));
-            }
-            Err(e) => eprintln!("washi: could not open All Notes window: {e}"),
+    /// Double click on a row: open that note on the desktop (or bring it forward if it is there).
+    pub fn all_notes_open_note(&self, id: NoteId) {
+        self.activate_note(id);
+        self.refresh_all_notes(None);
+    }
+
+    /// Press the editor's menu button (for testing).
+    pub fn invoke_editor_menu(&self) {
+        if let Some(v) = self.all_notes() {
+            v.ui().invoke_open_dropdown();
+        }
+    }
+
+    /// The editor's menu button rect in the editor window's logical coordinates (for testing).
+    pub fn editor_menu_button_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        self.all_notes().map(|v| v.editor_handle().menu_button_rect())
+    }
+
+    /// Invoke a double click on a row (for testing).
+    pub fn invoke_all_notes_open_note(&self, id: NoteId) {
+        if let Some(v) = self.all_notes() {
+            v.invoke_open_note(id);
         }
     }
 
@@ -760,6 +833,9 @@ impl App {
             m.close();
             let note_id = m.note_id();
             self.with_note(note_id, |n| n.set_dropdown_open(false));
+            if let Some(v) = self.all_notes() {
+                v.editor_handle().set_dropdown_open(false);
+            }
         }
     }
 
@@ -782,6 +858,103 @@ impl App {
         self.open_dropdown(id);
     }
 
+    /// The work area (logical px) of the monitor a button lies on; the main one if it is on none.
+    fn work_area_for(&self, button: &DropdownRect, scale: f32) -> Option<DropdownRect> {
+        let areas = self.0.env.window_control.work_areas();
+        let (cx, cy) = ((button.x + button.w / 2.0) * scale, (button.y + button.h / 2.0) * scale);
+        let on = |a: &&ScreenRect| {
+            cx >= a.x as f32 && cx < (a.x + a.w) as f32 && cy >= a.y as f32 && cy < (a.y + a.h) as f32
+        };
+        areas.iter().find(on).or_else(|| areas.first()).map(|wa| {
+            DropdownRect::new(wa.x as f32 / scale, wa.y as f32 / scale, wa.w as f32 / scale, wa.h as f32 / scale)
+        })
+    }
+
+    /// Toggle the trimmed dropdown of the All Notes editor.
+    fn toggle_editor_dropdown(&self) {
+        let Some(v) = self.all_notes() else { return };
+        let id = v.editor_note_id();
+        if self.dropdown_note_id() == Some(id) {
+            self.dismiss_dropdown();
+            return;
+        }
+        self.dismiss_dropdown();
+        self.open_editor_dropdown(&v);
+    }
+
+    /// The editor's dropdown: pin, close, delete (as the action bar does it), New and Settings.
+    fn open_editor_dropdown(&self, v: &Rc<AllNotesView>) {
+        let id = v.editor_note_id();
+        let editor = v.editor_handle();
+        let geom = editor.geometry();
+        let (btn_x, btn_y, btn_w, btn_h) = editor.menu_button_rect();
+        let button_screen = DropdownRect::new(geom.x as f32 + btn_x, geom.y as f32 + btn_y, btn_w, btn_h);
+        let scale = editor.ui().window().scale_factor();
+        let work_area = self.work_area_for(&button_screen, scale);
+        let pos = calculate_dropdown_position(button_screen, &DropdownMetrics::compact(), work_area);
+
+        let weak = Rc::downgrade(&self.0);
+        let on_dismiss = Rc::new(move |_id| {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).dismiss_dropdown();
+            }
+        });
+        let menu = match DropdownMenu::open_compact(id, pos, editor.hwnd(), on_dismiss) {
+            Ok(menu) => menu,
+            Err(e) => {
+                eprintln!("washi: could not open dropdown menu: {e}");
+                return;
+            }
+        };
+        menu.set_pinned(editor.always_on_top());
+        {
+            let weak = Rc::downgrade(&self.0);
+            menu.ui().on_toggle_pin(move || {
+                let Some(inner) = weak.upgrade() else { return };
+                let app = App(inner);
+                let Some(v) = app.all_notes() else { return };
+                let on = !v.editor_handle().always_on_top();
+                v.editor_handle().set_always_on_top(on);
+                app.set_always_on_top(id, on);
+                if let Some(d) = app.dropdown() {
+                    d.set_pinned(on);
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&self.0);
+            menu.ui().on_close_note(move || {
+                if let Some(inner) = weak.upgrade() {
+                    let app = App(inner);
+                    app.dismiss_dropdown();
+                    app.all_notes_close_note();
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&self.0);
+            menu.ui().on_delete_note(move || {
+                if let Some(inner) = weak.upgrade() {
+                    let app = App(inner);
+                    app.dismiss_dropdown();
+                    app.all_notes_request_delete();
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&self.0);
+            menu.ui().on_new_note(move || {
+                if let Some(inner) = weak.upgrade() {
+                    let app = App(inner);
+                    app.dismiss_dropdown();
+                    app.all_notes_new_note();
+                }
+            });
+        }
+        editor.set_dropdown_open(true);
+        *self.0.dropdown.borrow_mut() = Some(Rc::new(menu));
+    }
+
     /// Open the dropdown menu for note `id`.
     pub fn open_dropdown(&self, id: NoteId) {
         for n in self.0.notes.borrow().iter() {
@@ -802,14 +975,8 @@ impl App {
 
         let metrics = DropdownMetrics::default();
 
-        let work_areas = self.0.env.window_control.work_areas();
         let scale = note.ui().window().scale_factor();
-        let work_area = work_areas.first().map(|wa| DropdownRect::new(
-            wa.x as f32 / scale,
-            wa.y as f32 / scale,
-            wa.w as f32 / scale,
-            wa.h as f32 / scale,
-        ));
+        let work_area = self.work_area_for(&button_screen, scale);
 
         let pos = calculate_dropdown_position(button_screen, &metrics, work_area);
 
@@ -869,6 +1036,15 @@ impl App {
                         let app = App(inner);
                         app.dismiss_dropdown();
                         app.delete_note(id);
+                    }
+                });
+
+                let weak = Rc::downgrade(&self.0);
+                menu.ui().on_close_note(move || {
+                    if let Some(inner) = weak.upgrade() {
+                        let app = App(inner);
+                        app.dismiss_dropdown();
+                        app.close_note(id);
                     }
                 });
 

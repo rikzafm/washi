@@ -61,6 +61,8 @@ export component DropdownMenuWindow inherits Window {
 
     in property <length> card-width: 268px;
     in property <length> card-height: 320px;
+    /// The trimmed card of the All Notes editor: header and New / Settings only.
+    in property <bool> compact: false;
     in property <length> shadow-margin: 16px;
 
     width: card-width + 2 * shadow-margin;
@@ -69,6 +71,7 @@ export component DropdownMenuWindow inherits Window {
     callback dismiss();
     callback toggle_pin();
     callback delete_note();
+    callback close_note();
     callback new_note();
     callback all_notes();
     callback select_note(int);
@@ -137,15 +140,39 @@ export component DropdownMenuWindow inherits Window {
             Text {
                 x: 12px;
                 y: 0;
-                width: 120px;
+                width: 80px;
                 height: 100%;
-                text: "JUMP TO";
+                text: root.compact ? "THIS NOTE" : "JUMP TO";
                 font-family: "Shadows Into Light";
                 font-size: 16px;
                 font-weight: 400;
                 letter-spacing: 0.64px;
                 color: #5B616B;
                 vertical-alignment: center;
+            }
+
+            // Close button (x): closes the note, it stays in the list as a closed note
+            close-btn := HeaderIconButton {
+                x: parent.width - 44px - 2px - 44px - 2px - 44px;
+                y: 0;
+                accessible-name: "Close note";
+                clicked => {
+                    root.close_note();
+                }
+
+                Path {
+                    x: 12px;
+                    y: 12px;
+                    width: 20px;
+                    height: 20px;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M6 6l12 12M18 6L6 18";
+                    fill: transparent;
+                    stroke: #2B2F36;
+                    stroke-width: 1.5px;
+                    stroke-line-cap: round;
+                }
             }
 
             // Pin button (always on top)
@@ -204,6 +231,7 @@ export component DropdownMenuWindow inherits Window {
 
         // --- Note list ---
         list-area := Rectangle {
+            visible: !root.compact;
             x: 0;
             y: 50px;
             width: root.card-width;
@@ -353,7 +381,7 @@ export component DropdownMenuWindow inherits Window {
             }
 
             // All notes
-            BottomActionButton {
+            if !root.compact : BottomActionButton {
                 clicked => {
                     root.all_notes();
                 }

@@ -106,6 +106,15 @@ pub struct DropdownMetrics {
     pub gap: f32,
 }
 
+/// Height of the compact card (header 50 + action bar 72), logical px.
+pub const COMPACT_CARD_HEIGHT: f32 = 128.0;
+
+impl DropdownMetrics {
+    pub fn compact() -> Self {
+        Self { card_height: COMPACT_CARD_HEIGHT, ..Self::default() }
+    }
+}
+
 impl Default for DropdownMetrics {
     fn default() -> Self {
         Self {
@@ -168,7 +177,31 @@ impl DropdownMenu {
         owner_hwnd: Option<isize>,
         on_dismiss: Rc<dyn Fn(NoteId)>,
     ) -> Result<Self, slint::PlatformError> {
+        Self::open_with(note_id, position, owner_hwnd, on_dismiss, false)
+    }
+
+    /// The card of the All Notes editor: no jump list and no "All notes" button, so it is shorter.
+    pub fn open_compact(
+        note_id: NoteId,
+        position: (f32, f32),
+        owner_hwnd: Option<isize>,
+        on_dismiss: Rc<dyn Fn(NoteId)>,
+    ) -> Result<Self, slint::PlatformError> {
+        Self::open_with(note_id, position, owner_hwnd, on_dismiss, true)
+    }
+
+    fn open_with(
+        note_id: NoteId,
+        position: (f32, f32),
+        owner_hwnd: Option<isize>,
+        on_dismiss: Rc<dyn Fn(NoteId)>,
+        compact: bool,
+    ) -> Result<Self, slint::PlatformError> {
         let ui = DropdownMenuWindow::new()?;
+        if compact {
+            ui.set_compact(true);
+            ui.set_card_height(COMPACT_CARD_HEIGHT);
+        }
         ui.window().set_position(slint::LogicalPosition::new(position.0, position.1));
 
         {
@@ -272,6 +305,10 @@ impl DropdownMenu {
 
     pub fn invoke_delete_note(&self) {
         self.ui.invoke_delete_note();
+    }
+
+    pub fn invoke_close_note(&self) {
+        self.ui.invoke_close_note();
     }
 
     pub fn invoke_new_note(&self) {

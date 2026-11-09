@@ -1183,6 +1183,9 @@ pub struct Note {
     on_event: Rc<dyn Fn(NoteId, NoteEvent)>,
     clipboard: Rc<dyn ImageClipboard>,
     paste_image: Rc<dyn Fn(NoteId) -> bool>,
+    /// False for the All Notes editor: its window is wider than the note (the sidebar's strip), so
+    /// it must never write its position as the note's.
+    saves_geometry: Cell<bool>,
 }
 
 impl Note {
@@ -1618,7 +1621,7 @@ impl Note {
         ui.show()?;
         let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, on_event, clipboard, paste_image })
+        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, on_event, clipboard, paste_image, saves_geometry: Cell::new(true) })
     }
 
     /// Where an image added now goes: after the block that has the caret (or last had it).
@@ -1803,6 +1806,9 @@ impl Note {
     /// The user (or the platform) moved or resized the window: save the new geometry after the
     /// geometry debounce.
     pub fn geometry_changed(&self) {
+        if !self.saves_geometry.get() {
+            return;
+        }
         self.geometry.dirty.set(true);
         let g = self.geometry.clone();
         self.geometry_timer.start(TimerMode::SingleShot, GEOMETRY_DELAY, move || g.flush());
@@ -1826,6 +1832,27 @@ impl Note {
 
     pub fn id(&self) -> NoteId {
         self.id
+    }
+
+    /// Whether moving or resizing the window is saved as the note's place (default true).
+    pub fn set_saves_geometry(&self, on: bool) {
+        self.saves_geometry.set(on);
+    }
+
+    /// Show or hide the window without touching the note.
+    pub fn set_visible(&self, visible: bool) {
+        if visible {
+            let _ = self.ui.show();
+        } else {
+            let _ = self.ui.hide();
+        }
+    }
+
+    /// Put the window at `g` (logical px) and remember it as the note's place.
+    pub fn place(&self, g: Geometry) {
+        self.ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
+        self.ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
+        self.geometry_changed();
     }
 
     /// The note's selection: where it started and where the caret is (the same caret: none).

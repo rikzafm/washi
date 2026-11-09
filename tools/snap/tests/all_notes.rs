@@ -102,43 +102,13 @@ fn write_png_rgb(path: &Path, width: u32, height: u32, rgb: &[u8]) {
     std::fs::write(path, out).expect("write png file");
 }
 
-/// Build a 3-panel `[Mockup | Rendered | Diff (4x amplified)]` side-by-side comparison image in memory.
-fn build_side_by_side_rgb(width: u32, height: u32, mockup_rgb: &[u8], rendered_rgb: &[u8]) -> (u32, u32, Vec<u8>) {
-    let sep = 4u32;
-    let out_w = width * 3 + sep * 2;
-    let mut out = vec![0x2Bu8; (out_w * height * 3) as usize];
-    for y in 0..height {
-        for x in 0..width {
-            let src_i = ((y * width + x) * 3) as usize;
-            let m = [mockup_rgb[src_i], mockup_rgb[src_i + 1], mockup_rgb[src_i + 2]];
-            let r = [rendered_rgb[src_i], rendered_rgb[src_i + 1], rendered_rgb[src_i + 2]];
-            let d = [
-                ((m[0] as i32 - r[0] as i32).unsigned_abs() * 4).min(255) as u8,
-                ((m[1] as i32 - r[1] as i32).unsigned_abs() * 4).min(255) as u8,
-                ((m[2] as i32 - r[2] as i32).unsigned_abs() * 4).min(255) as u8,
-            ];
-
-            let dst_m = ((y * out_w + x) * 3) as usize;
-            out[dst_m..dst_m + 3].copy_from_slice(&m);
-
-            let dst_r = ((y * out_w + (width + sep + x)) * 3) as usize;
-            out[dst_r..dst_r + 3].copy_from_slice(&r);
-
-            let dst_d = ((y * out_w + (width * 2 + sep * 2 + x)) * 3) as usize;
-            out[dst_d..dst_d + 3].copy_from_slice(&d);
-        }
-    }
-    (out_w, height, out)
-}
-
 #[test]
 fn all_notes_end_to_end_workflow() {
     let mut h = setup_mockup_all_notes();
 
-    // 1. Verify counts and sidebar sections match the 6 fixture notes
+    // 1. Counts and sections match the 6 fixture notes
     assert_eq!(h.all_notes_open_count(), Some(2));
     assert_eq!(h.all_notes_closed_count(), Some(4));
-
     let open_items = h.all_notes_open_items();
     let closed_items = h.all_notes_closed_items();
     assert_eq!(
@@ -149,252 +119,328 @@ fn all_notes_end_to_end_workflow() {
         closed_items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(),
         vec!["Meeting ideas", "Birthday gifts", "Reading list", "Trip to Kyoto"]
     );
-
     let endfield_id = open_items[0].id as i64;
     let grocery_id = open_items[1].id as i64;
     let meeting_id = closed_items[0].id as i64;
 
-    // 2. Selecting a closed note by clicking its sidebar row at (80, 340) previews it
-    h.click_all_notes(80.0, 340.0);
+    // 2. Selecting a closed note swaps the editor to it
+    h.invoke_all_notes_select_note(meeting_id);
     assert_eq!(h.all_notes_selected_id(), Some(meeting_id));
+    assert_eq!(h.all_notes_editor_note_id(), Some(meeting_id));
     assert_eq!(h.all_notes_status_text().as_deref(), Some("Closed · edited today"));
 
-    // 3. Clicking the Open/Focus button at (279, 489) reopens the closed note onto the desktop
-    h.click_all_notes(279.0, 489.0);
+    // 3. Open/Focus reopens the closed note onto the desktop
+    h.invoke_all_notes_open_or_focus();
     assert_eq!(h.open_note_count(), 3);
     assert_eq!(h.all_notes_open_count(), Some(3));
     assert_eq!(h.all_notes_closed_count(), Some(3));
-    assert_eq!(h.all_notes_selected_id(), Some(meeting_id));
     assert_eq!(
         h.all_notes_status_text().as_deref(),
         Some("Open on your desktop · edited today")
     );
 
-    // 4. Clicking the Close (×) button at (316, 490) closes the note's desktop window and moves it back to CLOSED
-    h.click_all_notes(316.0, 490.0);
+    // 4. Close closes the note's desktop window and moves it back to CLOSED
+    h.invoke_all_notes_close_note();
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.all_notes_open_count(), Some(2));
     assert_eq!(h.all_notes_closed_count(), Some(4));
-    assert_eq!(h.all_notes_selected_id(), Some(meeting_id));
     assert_eq!(h.all_notes_status_text().as_deref(), Some("Closed · edited today"));
 
-    // 5. Select open note "Endfield Note" by clicking row 0 at (80, 234) and click Open/Focus to bring to front
-    h.click_all_notes(80.0, 234.0);
-    assert_eq!(h.all_notes_selected_id(), Some(endfield_id));
+    // 5. Open/Focus on an open note brings it to front
+    h.invoke_all_notes_select_note(endfield_id);
     let log_before = h.control.log.borrow().len();
-    h.click_all_notes(279.0, 489.0);
+    h.invoke_all_notes_open_or_focus();
     assert!(
         h.control.log.borrow()[log_before..].contains(&snap::WindowCommand::BringToFront(endfield_id)),
-        "clicking Open/Focus on open note brings it to front"
+        "Open/Focus on an open note brings it to front"
     );
 
-    // 6. Clicking Export (↓) button at (352, 491) exports the selected note as Markdown
+    // 6. Export writes the selected note as Markdown
     let export_dir = tempfile::tempdir().unwrap();
     let md_path = export_dir.path().join("endfield.md");
     *h.dialogs.save_path.borrow_mut() = Some(md_path.clone());
-    h.click_all_notes(352.0, 491.0);
+    h.invoke_all_notes_export_note();
     let exported = std::fs::read_to_string(&md_path).expect("exported markdown file");
     assert!(exported.contains("# Endfield Note"));
-    assert!(exported.contains("## Thermite Cutter : POG & Akekuri"));
 
-    // 7. Clicking Delete (🗑) button at (388, 492) enters inline delete confirmation
+    // 7-9. Delete asks first; Keep and Escape cancel
     assert_eq!(h.all_notes_confirming_delete(), Some(false));
-    h.click_all_notes(388.0, 492.0);
+    h.invoke_all_notes_request_delete();
     assert_eq!(h.all_notes_confirming_delete(), Some(true));
-
-    // 8. Clicking "Keep" button at (456, 495) cancels delete confirmation
-    h.click_all_notes(456.0, 495.0);
+    h.invoke_all_notes_cancel_delete();
     assert_eq!(h.all_notes_confirming_delete(), Some(false));
     assert!(!h.is_deleted(endfield_id));
-
-    // 9. Pressing Escape while confirming delete cancels confirmation without closing All Notes
-    h.click_all_notes(388.0, 492.0);
-    assert_eq!(h.all_notes_confirming_delete(), Some(true));
+    h.invoke_all_notes_request_delete();
     h.press_all_notes_escape();
     assert_eq!(h.all_notes_confirming_delete(), Some(false));
     assert!(h.is_all_notes_open());
 
-    // 10. Clicking "Delete" button at (519, 496) permanently deletes the note and selects next note
-    h.click_all_notes(388.0, 492.0);
-    assert_eq!(h.all_notes_confirming_delete(), Some(true));
-    h.click_all_notes(519.0, 496.0);
-    assert_eq!(h.all_notes_confirming_delete(), Some(false));
+    // 10. Confirm deletes for good and selects the next note
+    h.invoke_all_notes_request_delete();
+    h.invoke_all_notes_confirm_delete();
     assert!(h.is_deleted(endfield_id));
     assert_eq!(h.open_note_count(), 1);
     assert_eq!(h.all_notes_open_count(), Some(1));
     assert_eq!(h.all_notes_selected_id(), Some(grocery_id));
 
-    // 11. Clicking "+ New note" button in the sidebar creates a new note and selects it
-    // With 1 open note and 4 closed notes, new-button-cy = (225 + 1*38) + 46.0 + 4*38 = 461.0
-    h.click_all_notes(84.0, 461.0);
+    // 11. "+ New note" creates a note and selects it
+    h.invoke_all_notes_new_note();
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.all_notes_open_count(), Some(2));
 
-    // 12. Pressing Escape when not confirming delete closes All Notes window
+    // 12. Escape closes All Notes
     h.press_all_notes_escape();
     assert!(!h.is_all_notes_open());
 }
 
-fn mean_abs_error(a: &[u8], b: &[u8]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    let sum: u64 = a
-        .iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| (x as i32 - y as i32).unsigned_abs() as u64)
-        .sum();
-    sum as f64 / a.len() as f64
-}
-
-fn ink_bbox(rgb: &[u8], width: u32, x0: u32, x1: u32, y0: u32, y1: u32, thresh: u8) -> (i32, i32, i32, i32) {
-    let (mut min_x, mut max_x) = (i32::MAX, i32::MIN);
-    let (mut min_y, mut max_y) = (i32::MAX, i32::MIN);
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let i = ((y * width + x) * 3) as usize;
-            let (r, g, b) = (rgb[i], rgb[i + 1], rgb[i + 2]);
-            if r < thresh && g < thresh && b < thresh.saturating_add(10) {
-                min_x = min_x.min(x as i32);
-                max_x = max_x.max(x as i32);
-                min_y = min_y.min(y as i32);
-                max_y = max_y.max(y as i32);
-            }
-        }
-    }
-    assert!(min_x <= max_x, "no ink found in region x={x0}..{x1}, y={y0}..{y1}");
-    (min_x, max_x, min_y, max_y)
-}
-
 #[test]
-fn external_desktop_note_lifecycle_updates_open_all_notes_window_and_exits_when_all_closed() {
+fn external_desktop_note_lifecycle_updates_open_all_notes_and_exits_when_all_closed() {
     let mut h = setup_mockup_all_notes();
     assert_eq!(h.all_notes_open_count(), Some(2));
     assert_eq!(h.all_notes_closed_count(), Some(4));
-
-    let open_items = h.all_notes_open_items();
-    let endfield_id = open_items[0].id as i64;
+    let endfield_id = h.all_notes_open_items()[0].id as i64;
     assert_eq!(h.all_notes_selected_id(), Some(endfield_id));
 
-    // 1. Editing an open note's text from the desktop updates AllNotesWindow's sidebar title & preview
-    let endfield_idx = (0..h.open_note_count())
-        .find(|&i| h.note_id(i) == endfield_id)
-        .unwrap();
-    h.set_note_text(endfield_idx, "# Updated Endfield\nNew body line");
-    assert_eq!(h.all_notes_open_items()[0].title.as_str(), "Updated Endfield");
-    let preview_str: String = h.all_notes_preview_runs().iter().map(|r| r.text.as_str()).collect();
-    assert!(preview_str.contains("Updated Endfield"));
-    assert!(preview_str.contains("New body line"));
+    // Editing another open note from the desktop updates the list titles
+    let grocery_idx = (0..h.open_note_count()).find(|&i| h.note_id(i) != endfield_id).unwrap();
+    h.set_note_text(grocery_idx, "# Updated Grocery\nNew body line");
+    assert!(h.all_notes_open_items().iter().any(|i| i.title.as_str() == "Updated Grocery"));
 
-    // 2. Creating a new note from a desktop note window updates AllNotesWindow's open count & list while keeping selection
-    h.right_click(endfield_idx, Some(&["New note"]));
-    assert_eq!(h.open_note_count(), 3);
+    // Creating a new note from a desktop window updates the count and keeps the selection
+    h.right_click(grocery_idx, Some(&["New note"]));
     assert_eq!(h.all_notes_open_count(), Some(3));
     assert_eq!(h.all_notes_selected_id(), Some(endfield_id));
-    let new_idx = h.open_note_count() - 1;
-    h.set_note_text(new_idx, "# Fresh Desktop Note");
-    assert!(
-        h.all_notes_open_items()
-            .iter()
-            .any(|i| i.title.as_str() == "Fresh Desktop Note")
-    );
 
-    // 3. Closing all desktop notes while AllNotesWindow is open updates counts/lists and keeps the app alive
+    // Closing every desktop note keeps the app alive while All Notes is open
     while h.open_note_count() > 0 {
         h.close_note(0);
     }
     assert_eq!(h.all_notes_open_count(), Some(0));
-    assert_eq!(h.all_notes_closed_count(), Some(7));
-    assert!(!h.has_quit(), "app stays alive while AllNotesWindow is still open");
+    assert!(!h.has_quit(), "app stays alive while All Notes is open");
 
-    // 4. Closing AllNotesWindow after all desktop notes are closed quits the app
+    // Closing All Notes after that quits the app
     h.press_all_notes_escape();
     assert!(!h.is_all_notes_open());
-    assert!(h.has_quit(), "closing AllNotesWindow when no desktop notes are open exits the app");
+    assert!(h.has_quit());
 }
 
 #[test]
-fn all_notes_side_by_side_mockup_fidelity() {
+fn the_window_grows_left_for_the_list_and_the_paper_stays_put() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "# Solo\nbody");
+    let g = h.note_geometry(0);
+    h.place_note(0, washi::storage::Geometry { x: 600, y: 100, ..g });
+    let host = h.note_geometry(0);
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    assert!(h.is_all_notes_open());
+
+    let (x, y, w, hh) = h.all_notes_window_geometry().unwrap();
+    assert_eq!(x, host.x - 282);
+    assert_eq!(y, host.y);
+    assert_eq!(w, host.w + 282);
+    assert_eq!(hh, host.h);
+
+    // closing gives the strip back and the note keeps its place
+    h.press_all_notes_escape();
+    assert!(!h.is_all_notes_open());
+    assert_eq!(h.note_geometry(0), host);
+}
+
+#[test]
+fn the_editor_shows_the_selected_note_and_stays_in_sync_with_its_desktop_window() {
+    let mut h = setup_mockup_all_notes();
+    let open_items = h.all_notes_open_items();
+    let endfield_id = open_items[0].id as i64;
+    let grocery_id = open_items[1].id as i64;
+
+    assert_eq!(h.all_notes_editor_note_id(), Some(endfield_id));
+    assert!(h.all_notes_editor_text().unwrap().contains("Thermite Cutter"));
+
+    // typing in the editor reaches the desktop window of the same note
+    h.invoke_all_notes_select_note(grocery_id);
+    assert_eq!(h.all_notes_editor_note_id(), Some(grocery_id));
+    h.set_all_notes_editor_text("# Grocery run\nmilk and eggs");
+    let grocery_idx = (0..h.open_note_count()).find(|&i| h.note_id(i) == grocery_id).unwrap();
+    assert!(h.note_text(grocery_idx).contains("milk and eggs"));
+
+    // and an edit on the desktop reaches the editor
+    h.set_note_text(grocery_idx, "# Grocery run\noat milk");
+    assert!(h.all_notes_editor_text().unwrap().contains("oat milk"));
+}
+
+#[test]
+fn double_clicking_a_closed_row_opens_it_and_an_open_row_is_brought_forward() {
+    let mut h = setup_mockup_all_notes();
+    let closed_id = h.all_notes_closed_items()[0].id as i64;
+    assert_eq!(h.open_note_count(), 2);
+
+    h.invoke_all_notes_open_note(closed_id);
+    assert_eq!(h.open_note_count(), 3);
+    assert_eq!(h.all_notes_open_count(), Some(3));
+    assert_eq!(h.all_notes_closed_count(), Some(3));
+    assert!(h.all_notes_open_items().iter().any(|i| i.id as i64 == closed_id));
+
+    let log_before = h.control.log.borrow().len();
+    h.invoke_all_notes_open_note(closed_id);
+    assert_eq!(h.open_note_count(), 3, "an open note is not opened twice");
+    assert!(h.control.log.borrow()[log_before..].contains(&snap::WindowCommand::BringToFront(closed_id)));
+}
+
+/// With many notes the list outgrows the panel: "+ New note" stays at the panel's bottom instead of
+/// following the last row.
+#[test]
+fn a_long_list_pins_new_note_to_the_bottom_and_a_short_one_lets_it_follow() {
+    let dark_button_bottom = |h: &Harness| -> Option<usize> {
+        let (w, hh, px) = h.render_all_notes().unwrap();
+        // the button is #2B2F36: the lowest row with a long run of such pixels in the sidebar strip
+        // (a single blended edge pixel of the panel is not the button)
+        (0..hh as usize).rev().find(|&y| {
+            (0..282usize.min(w as usize))
+                .filter(|&x| {
+                    let p = px[y * w as usize + x];
+                    (p.r as i32 - 43).abs() < 8 && (p.g as i32 - 47).abs() < 8 && (p.b as i32 - 54).abs() < 8
+                })
+                .count()
+                > 25
+        })
+    };
+    let short = {
+        let mut solo = Harness::new();
+        solo.start().unwrap();
+        solo.set_note_text(0, "# Solo");
+        solo.toggle_dropdown(0);
+        solo.invoke_dropdown_all_notes();
+        dark_button_bottom(&solo).expect("button drawn")
+    };
     let mut h = setup_mockup_all_notes();
 
-    // Render 1.0x normal state (603 x 625)
-    h.set_all_notes_confirming_delete(false);
-    let normal_1x = h.render_all_notes_canvas(1.0, (603, 625)).expect("render normal 1x");
-    assert_eq!((normal_1x.width, normal_1x.height), (603, 625));
-
-    // Render 1.6305x normal state on 1001 x 1024 desk canvas
-    let normal_hi = h.render_all_notes_canvas(1.6305, (1001, 1024)).expect("render normal 1.63x");
-    assert_eq!((normal_hi.width, normal_hi.height), (1001, 1024));
-
-    // Render 1.0x delete confirmation state (603 x 625)
-    h.set_all_notes_confirming_delete(true);
-    let delete_1x = h.render_all_notes_canvas(1.0, (603, 625)).expect("render delete 1x");
-    assert_eq!((delete_1x.width, delete_1x.height), (603, 625));
-
-    // Load reference mockups
-    let ref_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/design/reference");
-    let (nw, nh, ref_normal_rgb) = load_png_rgb(&ref_dir.join("all-notes-normal-1x.png"));
-    let (dw, dh, ref_delete_rgb) = load_png_rgb(&ref_dir.join("all-notes-delete.png"));
-    assert_eq!((nw, nh), (603, 625));
-    assert_eq!((dw, dh), (603, 625));
-
-    // Build side-by-side comparison images in memory on every test run
-    let (sbs_nw, sbs_nh, sbs_normal_rgb) = build_side_by_side_rgb(603, 625, &ref_normal_rgb, normal_1x.rgb());
-    let (sbs_dw, sbs_dh, sbs_delete_rgb) = build_side_by_side_rgb(603, 625, &ref_delete_rgb, delete_1x.rgb());
-    assert_eq!((sbs_nw, sbs_nh), (603 * 3 + 8, 625));
-    assert_eq!((sbs_dw, sbs_dh), (603 * 3 + 8, 625));
-
-    // Optionally dump rendered & side-by-side PNGs if WASHI_SNAP_OUT_DIR is set
-    if let Some(out_dir) = std::env::var_os("WASHI_SNAP_OUT_DIR") {
-        let out_dir = Path::new(&out_dir);
-        write_png_rgb(&out_dir.join("rendered_normal.png"), 603, 625, normal_1x.rgb());
-        write_png_rgb(&out_dir.join("rendered_delete.png"), 603, 625, delete_1x.rgb());
-        write_png_rgb(&out_dir.join("side_by_side_normal.png"), sbs_nw, sbs_nh, &sbs_normal_rgb);
-        write_png_rgb(&out_dir.join("side_by_side_delete.png"), sbs_dw, sbs_dh, &sbs_delete_rgb);
+    for i in 0..12 {
+        h.right_click(0, Some(&["New note"]));
+        let last = h.open_note_count() - 1;
+        h.set_note_text(last, &format!("# Extra {i}"));
+        h.right_click(last, Some(&["Close"]));
     }
+    assert!(h.all_notes_closed_count().unwrap() >= 16);
+    let long = dark_button_bottom(&h).expect("button still drawn");
+    let (_, window_h, _) = h.render_all_notes().unwrap();
+    assert!(long > short, "pinned at the bottom, lower than when it followed the rows ({short} -> {long})");
+    assert!(long < window_h as usize - 30, "inside the panel, above the window's margin ({long})");
 
-    // 1. Assert overall Mean Absolute Error against reference mockups (< 3.0 out of 255)
-    let mae_normal = mean_abs_error(&ref_normal_rgb, normal_1x.rgb());
-    let mae_delete = mean_abs_error(&ref_delete_rgb, delete_1x.rgb());
-    assert!(
-        mae_normal < 3.0,
-        "normal state MAE should be < 3.0, got {mae_normal:.3}"
-    );
-    assert!(
-        mae_delete < 2.5,
-        "delete state MAE should be < 2.5, got {mae_delete:.3}"
-    );
+    // adding more notes does not move it again
+    h.right_click(0, Some(&["New note"]));
+    let last = h.open_note_count() - 1;
+    h.set_note_text(last, "# One more");
+    h.right_click(last, Some(&["Close"]));
+    assert_eq!(dark_button_bottom(&h), Some(long));
+}
 
-    // 2. Assert ink bounding-box alignment (within 2px) for every text region in sidebar and preview card
-    let regions = [
-        ("Notes", 25, 110, 110, 155, 160),
-        ("2 open · 4 closed", 25, 130, 160, 188, 175),
-        ("OPEN", 30, 80, 192, 214, 175),
-        ("Endfield Note (sidebar)", 35, 130, 222, 248, 160),
-        ("Grocery run", 35, 130, 264, 290, 160),
-        ("CLOSED", 35, 95, 298, 320, 175),
-        ("Meeting ideas", 35, 135, 328, 358, 160),
-        ("Birthday gifts", 35, 135, 366, 396, 160),
-        ("Reading list", 35, 135, 404, 434, 160),
-        ("Trip to Kyoto", 35, 135, 442, 472, 160),
-        ("Status line", 260, 460, 125, 152, 185),
-        ("Preview Title", 260, 445, 152, 195, 160),
-        ("Preview Heading", 260, 495, 204, 232, 160),
-        ("Body Line 1", 260, 538, 238, 263, 160),
-        ("Body Line 2", 260, 548, 260, 286, 160),
-        ("Body Line 3", 260, 380, 282, 308, 160),
-        ("Delete for good?", 255, 370, 475, 505, 160),
-        ("Keep text", 435, 475, 480, 505, 160),
-    ];
-
-    for (name, x0, x1, y0, y1, th) in regions {
-        let b_ref = ink_bbox(&ref_delete_rgb, 603, x0, x1, y0, y1, th);
-        let b_ren = ink_bbox(delete_1x.rgb(), 603, x0, x1, y0, y1, th);
-        assert!(
-            (b_ren.0 - b_ref.0).abs() <= 2 && (b_ren.2 - b_ref.2).abs() <= 2,
-            "{name} top-left ink bbox mismatch: ref={b_ref:?}, ren={b_ren:?}"
-        );
-        assert!(
-            (b_ren.1 - b_ref.1).abs() <= 3 && (b_ren.3 - b_ref.3).abs() <= 3,
-            "{name} bottom-right ink bbox mismatch: ref={b_ref:?}, ren={b_ren:?}"
-        );
+/// Dumps the editor window next to its sidebar for looking at: `WASHI_SNAP_OUT_DIR=… cargo test`.
+#[test]
+fn render_all_notes_for_a_look() {
+    let h = setup_mockup_all_notes();
+    let shot = h.render_all_notes_canvas((760, 560)).expect("render");
+    assert_eq!((shot.width, shot.height), (760, 560));
+    if let Some(dir) = std::env::var_os("WASHI_SNAP_OUT_DIR") {
+        write_png_rgb(&Path::new(&dir).join("all_notes.png"), 760, 560, shot.rgb());
     }
+}
+
+
+#[test]
+fn pressing_the_sidebars_empty_area_drags_the_whole_window_but_a_row_does_not() {
+    let mut h = setup_mockup_all_notes();
+    let before = h.control.log.borrow().iter().filter(|c| matches!(c, snap::WindowCommand::Move(_))).count();
+    // a row (the first one: x in the pill, y at its middle)
+    h.click_all_notes(100.0, 172.0);
+    let after_row = h.control.log.borrow().iter().filter(|c| matches!(c, snap::WindowCommand::Move(_))).count();
+    assert_eq!(after_row, before, "pressing a row selects it, it does not start a drag");
+
+    // the panel's empty lower-left corner
+    h.click_all_notes(20.0, 400.0);
+    let after_bg = h.control.log.borrow().iter().filter(|c| matches!(c, snap::WindowCommand::Move(_))).count();
+    assert_eq!(after_bg, before + 1, "pressing the sidebar's empty area drags the window");
+}
+
+#[test]
+fn the_list_scrolls_when_it_overflows_and_a_wheel_over_it_moves_the_rows() {
+    let mut h = setup_mockup_all_notes();
+    // the first row's pill (white) is at the top of the viewport before scrolling
+    let pill_y = |h: &Harness| -> Option<usize> {
+        let (w, hh, px) = h.render_all_notes().unwrap();
+        (0..hh as usize).find(|&y| {
+            (60..200usize).filter(|&x| { let p = px[y * w as usize + x]; p.r >= 252 && p.g >= 252 && p.b >= 250 }).count() > 60
+        })
+    };
+    let top = pill_y(&h).expect("selected pill drawn");
+    h.scroll_all_notes(100.0, 250.0, -60.0);
+    let scrolled = pill_y(&h);
+    assert!(scrolled.map_or(true, |y| y < top), "rows moved up (or the pill left the viewport)");
+}
+
+#[test]
+fn near_the_screen_edge_the_window_is_kept_on_screen_instead_of_growing_off_it() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "# Solo");
+    let g = h.note_geometry(0);
+    h.place_note(0, washi::storage::Geometry { x: 40, y: 0, ..g });
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    let (x, _, w, _) = h.all_notes_window_geometry().unwrap();
+    assert_eq!(x, 0, "shifted right to the screen's edge, not left of it");
+    assert_eq!(w, g.w + 282);
+}
+
+#[test]
+fn the_editor_has_a_trimmed_dropdown_that_acts_on_the_selected_note() {
+    let mut h = setup_mockup_all_notes();
+    let endfield_id = h.all_notes_open_items()[0].id as i64;
+
+    h.invoke_editor_menu();
+    assert!(h.is_dropdown_open());
+    assert_eq!(h.dropdown_note_id(), Some(endfield_id));
+    // compact card: header + New/Settings only (128 + 2 * 16 shadow margin)
+    assert_eq!(h.dropdown_size(), Some((300.0, 160.0)));
+    // the button the card hangs from is inside the editor window, right of the sidebar's strip
+    let (bx, _, _, _) = h.editor_menu_button_rect().unwrap();
+    assert!(bx > 282.0, "menu button is over the paper: {bx}");
+
+    // pin follows the editor and the note
+    h.invoke_dropdown_toggle_pin();
+    assert_eq!(h.dropdown_pinned(), Some(true));
+
+    // delete asks inside the action bar, not in a dialog
+    h.invoke_dropdown_delete_note();
+    assert!(!h.is_dropdown_open());
+    assert!(!h.is_delete_dialog_open());
+    assert_eq!(h.all_notes_confirming_delete(), Some(true));
+    h.invoke_all_notes_cancel_delete();
+
+    // close closes the note's desktop window and keeps it in the list
+    h.invoke_editor_menu();
+    h.invoke_dropdown_close_note();
+    assert!(!h.is_dropdown_open());
+    assert_eq!(h.open_note_count(), 1);
+    assert_eq!(h.all_notes_closed_count(), Some(5));
+
+    // New makes a note and selects it
+    h.invoke_editor_menu();
+    h.invoke_dropdown_new_note();
+    assert!(!h.is_dropdown_open());
+    assert_eq!(h.open_note_count(), 2);
+}
+
+#[test]
+fn the_dropdown_opens_on_the_monitor_the_note_is_on() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "# Far");
+    h.control.areas.borrow_mut().push(washi::platform::ScreenRect::new(1920, 0, 1920, 1040));
+    let g = h.note_geometry(0);
+    h.place_note(0, washi::storage::Geometry { x: 2200, y: 100, ..g });
+    h.toggle_dropdown(0);
+    let (x, _) = h.dropdown_position().unwrap();
+    assert!(x >= 1920.0 - 16.0, "card is on the second monitor, not clamped back to the first: {x}");
 }

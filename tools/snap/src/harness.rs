@@ -525,6 +525,11 @@ impl Harness {
         (g.w, g.h)
     }
 
+    /// Put a note's window somewhere (logical px), as if the user had moved it.
+    pub fn place_note(&mut self, note: usize, g: washi::storage::Geometry) {
+        self.app().with_note(self.id(note), |n| n.place(g));
+    }
+
     /// Geometry of a note's window.
     pub fn note_geometry(&self, note: usize) -> washi::storage::Geometry {
         self.app().with_note(self.id(note), |n| n.geometry()).unwrap()
@@ -938,6 +943,12 @@ impl Harness {
         }
     }
 
+    pub fn invoke_dropdown_close_note(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_dropdown_close_note();
+        }
+    }
+
     pub fn invoke_dropdown_new_note(&mut self) {
         if let Some(app) = &self.app {
             app.invoke_dropdown_new_note();
@@ -979,8 +990,50 @@ impl Harness {
         self.app.as_ref().and_then(|a| a.all_notes_status_text())
     }
 
-    pub fn all_notes_preview_runs(&self) -> Vec<washi::note_window::PreviewRun> {
-        self.app.as_ref().map(|a| a.all_notes_preview_runs()).unwrap_or_default()
+    /// The note the All Notes editor shows (it may differ from the selected row only briefly).
+    pub fn all_notes_editor_note_id(&self) -> Option<NoteId> {
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_note_id())
+    }
+
+    pub fn all_notes_editor_text(&self) -> Option<String> {
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_text())
+    }
+
+    /// Type into the All Notes editor (replace its text without typing it).
+    pub fn set_all_notes_editor_text(&mut self, text: &str) {
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.set_editor_text(text);
+        }
+        self.settle();
+    }
+
+    /// Press the All Notes editor's menu button.
+    pub fn invoke_editor_menu(&mut self) {
+        if let Some(app) = &self.app {
+            app.invoke_editor_menu();
+        }
+        self.settle();
+    }
+
+    pub fn editor_menu_button_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        self.app.as_ref().and_then(|a| a.editor_menu_button_rect())
+    }
+
+    /// Double click a row of the list.
+    pub fn invoke_all_notes_open_note(&mut self, id: NoteId) {
+        if let Some(app) = &self.app {
+            app.invoke_all_notes_open_note(id);
+        }
+        self.settle();
+    }
+
+    /// The editor window's place and size, logical px.
+    pub fn all_notes_window_geometry(&self) -> Option<(i32, i32, u32, u32)> {
+        let v = self.app.as_ref().and_then(|a| a.all_notes())?;
+        let ui = v.ui();
+        let w = ui.window();
+        let (p, sz) = (w.position(), w.size());
+        Some((p.x, p.y, sz.width, sz.height))
     }
 
     pub fn all_notes_confirming_delete(&self) -> Option<bool> {
@@ -1060,15 +1113,31 @@ impl Harness {
         self.settle();
     }
 
-    pub fn render_all_notes(&self) -> Option<(u32, u32, Vec<slint::Rgb8Pixel>)> {
+    /// The editor window of the open All Notes view: the newest window as wide as a note plus
+    /// the sidebar's strip.
+    fn all_notes_window(&self) -> Option<std::rc::Rc<crate::platform::StandInWindow>> {
         if !self.is_all_notes_open() {
             return None;
         }
-        let wins = platform::windows();
-        let w = wins.into_iter().rev().find(|w| {
-            let s = w.window().size();
-            s.width == 603 && s.height == 625
-        })?;
+        let (_, _, w, h) = self.all_notes_window_geometry()?;
+        platform::windows().into_iter().rev().find(|win| {
+            let s = win.window().size();
+            s.width == w && s.height == h
+        })
+    }
+
+    /// Turn the mouse wheel over the All Notes editor window at (x, y).
+    pub fn scroll_all_notes(&mut self, x: f32, y: f32, dy: f32) {
+        if let Some(app) = &self.app {
+            let position = slint::LogicalPosition::new(x, y);
+            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerMoved { position });
+            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: dy });
+        }
+        self.settle();
+    }
+
+    pub fn render_all_notes(&self) -> Option<(u32, u32, Vec<slint::Rgb8Pixel>)> {
+        let w = self.all_notes_window()?;
         w.window().request_redraw();
         let s = w.window().size();
         let (pw, ph) = (s.width, s.height);
@@ -1079,29 +1148,9 @@ impl Harness {
         Some((pw, ph, buf))
     }
 
-    /// Render the open `AllNotesWindow` at `scale` onto a `#D6DBE2` desk canvas of `canvas` physical pixels.
-    pub fn render_all_notes_canvas(&self, scale: f32, canvas: (u32, u32)) -> Option<crate::shot::Snapshot> {
-        if !self.is_all_notes_open() {
-            return None;
-        }
-        let wins = platform::windows();
-        let w = wins.into_iter().rev().find(|w| {
-            let s = w.window().size();
-            s.width == 603 && s.height == 625
-        })?;
-        w.window().dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale });
-        w.window().set_size(slint::LogicalSize::new(603.0, 625.0));
-        w.window().request_redraw();
-        let s = w.window().size();
-        let (pw, ph) = (s.width, s.height);
-        let mut buf = vec![slint::Rgb8Pixel::default(); (pw * ph) as usize];
-        w.draw_if_needed(|r| {
-            r.render(&mut buf, pw as usize);
-        });
-        // Restore 1.0x logical window size for subsequent interactions
-        w.window().dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: 1.0 });
-        w.window().set_size(slint::LogicalSize::new(603.0, 625.0));
-
+    /// Render the open All Notes editor window onto a `#D6DBE2` desk canvas of `canvas` physical pixels.
+    pub fn render_all_notes_canvas(&self, canvas: (u32, u32)) -> Option<crate::shot::Snapshot> {
+        let (pw, ph, buf) = self.render_all_notes()?;
         let desk = [0xD6u8, 0xDB, 0xE2];
         let (cw, ch) = canvas;
         let (ox, oy) = ((cw as i64 - pw as i64) / 2, (ch as i64 - ph as i64) / 2);

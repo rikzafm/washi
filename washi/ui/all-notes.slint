@@ -1,9 +1,18 @@
-// All Notes ("Notes") in-place sidebar and paper overlay components.
-// Embedded inside NoteWindow (603 x 625 logical px, transparent window background).
+// All Notes ("Notes") in place: a sidebar to the left of the note's own window, and the bottom
+// action bar that replaces the formatting toolbar while the list is open.
+//
+// The note window grows to the left by `AllNotesMetrics.sidebar-w`; the paper (the real editor)
+// keeps its place on screen. The sidebar is drawn in the window's left strip, tilted -1deg like
+// the mockup, with a slate backing so the dark text reads on any wallpaper.
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { Frame, Tilt, TRect } from "toolbar.slint";
+
+export global AllNotesMetrics {
+    /// Width of the strip the sidebar adds to the left of the note window.
+    out property <length> sidebar-w: 282px;
+}
 
 export struct AllNoteItem {
     id: int,
@@ -11,92 +20,70 @@ export struct AllNoteItem {
     is-open: bool,
 }
 
-export struct PreviewRun {
-    text: string,
-    u: float,
-    v: float,
-    dx: float,
-    dy: float,
-    width: float,
-    size: float,
-    bold: bool,
-    italic: bool,
-    color: color,
-}
-
+/// One row (title in a pill), drawn in the tilted frame `f`; `t` is the row's top measured from the
+/// panel's top edge (the frame's center is `ph / 2` below it).
 component SidebarRow inherits Rectangle {
     in property <AllNoteItem> item;
     in property <bool> selected: false;
-    in property <float> row-cy;
-    in property <length> text-x: 41px;
-    in property <length> text-y;
+    in property <Frame> f;
+    in property <float> v0;
     callback clicked();
+    callback double-clicked();
     callback scrolled(length) -> EventResult;
 
     x: 0px;
     y: 0px;
-    width: 603px;
-    height: 625px;
-
-    property <Frame> pill-frame: {
-        w: 603.0,
-        h: 625.0,
-        cx: 124.8,
-        cy: root.row-cy,
-        cs: Math.cos(-1.0deg),
-        sn: Math.sin(-1.0deg),
-    };
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
 
     for growth in [6.0, 4.0, 2.0, 0.5]: TRect {
         visible: root.selected;
-        f: root.pill-frame;
-        u0: -94.0 - growth;
-        v0: -17.5 - growth + 2.5;
-        w: 188.0 + 2.0 * growth;
-        h: 35.0 + 2.0 * growth;
+        f: root.f;
+        u0: -123.0 - growth;
+        v0: root.v0 - growth + 3.0;
+        w: 246.0 + 2.0 * growth;
+        h: 52.0 + 2.0 * growth;
         r: 8.0 + growth;
         fill: #00000006;
     }
 
     if root.selected : TRect {
-        f: root.pill-frame;
-        u0: -94.0;
-        v0: -17.5;
-        w: 188.0;
-        h: 35.0;
-        r: 8.0;
+        f: root.f;
+        u0: -123.0;
+        v0: root.v0;
+        w: 246.0;
+        h: 52.0;
+        r: 10.8;
         fill: #FFFFFD;
     }
 
     Text {
-        x: root.text-x;
-        y: root.text-y;
-        width: 170px;
+        x: Tilt.x(root.f, -107.0, root.v0) * 1px;
+        y: Tilt.y(root.f, -107.0, root.v0) * 1px;
+        width: 214px;
+        height: 52px;
         text: root.item.title;
         font-family: "Shadows Into Light";
-        font-size: 15.2px;
+        font-size: 22px;
         font-weight: root.selected ? 700 : 400;
         color: #2B2F36;
+        vertical-alignment: center;
         overflow: elide;
     }
 
     TouchArea {
-        x: 30px;
-        y: (root.row-cy - 17.5) * 1px;
-        width: 188px;
-        height: 35px;
+        x: Tilt.x(root.f, -123.0, root.v0) * 1px;
+        y: Tilt.y(root.f, -123.0, root.v0) * 1px;
+        width: 246px;
+        height: 52px;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        double-clicked => { root.double-clicked(); }
         scroll-event(e) => { return root.scrolled(e.delta-y); }
     }
 }
 
 export component AllNotesSidebar inherits Rectangle {
-    x: 0px;
-    y: 0px;
-    width: 603px;
-    height: 625px;
-
     in property <int> selected-note-id: -1;
     in property <int> open-count: 0;
     in property <int> closed-count: 0;
@@ -105,11 +92,30 @@ export component AllNotesSidebar inherits Rectangle {
     in-out property <float> scroll-y: 0.0;
 
     callback select-note(int);
+    callback open-note(int);
     callback new-note();
+    /// The user pressed the sidebar itself (not a row or the button): the platform drags the window.
+    callback start-move();
 
-    property <float> closed-header-y: 225.0 + root.open-notes.length * 38.0;
-    property <float> new-button-cy: root.closed-header-y + 46.0 + root.closed-notes.length * 38.0;
-    property <float> max-scroll: max(0.0, (root.new-button-cy + 30.0) - (root.height / 1px));
+    // The panel, in window px: 210 wide at x = 8, as tall as the paper (the window minus the margin).
+    property <float> pw: 270.0;
+    property <float> ph: max(240.0, root.height / 1px - 84.0);
+    property <float> pcx: 143.0;
+    property <float> pcy: root.height / 1px / 2.0;
+    property <float> header-h: 104.0;
+    property <float> row-pitch: 54.0;
+
+    property <float> n-open: root.open-notes.length;
+    property <float> n-closed: root.closed-notes.length;
+    // The list: two labels and the rows.
+    property <float> content-h: 30.0 + root.n-open * root.row-pitch + 14.0 + 30.0 + root.n-closed * root.row-pitch;
+    // The button follows the last row while everything fits; once it would not, it is fixed at
+    // the panel's bottom and only the rows scroll above it.
+    property <float> fit-h: root.ph - root.header-h - 16.0 - 44.0 - 14.0;
+    property <bool> overflow: root.content-h > root.fit-h;
+    property <float> vp-h: root.overflow ? root.ph - root.header-h - 16.0 - 44.0 - 10.0 : root.content-h;
+    property <float> btn-t: root.overflow ? root.ph - 16.0 - 44.0 : root.header-h + root.content-h + 14.0;
+    out property <float> max-scroll: root.overflow ? root.content-h - root.vp-h : 0.0;
     changed max-scroll => {
         if (root.scroll-y > root.max-scroll) {
             root.scroll-y = root.max-scroll;
@@ -122,156 +128,171 @@ export component AllNotesSidebar inherits Rectangle {
         return accept;
     }
 
-    property <Frame> new-button-frame: {
-        w: 603.0,
-        h: 625.0,
-        cx: 84.0,
-        cy: root.new-button-cy - root.scroll-y,
+    // The panel's frame in window px, and the same frame in the list viewport's own coordinates.
+    property <Frame> pf: {
+        w: AllNotesMetrics.sidebar-w / 1px,
+        h: root.height / 1px,
+        cx: root.pcx,
+        cy: root.pcy,
         cs: Math.cos(-1.0deg),
         sn: Math.sin(-1.0deg),
     };
+    property <float> clip-y: root.pcy - root.ph / 2.0 + root.header-h - 6.0;
+    property <Frame> lf: {
+        w: AllNotesMetrics.sidebar-w / 1px,
+        h: root.vp-h + 12.0,
+        cx: root.pcx,
+        cy: root.pcy - root.clip-y,
+        cs: Math.cos(-1.0deg),
+        sn: Math.sin(-1.0deg),
+    };
+    // The top of the panel from its center, for `v` values.
+    property <float> top-v: -root.ph / 2.0;
 
-    // Backing: the mockup's slate desk color behind the sidebar column, so the dark text reads on
-    // any wallpaper (the window itself stays transparent). Tilted with the sidebar.
-    TRect {
-        f: {
-            w: 603.0,
-            h: 625.0,
-            cx: 124.8,
-            cy: 345.0,
-            cs: Math.cos(-1.0deg),
-            sn: Math.sin(-1.0deg),
-        };
-        u0: -112.0;
-        v0: -262.0;
-        w: 224.0;
-        h: 524.0;
-        r: 18.0;
-        fill: #D6DBE2;
-    }
-
-    if root.max-scroll > 0.0 : TouchArea {
-        x: 24px;
-        y: 100px;
-        width: 200px;
-        height: root.height - 100px;
+    // Dragging the sidebar's empty parts moves the whole window.
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: AllNotesMetrics.sidebar-w;
+        height: root.height;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                root.start-move();
+            }
+        }
         scroll-event(e) => { return root.scroll-by(e.delta-y); }
     }
 
+    // Backing: the mockup's slate desk color behind the list.
+    TRect {
+        f: root.pf;
+        u0: -root.pw / 2.0;
+        v0: root.top-v;
+        w: root.pw;
+        h: root.ph;
+        r: 22.0;
+        fill: #D6DBE2;
+    }
+
     Text {
-        x: 33.8px;
-        y: (112.0 - root.scroll-y) * 1px;
+        x: Tilt.x(root.pf, -113.0, root.top-v + 8.0) * 1px;
+        y: Tilt.y(root.pf, -113.0, root.top-v + 8.0) * 1px;
         text: "Notes";
         font-family: "Shadows Into Light";
-        font-size: 30px;
+        font-size: 44px;
         color: #2B2F36;
     }
 
-    open-count-label := Text {
-        x: 33.8px;
-        y: (162.0 - root.scroll-y) * 1px;
-        text: root.open-count + " open · ";
-        font-family: "Shadows Into Light";
-        font-size: 12.6px;
-        color: #5B616B;
-    }
-
     Text {
-        x: root.open-count < 10 ? 79.5px : (open-count-label.x + open-count-label.width + 2px);
-        y: (161.2 - root.scroll-y) * 1px;
-        text: root.closed-count + " closed";
+        x: Tilt.x(root.pf, -113.0, root.top-v + 68.0) * 1px;
+        y: Tilt.y(root.pf, -113.0, root.top-v + 68.0) * 1px;
+        text: root.open-count + " open · " + root.closed-count + " closed";
         font-family: "Shadows Into Light";
-        font-size: 12.6px;
+        font-size: 18px;
         color: #5B616B;
     }
 
-    Text {
-        x: 39.5px;
-        y: (195.0 - root.scroll-y) * 1px;
-        text: "OPEN";
-        font-family: "Shadows Into Light";
-        font-size: 12.6px;
-        letter-spacing: 0.4px;
-        color: #5B616B;
-    }
+    // The list viewport: rows scroll inside it and never over the header or the button.
+    Rectangle {
+        x: 0px;
+        y: root.clip-y * 1px;
+        width: AllNotesMetrics.sidebar-w;
+        height: (root.vp-h + 12.0) * 1px;
+        clip: true;
 
-    for item[i] in root.open-notes: SidebarRow {
-        item: item;
-        selected: item.id == root.selected-note-id;
-        row-cy: 234.6 + i * 38.0 - root.scroll-y;
-        text-x: (40.5 + i * 0.5) * 1px;
-        text-y: (223.8 + i * 38.0 - root.scroll-y) * 1px;
-        clicked => { root.select-note(item.id); }
-        scrolled(dy) => { return root.scroll-by(dy); }
-    }
+        TouchArea {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            scroll-event(e) => { return root.scroll-by(e.delta-y); }
+        }
 
-    Text {
-        x: 41.5px;
-        y: (root.closed-header-y - 0.5 - root.scroll-y) * 1px;
-        text: "CLOSED";
-        font-family: "Shadows Into Light";
-        font-size: 12.6px;
-        letter-spacing: 0.3px;
-        color: #5B616B;
-    }
+        Text {
+            x: Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
+            y: Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
+            text: "OPEN";
+            font-family: "Shadows Into Light";
+            font-size: 18px;
+            letter-spacing: 0.72px;
+            color: #5B616B;
+        }
 
-    for item[j] in root.closed-notes: SidebarRow {
-        item: item;
-        selected: item.id == root.selected-note-id;
-        row-cy: root.closed-header-y + 39.5 + j * 38.0 - root.scroll-y;
-        text-x: (42.5 + j * 0.66) * 1px;
-        text-y: (root.closed-header-y + 28.0 + j * 38.0 - root.scroll-y) * 1px;
-        clicked => { root.select-note(item.id); }
-        scrolled(dy) => { return root.scroll-by(dy); }
+        for item[i] in root.open-notes: SidebarRow {
+            item: item;
+            selected: item.id == root.selected-note-id;
+            f: root.lf;
+            v0: root.top-v + root.header-h + 30.0 + i * root.row-pitch - root.scroll-y;
+            clicked => { root.select-note(item.id); }
+            double-clicked => { root.open-note(item.id); }
+            scrolled(dy) => { return root.scroll-by(dy); }
+        }
+
+        Text {
+            x: Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) * 1px;
+            y: Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) * 1px;
+            text: "CLOSED";
+            font-family: "Shadows Into Light";
+            font-size: 18px;
+            letter-spacing: 0.72px;
+            color: #5B616B;
+        }
+
+        for item[j] in root.closed-notes: SidebarRow {
+            item: item;
+            selected: item.id == root.selected-note-id;
+            f: root.lf;
+            v0: root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 14.0 + 30.0 + j * root.row-pitch - root.scroll-y;
+            clicked => { root.select-note(item.id); }
+            double-clicked => { root.open-note(item.id); }
+            scrolled(dy) => { return root.scroll-by(dy); }
+        }
     }
 
     // "+ New note" button
     TRect {
-        f: root.new-button-frame;
-        u0: -45.0;
-        v0: -15.5;
-        w: 90.0;
-        h: 31.0;
-        r: 7.5;
+        f: root.pf;
+        u0: -123.0;
+        v0: root.top-v + root.btn-t;
+        w: 124.0;
+        h: 44.0;
+        r: 10.8;
         fill: #2B2F36;
     }
 
     Text {
-        x: (84.0 - 45.0) * 1px;
-        y: (root.new-button-cy - 15.5 - root.scroll-y) * 1px;
-        width: 90px;
-        height: 31px;
+        x: Tilt.x(root.pf, -123.0, root.top-v + root.btn-t) * 1px;
+        y: Tilt.y(root.pf, -123.0, root.top-v + root.btn-t) * 1px;
+        width: 124px;
+        height: 44px;
         text: "+ New note";
         font-family: "Shadows Into Light";
-        font-size: 15.0px;
+        font-size: 21px;
         color: #FFFFFD;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
 
     TouchArea {
-        x: (84.0 - 45.0) * 1px;
-        y: (root.new-button-cy - 15.5 - root.scroll-y) * 1px;
-        width: 90px;
-        height: 31px;
+        x: Tilt.x(root.pf, -123.0, root.top-v + root.btn-t) * 1px;
+        y: Tilt.y(root.pf, -123.0, root.top-v + root.btn-t) * 1px;
+        width: 124px;
+        height: 44px;
         mouse-cursor: pointer;
         clicked => { root.new-note(); }
         scroll-event(e) => { return root.scroll-by(e.delta-y); }
     }
 }
 
-export component AllNotesPaperOverlay inherits Rectangle {
-    x: 0px;
-    y: 0px;
-    width: 603px;
-    height: 625px;
-
-    in property <int> selected-note-id: -1;
+/// The bottom bar of the paper while the list is open: open/focus, close, export and delete, or the
+/// "Delete for good?" confirmation. It sits where the formatting toolbar does, in the paper's
+/// tilted frame `f` (`paper-w` x `paper-h`, in px).
+export component AllNotesActionBar inherits Rectangle {
+    in property <Frame> f;
+    in property <float> paper-w;
+    in property <float> paper-h;
     in property <bool> selected-note-open: false;
     in-out property <bool> confirming-delete: false;
-    in property <[PreviewRun]> status-runs: [];
-    in property <[PreviewRun]> preview-runs: [];
-    in property <bool> show-preview-runs: true;
 
     callback open-or-focus-note();
     callback close-note();
@@ -279,92 +300,41 @@ export component AllNotesPaperOverlay inherits Rectangle {
     callback request-delete();
     callback cancel-delete();
     callback confirm-delete();
-    callback close-view();
 
-    FocusScope {
-        width: 100%;
-        height: 100%;
-        init => { self.focus(); }
-        key-pressed(e) => {
-            if (e.text == Key.Escape) {
-                if (root.confirming-delete) {
-                    root.confirming-delete = false;
-                    root.cancel-delete();
-                } else {
-                    root.close-view();
-                }
-                return accept;
-            }
-            reject
-        }
-    }
+    // Same cells as the formatting toolbar: first button at 23.2 px from the left edge, 32 px
+    // buttons on a 42.667 px pitch, their centers 24 px above the paper's bottom.
+    property <float> left: -root.paper-w / 2.0 + 23.2;
+    property <float> cv: root.paper-h / 2.0 - 24.0;
 
-    property <Frame> paper-frame: {
-        w: 603.0,
-        h: 625.0,
-        cx: 412.1,
-        cy: 311.6,
-        cs: Math.cos(1.5deg),
-        sn: Math.sin(1.5deg),
-    };
+    x: 0px;
+    y: 0px;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
 
-    for r in root.status-runs: Text {
-        x: (244.7 + r.u + r.dx) * 1px;
-        y: (104.1 + r.v + r.dy) * 1px;
-        text: r.text;
-        wrap: no-wrap;
-        font-family: "Shadows Into Light";
-        font-size: r.size * 1px;
-        font-weight: r.bold ? 700 : 400;
-        font-italic: r.italic;
-        color: r.color;
-    }
-
-    if root.show-preview-runs : Rectangle {
+    if !root.confirming-delete : Rectangle {
         x: 0px;
         y: 0px;
-        width: 603px;
-        height: 625px;
+        width: parent.width;
+        height: parent.height;
 
-        for r in root.preview-runs: Text {
-            x: (244.7 + r.u + r.dx) * 1px;
-            y: (102.9 + r.v + r.dy) * 1px;
-            text: r.text;
-            wrap: no-wrap;
-            font-family: "Shadows Into Light";
-            font-size: r.size * 1px;
-            font-weight: r.bold ? 700 : 400;
-            font-italic: r.italic;
-            color: r.color;
-        }
-    }
-
-    // --- Bottom Bar: Normal State (4 tilted icon buttons) ---
-    if !root.confirming-delete && root.selected-note-id >= 0 : Rectangle {
-        x: 0px;
-        y: 0px;
-        width: 603px;
-        height: 625px;
-
-        // 1. Open / Focus on desktop (du = -127.5, dv = 181.5)
         TRect {
-            f: root.paper-frame;
-            u0: -127.5 - 15.2;
-            v0: 181.2 - 15.2;
-            w: 30.4;
-            h: 30.4;
-            r: 7.5;
+            f: root.f;
+            u0: root.left;
+            v0: root.cv - 16.0;
+            w: 32.0;
+            h: 32.0;
+            r: 8.6;
             fill: root.selected-note-open ? #F0F0EE : (open-hit.has-hover ? #F0F0EE : transparent);
         }
 
         Path {
-            x: Tilt.x(root.paper-frame, -127.0, 181.8) * 1px - 8px;
-            y: Tilt.y(root.paper-frame, -127.0, 181.8) * 1px - 8px;
+            x: Tilt.x(root.f, root.left + 16.0, root.cv) * 1px - 8px;
+            y: Tilt.y(root.f, root.left + 16.0, root.cv) * 1px - 8px;
             width: 16px;
             height: 16px;
             viewbox-width: 24;
             viewbox-height: 24;
-            commands: "M9 9h10v10H9zM5 15H4V4h11v1";
+            commands: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5";
             fill: transparent;
             stroke: root.selected-note-open ? #2B2F36 : #5B616B;
             stroke-width: 1.3px;
@@ -373,28 +343,27 @@ export component AllNotesPaperOverlay inherits Rectangle {
         }
 
         open-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, -127.5, 181.5) * 1px - 15.5px;
-            y: Tilt.y(root.paper-frame, -127.5, 181.5) * 1px - 15.5px;
-            width: 31px;
-            height: 31px;
+            x: Tilt.x(root.f, root.left + 16.0, root.cv) * 1px - 16px;
+            y: Tilt.y(root.f, root.left + 16.0, root.cv) * 1px - 16px;
+            width: 32px;
+            height: 32px;
             mouse-cursor: pointer;
             clicked => { root.open-or-focus-note(); }
         }
 
-        // 2. Close (×) (du = -91.0, dv = 181.8)
         TRect {
-            f: root.paper-frame;
-            u0: -91.0 - 15.5;
-            v0: 181.5 - 15.5;
-            w: 31.0;
-            h: 31.0;
-            r: 8.0;
+            f: root.f;
+            u0: root.left + 42.667;
+            v0: root.cv - 16.0;
+            w: 32.0;
+            h: 32.0;
+            r: 8.6;
             fill: close-hit.has-hover ? #F0F0EE : transparent;
         }
 
         Path {
-            x: Tilt.x(root.paper-frame, -91.2, 181.9) * 1px - 7px;
-            y: Tilt.y(root.paper-frame, -91.2, 181.9) * 1px - 7px;
+            x: Tilt.x(root.f, root.left + 42.667 + 16.0, root.cv) * 1px - 7px;
+            y: Tilt.y(root.f, root.left + 42.667 + 16.0, root.cv) * 1px - 7px;
             width: 14px;
             height: 14px;
             viewbox-width: 24;
@@ -407,28 +376,27 @@ export component AllNotesPaperOverlay inherits Rectangle {
         }
 
         close-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, -91.0, 181.5) * 1px - 15.5px;
-            y: Tilt.y(root.paper-frame, -91.0, 181.5) * 1px - 15.5px;
-            width: 31px;
-            height: 31px;
+            x: Tilt.x(root.f, root.left + 42.667 + 16.0, root.cv) * 1px - 16px;
+            y: Tilt.y(root.f, root.left + 42.667 + 16.0, root.cv) * 1px - 16px;
+            width: 32px;
+            height: 32px;
             mouse-cursor: pointer;
             clicked => { root.close-note(); }
         }
 
-        // 3. Export (↓) (du = -55.0, dv = 182.0)
         TRect {
-            f: root.paper-frame;
-            u0: -55.0 - 15.5;
-            v0: 181.5 - 15.5;
-            w: 31.0;
-            h: 31.0;
-            r: 8.0;
+            f: root.f;
+            u0: root.left + 2.0 * 42.667;
+            v0: root.cv - 16.0;
+            w: 32.0;
+            h: 32.0;
+            r: 8.6;
             fill: export-hit.has-hover ? #F0F0EE : transparent;
         }
 
         Path {
-            x: 344px;
-            y: 483.2px;
+            x: Tilt.x(root.f, root.left + 2.0 * 42.667 + 16.0, root.cv) * 1px - 8px;
+            y: Tilt.y(root.f, root.left + 2.0 * 42.667 + 16.0, root.cv) * 1px - 8px;
             width: 16px;
             height: 16px;
             viewbox-width: 24;
@@ -442,28 +410,27 @@ export component AllNotesPaperOverlay inherits Rectangle {
         }
 
         export-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, -55.0, 181.5) * 1px - 15.5px;
-            y: Tilt.y(root.paper-frame, -55.0, 181.5) * 1px - 15.5px;
-            width: 31px;
-            height: 31px;
+            x: Tilt.x(root.f, root.left + 2.0 * 42.667 + 16.0, root.cv) * 1px - 16px;
+            y: Tilt.y(root.f, root.left + 2.0 * 42.667 + 16.0, root.cv) * 1px - 16px;
+            width: 32px;
+            height: 32px;
             mouse-cursor: pointer;
             clicked => { root.export-note(); }
         }
 
-        // 4. Delete (🗑) (du = -18.5, dv = 182.0)
         TRect {
-            f: root.paper-frame;
-            u0: -18.5 - 15.5;
-            v0: 181.5 - 15.5;
-            w: 31.0;
-            h: 31.0;
-            r: 8.0;
+            f: root.f;
+            u0: root.left + 3.0 * 42.667;
+            v0: root.cv - 16.0;
+            w: 32.0;
+            h: 32.0;
+            r: 8.6;
             fill: del-hit.has-hover ? #F6E7E9 : transparent;
         }
 
         Path {
-            x: Tilt.x(root.paper-frame, -18.3, 182.0) * 1px - 8px;
-            y: Tilt.y(root.paper-frame, -18.3, 182.0) * 1px - 8px;
+            x: Tilt.x(root.f, root.left + 3.0 * 42.667 + 16.0, root.cv) * 1px - 8px;
+            y: Tilt.y(root.f, root.left + 3.0 * 42.667 + 16.0, root.cv) * 1px - 8px;
             width: 16px;
             height: 16px;
             viewbox-width: 24;
@@ -477,10 +444,10 @@ export component AllNotesPaperOverlay inherits Rectangle {
         }
 
         del-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, -18.5, 181.5) * 1px - 15.5px;
-            y: Tilt.y(root.paper-frame, -18.5, 181.5) * 1px - 15.5px;
-            width: 31px;
-            height: 31px;
+            x: Tilt.x(root.f, root.left + 3.0 * 42.667 + 16.0, root.cv) * 1px - 16px;
+            y: Tilt.y(root.f, root.left + 3.0 * 42.667 + 16.0, root.cv) * 1px - 16px;
+            width: 32px;
+            height: 32px;
             mouse-cursor: pointer;
             clicked => {
                 root.confirming-delete = true;
@@ -489,58 +456,63 @@ export component AllNotesPaperOverlay inherits Rectangle {
         }
     }
 
-    // --- Bottom Bar: Delete Confirmation State ---
-    if root.confirming-delete && root.selected-note-id >= 0 : Rectangle {
+    if root.confirming-delete : Rectangle {
         x: 0px;
         y: 0px;
-        width: 603px;
-        height: 625px;
+        width: parent.width;
+        height: parent.height;
 
-        // "Delete for good?" along the 1.5deg paper baseline
+        // "Delete for good?" word by word along the paper's baseline
         Text {
-            x: (Tilt.x(root.paper-frame, -124.7, 180.0) - 18.0) * 1px;
-            y: (Tilt.y(root.paper-frame, -124.7, 180.0) - 10.7) * 1px;
+            x: Tilt.x(root.f, root.left + 2.0, root.cv) * 1px;
+            y: Tilt.y(root.f, root.left + 2.0, root.cv) * 1px - 11px;
+            height: 22px;
             text: "Delete";
             wrap: no-wrap;
             font-family: "Shadows Into Light";
             font-size: 15.4px;
             color: #2B2F36;
+            vertical-alignment: center;
         }
 
         Text {
-            x: (Tilt.x(root.paper-frame, -90.7, 180.0) - 8.5) * 1px;
-            y: (Tilt.y(root.paper-frame, -90.7, 180.0) - 11.0) * 1px;
+            x: Tilt.x(root.f, root.left + 36.0, root.cv) * 1px;
+            y: Tilt.y(root.f, root.left + 36.0, root.cv) * 1px - 11px;
+            height: 22px;
             text: "for";
             wrap: no-wrap;
             font-family: "Shadows Into Light";
             font-size: 15.4px;
             color: #2B2F36;
+            vertical-alignment: center;
         }
 
         Text {
-            x: (Tilt.x(root.paper-frame, -61.2, 180.0) - 16.0) * 1px;
-            y: (Tilt.y(root.paper-frame, -61.2, 180.0) - 10.7) * 1px;
+            x: Tilt.x(root.f, root.left + 54.0, root.cv) * 1px;
+            y: Tilt.y(root.f, root.left + 54.0, root.cv) * 1px - 11px;
+            height: 22px;
             text: "good?";
             wrap: no-wrap;
             font-family: "Shadows Into Light";
             font-size: 15.4px;
             color: #2B2F36;
+            vertical-alignment: center;
         }
 
-        // "Keep" button
+        // "Keep"
         TRect {
-            f: root.paper-frame;
-            u0: 23.3;
-            v0: 166.5;
+            f: root.f;
+            u0: root.left + 100.0;
+            v0: root.cv - 15.0;
             w: 54.0;
-            h: 30.5;
+            h: 30.0;
             r: 7.5;
             fill: keep-hit.pressed ? #E4E4E2 : (keep-hit.has-hover ? #EAEAE8 : #F0F0EE);
         }
 
         Text {
-            x: Tilt.x(root.paper-frame, 50.8, 181.2) * 1px - 27.0px;
-            y: Tilt.y(root.paper-frame, 50.8, 181.2) * 1px - 15.5px;
+            x: Tilt.x(root.f, root.left + 100.0, root.cv - 15.0) * 1px;
+            y: Tilt.y(root.f, root.left + 100.0, root.cv - 15.0) * 1px;
             width: 54px;
             height: 30px;
             text: "Keep";
@@ -552,10 +524,10 @@ export component AllNotesPaperOverlay inherits Rectangle {
         }
 
         keep-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, 50.3, 181.8) * 1px - 27.0px;
-            y: Tilt.y(root.paper-frame, 50.3, 181.8) * 1px - 15.2px;
+            x: Tilt.x(root.f, root.left + 100.0, root.cv - 15.0) * 1px;
+            y: Tilt.y(root.f, root.left + 100.0, root.cv - 15.0) * 1px;
             width: 54px;
-            height: 31px;
+            height: 30px;
             mouse-cursor: pointer;
             clicked => {
                 root.confirming-delete = false;
@@ -563,21 +535,21 @@ export component AllNotesPaperOverlay inherits Rectangle {
             }
         }
 
-        // "Delete" button
+        // "Delete"
         TRect {
-            f: root.paper-frame;
-            u0: 83.3;
-            v0: 166.5;
-            w: 59.5;
-            h: 30.5;
+            f: root.f;
+            u0: root.left + 160.0;
+            v0: root.cv - 15.0;
+            w: 60.0;
+            h: 30.0;
             r: 7.5;
             fill: confirm-hit.pressed ? #721923 : (confirm-hit.has-hover ? #9B2331 : #8A1F2B);
         }
 
         Text {
-            x: Tilt.x(root.paper-frame, 112.2, 180.5) * 1px - 29.5px;
-            y: Tilt.y(root.paper-frame, 112.2, 180.5) * 1px - 15.5px;
-            width: 59px;
+            x: Tilt.x(root.f, root.left + 160.0, root.cv - 15.0) * 1px;
+            y: Tilt.y(root.f, root.left + 160.0, root.cv - 15.0) * 1px;
+            width: 60px;
             height: 30px;
             text: "Delete";
             font-family: "Shadows Into Light";
@@ -588,30 +560,14 @@ export component AllNotesPaperOverlay inherits Rectangle {
         }
 
         confirm-hit := TouchArea {
-            x: Tilt.x(root.paper-frame, 113.0, 181.8) * 1px - 29.5px;
-            y: Tilt.y(root.paper-frame, 113.0, 181.8) * 1px - 15.2px;
-            width: 59px;
-            height: 31px;
+            x: Tilt.x(root.f, root.left + 160.0, root.cv - 15.0) * 1px;
+            y: Tilt.y(root.f, root.left + 160.0, root.cv - 15.0) * 1px;
+            width: 60px;
+            height: 30px;
             mouse-cursor: pointer;
             clicked => {
                 root.confirm-delete();
             }
         }
-    }
-
-    Image {
-        source: @image-url("assets/tape-pink.png");
-        x: 236px;
-        y: 71px;
-        width: 79px;
-        height: 63px;
-    }
-
-    Image {
-        source: @image-url("assets/tape-blue.png");
-        x: 508px;
-        y: 487px;
-        width: 80px;
-        height: 64px;
     }
 }

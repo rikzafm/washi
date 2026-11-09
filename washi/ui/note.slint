@@ -4,16 +4,16 @@ import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
 
-import { AllNotesSidebar, AllNotesPaperOverlay, AllNoteItem, PreviewRun } from "all-notes.slint";
+import { AllNotesSidebar, AllNotesActionBar, AllNotesMetrics, AllNoteItem } from "all-notes.slint";
 
 export { BlockData, BlockKind, MarkerData, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
-export { AllNoteItem, PreviewRun } from "all-notes.slint";
+export { AllNoteItem } from "all-notes.slint";
 export { DeleteNoteDialog } from "delete-dialog.slint";
 export { PaletteEntry, PickerPalette } from "color-picker.slint";
-import { Toolbar, ToolbarMetrics, MenuButton } from "toolbar.slint";
+import { Toolbar, ToolbarMetrics, MenuButton, Frame } from "toolbar.slint";
 import { ColorPicker, ColorPickerNav, PickerPalette } from "color-picker.slint";
 import { WindowHandles } from "resize-zones.slint";
 import { ScrollBar, ScrollMetrics } from "scroll.slint";
@@ -26,7 +26,7 @@ export component NoteWindow inherits Window {
     out property <bool> menu-button-highlighted: menu-btn.highlighted;
     out property <bool> menu-button-shown: root.dropdown-open || paper-touch.has-hover || menu-btn.has-hover;
     out property <float> menu-button-opacity: menu-btn.opacity;
-    out property <length> menu-button-x: menu-btn.center-x - ToolbarMetrics.menu-button-width / 2;
+    out property <length> menu-button-x: menu-btn.center-x - ToolbarMetrics.menu-button-width / 2 + root.sidebar-w;
     out property <length> menu-button-y: menu-btn.center-y - ToolbarMetrics.menu-button-height / 2;
     out property <length> menu-button-width: ToolbarMetrics.menu-button-width;
     out property <length> menu-button-height: ToolbarMetrics.menu-button-height;
@@ -46,8 +46,6 @@ export component NoteWindow inherits Window {
     in-out property <int> all-notes-selected-id: -1;
     in-out property <bool> all-notes-selected-is-open: false;
     in-out property <string> all-notes-status-text: "";
-    in-out property <[PreviewRun]> all-notes-status-runs: [];
-    in-out property <[PreviewRun]> all-notes-preview-runs: [];
     in-out property <int> all-notes-open-count: 0;
     in-out property <int> all-notes-closed-count: 0;
     in-out property <[AllNoteItem]> all-notes-open-list: [];
@@ -56,6 +54,7 @@ export component NoteWindow inherits Window {
 
     callback all-notes-close-view();
     callback all-notes-select-note(int);
+    callback all-notes-open-note(int);
     callback all-notes-new-note();
     callback all-notes-open-or-focus();
     callback all-notes-close-note();
@@ -66,9 +65,13 @@ export component NoteWindow inherits Window {
     // The window is the paper plus a fixed transparent margin on every side.
     no-frame: true;
     background: transparent;
-    preferred-width: PaperTheme.paper-default-width + 2 * PaperTheme.margin;
+    // While All Notes is open the window is wider by the sidebar's strip, on the left; the paper
+    // (everything below but the sidebar) is `note-w` wide and starts at `sidebar-w`.
+    out property <length> sidebar-w: root.all-notes-open ? AllNotesMetrics.sidebar-w : 0px;
+    out property <length> note-w: root.width - root.sidebar-w;
+    preferred-width: PaperTheme.paper-default-width + 2 * PaperTheme.margin + root.sidebar-w;
     preferred-height: PaperTheme.paper-default-height + 2 * PaperTheme.margin;
-    min-width: PaperTheme.paper-min-width + 2 * PaperTheme.margin;
+    min-width: PaperTheme.paper-min-width + 2 * PaperTheme.margin + root.sidebar-w;
     min-height: PaperTheme.paper-min-height + 2 * PaperTheme.margin;
 
     /// The note's stored text, kept by the app; `blocks` is the same text split into styled blocks.
@@ -120,8 +123,9 @@ export component NoteWindow inherits Window {
     callback focus-entered(int);
     /// The paper (window minus margins) changed size: Rust lays the words out again.
     callback paper-resized(length, length);
-    changed width => { root.picker-open = false; root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
-    changed height => { root.picker-open = false; root.paper-resized(root.width - 2 * root.margin, root.height - 2 * root.margin); }
+    changed width => { root.picker-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
+    changed height => { root.picker-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
+    changed sidebar-w => { root.picker-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
     /// 1 at rest (words on the tilted baseline), 0 while editing (level).
     out property <float> text-tilt-scale: text-layer.tilt-scale;
     /// The block whose field has the focus (-1 none). Rust clears it when it replaces the blocks.
@@ -159,7 +163,7 @@ export component NoteWindow inherits Window {
             root.scroll-activity();
         }
     }
-    property <length> tilt-allowance: abs((root.width - 2 * root.margin) / 2 * root.tilt.sin());
+    property <length> tilt-allowance: abs((root.note-w - 2 * root.margin) / 2 * root.tilt.sin());
     /// The height of the text area (it ends above the toolbar band).
     out property <length> text-view-height: root.paper-bottom - root.paper-top - ToolbarMetrics.band-height - Theme.text-bottom-gap - 2 * root.tilt-allowance;
     /// Where the text layer's top is in the text area (minus the scroll): a pointer's place in the
@@ -221,22 +225,60 @@ export component NoteWindow inherits Window {
     // The paper's untilted box in the window (the margin on every side).
     property <length> paper-top: PaperTheme.margin;
     property <length> paper-bottom: root.height - PaperTheme.margin;
+    /// The paper's frame (center and tilt) in the note area, for the All Notes action bar.
+    property <Frame> paper-frame: {
+        w: root.note-w / 1px,
+        h: root.height / 1px,
+        cx: (root.margin + (root.note-w - 2 * root.margin) / 2) / 1px,
+        cy: (root.paper-top + (root.height - 2 * root.margin) / 2) / 1px,
+        cs: Math.cos(root.tilt),
+        sn: Math.sin(root.tilt),
+    };
+
+    // The sidebar (All Notes): left of the paper, in the strip the window grew by.
+    if root.all-notes-open : AllNotesSidebar {
+        x: 0px;
+        y: 0px;
+        width: AllNotesMetrics.sidebar-w;
+        height: root.height;
+        selected-note-id: root.all-notes-selected-id;
+        open-count: root.all-notes-open-count;
+        closed-count: root.all-notes-closed-count;
+        open-notes: root.all-notes-open-list;
+        closed-notes: root.all-notes-closed-list;
+        select-note(id) => {
+            root.all-notes-confirming-delete = false;
+            root.all-notes-select-note(id);
+        }
+        open-note(id) => { root.all-notes-open-note(id); }
+        new-note => {
+            root.all-notes-confirming-delete = false;
+            root.all-notes-new-note();
+        }
+        start-move => { root.picker-open = false; root.start-move(); }
+    }
+
+    // Everything of the note itself, shifted right by the sidebar's strip.
+    note-area := Rectangle {
+        x: root.sidebar-w;
+        y: 0px;
+        width: root.note-w;
+        height: root.height;
 
     // Shadow and paper (the look: see paper.slint). Behind everything.
     Paper {
-        width: root.width;
+        width: root.note-w;
         height: root.height;
-        cx: root.all-notes-open ? 412.1px : root.width / 2;
-        cy: root.all-notes-open ? 311.6px : root.height / 2;
-        paper-w: root.all-notes-open ? 334.8px : root.width - 2 * root.margin;
-        paper-h: root.all-notes-open ? 418.8px : root.height - 2 * root.margin;
+        cx: root.note-w / 2;
+        cy: root.height / 2;
+        paper-w: root.note-w - 2 * root.margin;
+        paper-h: root.height - 2 * root.margin;
     }
 
     // The whole note: it holds everything, so `has-hover` stays true over the editor and the
     // toolbar too (ADR 0001). The editor ignores the right button, so a right click anywhere
     // reaches this.
     paper-touch := TouchArea {
-        enabled: !root.all-notes-open;
         scroll-event(e) => {
             if (root.max-scroll <= 0px) { return reject; }
             root.scroll-y = max(0px, min(root.max-scroll, root.scroll-y - e.delta-y));
@@ -269,6 +311,15 @@ export component NoteWindow inherits Window {
                 reject
             }
             key-pressed(e) => {
+                if (e.text == Key.Escape && root.all-notes-open && !root.picker-open) {
+                    if (root.all-notes-confirming-delete) {
+                        root.all-notes-confirming-delete = false;
+                        root.all-notes-cancel-delete();
+                    } else {
+                        root.all-notes-close-view();
+                    }
+                    return accept;
+                }
                 if (e.text == Key.Escape && root.picker-open) { root.picker-open = false; return accept; }
                 if (e.modifiers.control && !e.modifiers.shift && !e.modifiers.alt) {
                     if (e.text == "n" || e.text == "\u{e}") { root.new-note(); return accept; }
@@ -289,12 +340,11 @@ export component NoteWindow inherits Window {
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             text-view := Rectangle {
-                visible: !root.all-notes-open;
                 x: root.margin;
                 // The tilted paper's top edge rises by half the paper width times sin(tilt) at the left.
                 // The clip starts at the highest point of the tilted top edge so images and text can reach the tilted edge.
                 y: root.paper-top - root.tilt-allowance;
-                width: root.width - 2 * root.margin;
+                width: root.note-w - 2 * root.margin;
                 // The tilted band's top edge rises by the same amount at the left;
                 // text may not reach into it, and a level clip cannot follow the tilt.
                 height: root.paper-bottom - ToolbarMetrics.band-height - Theme.text-bottom-gap - self.y - root.tilt-allowance;
@@ -303,10 +353,10 @@ export component NoteWindow inherits Window {
                 text-layer := TextLayer {
                     x: 0px;
                     y: -root.scroll-y - (text-view.y - root.paper-top);
-                    width: root.width - 2 * root.margin;
+                    width: root.note-w - 2 * root.margin;
                     // at least the text's height, or the blocks' layout would squeeze them together
                     height: max(root.paper-bottom - root.paper-top, root.content);
-                    paper-w: root.width - 2 * root.margin;
+                    paper-w: root.note-w - 2 * root.margin;
                     paper-h: root.height - 2 * root.margin;
                     tilt: root.tilt;
                     scroll-y: root.scroll-y;
@@ -371,10 +421,9 @@ export component NoteWindow inherits Window {
         // Invisible grips for moving and resizing (inside paper-touch, so hovering them keeps the
         // toolbar up). Above the editor; none of them reaches into the text area.
         WindowHandles {
-            visible: !root.all-notes-open;
             x: 0px;
             y: 0px;
-            width: root.width;
+            width: root.note-w;
             height: root.height;
             start-move => { root.picker-open = false; root.start-move(); }
             start-resize(d) => { root.picker-open = false; root.start-resize(d); }
@@ -384,12 +433,11 @@ export component NoteWindow inherits Window {
 
         // The scrollbar: drawn in the paper's frame (like the toolbar), hugging its right edge.
         scrollbar := ScrollBar {
-            visible: !root.all-notes-open;
             x: 0px;
             y: 0px;
-            width: root.width;
+            width: root.note-w;
             height: root.height;
-            paper-w: root.width - 2 * root.margin;
+            paper-w: root.note-w - 2 * root.margin;
             paper-h: root.height - 2 * root.margin;
             view: root.text-view-height;
             content: root.content;
@@ -405,11 +453,11 @@ export component NoteWindow inherits Window {
         toolbar := Toolbar {
             x: 0px;
             y: 0px;
-            width: root.width;
+            width: root.note-w;
             height: root.height;
             paper-x: root.margin;
             paper-y: root.paper-top;
-            paper-w: root.width - 2 * root.margin;
+            paper-w: root.note-w - 2 * root.margin;
             paper-h: root.height - 2 * root.margin;
             tilt: root.tilt;
             bold-active: root.fmt-bold;
@@ -434,13 +482,32 @@ export component NoteWindow inherits Window {
         // The top-right "..." trigger button for the dropdown menu
         menu-btn := MenuButton {
             f: toolbar.f;
-            du: (root.width - 2 * root.margin) / 2px - ToolbarMetrics.menu-button-right-inset / 1px;
+            du: (root.note-w - 2 * root.margin) / 2px - ToolbarMetrics.menu-button-right-inset / 1px;
             dv: -(root.height - 2 * root.margin) / 2px + ToolbarMetrics.menu-button-top-inset / 1px;
             active: root.dropdown-open;
             clicked => { root.open-dropdown(); }
             opacity: (paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open) ? 1 : 0;
-            visible: !root.all-notes-open && self.opacity > 0;
+            visible: self.opacity > 0;
             animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
+        }
+
+        // While All Notes is open, its action bar takes the toolbar's place.
+        if root.all-notes-open : AllNotesActionBar {
+            x: 0px;
+            y: 0px;
+            width: root.note-w;
+            height: root.height;
+            f: root.paper-frame;
+            paper-w: (root.note-w - 2 * root.margin) / 1px;
+            paper-h: (root.height - 2 * root.margin) / 1px;
+            selected-note-open: root.all-notes-selected-is-open;
+            confirming-delete <=> root.all-notes-confirming-delete;
+            open-or-focus-note => { root.all-notes-open-or-focus(); }
+            close-note => { root.all-notes-close-note(); }
+            export-note => { root.all-notes-export-note(); }
+            request-delete => { root.all-notes-request-delete(); }
+            cancel-delete => { root.all-notes-cancel-delete(); }
+            confirm-delete => { root.all-notes-confirm-delete(); }
         }
     }
 
@@ -448,11 +515,11 @@ export component NoteWindow inherits Window {
     color-picker := ColorPicker {
         x: 0px;
         y: 0px;
-        width: root.width;
+        width: root.note-w;
         height: root.height;
         paper-x: root.margin;
         paper-y: root.paper-top;
-        paper-w: root.width - 2 * root.margin;
+        paper-w: root.note-w - 2 * root.margin;
         paper-h: root.height - 2 * root.margin;
         tilt: root.tilt;
         open: !root.all-notes-open && root.picker-open;
@@ -466,37 +533,6 @@ export component NoteWindow inherits Window {
     }
 
     // The tapes lie over the paper.
-    Tapes { width: root.width; height: root.height; visible: !root.all-notes-open; }
-
-    if root.all-notes-open : AllNotesSidebar {
-        selected-note-id: root.all-notes-selected-id;
-        open-count: root.all-notes-open-count;
-        closed-count: root.all-notes-closed-count;
-        open-notes: root.all-notes-open-list;
-        closed-notes: root.all-notes-closed-list;
-        select-note(id) => {
-            root.all-notes-confirming-delete = false;
-            root.all-notes-select-note(id);
-        }
-        new-note => {
-            root.all-notes-confirming-delete = false;
-            root.all-notes-new-note();
-        }
-    }
-
-    if root.all-notes-open : AllNotesPaperOverlay {
-        selected-note-id: root.all-notes-selected-id;
-        selected-note-open: root.all-notes-selected-is-open;
-        confirming-delete <=> root.all-notes-confirming-delete;
-        status-runs: root.all-notes-status-runs;
-        preview-runs: root.all-notes-preview-runs;
-        show-preview-runs: true;
-        close-view => { root.all-notes-close-view(); }
-        open-or-focus-note => { root.all-notes-open-or-focus(); }
-        close-note => { root.all-notes-close-note(); }
-        export-note => { root.all-notes-export-note(); }
-        request-delete => { root.all-notes-request-delete(); }
-        cancel-delete => { root.all-notes-cancel-delete(); }
-        confirm-delete => { root.all-notes-confirm-delete(); }
+    Tapes { width: root.note-w; height: root.height; }
     }
 }
