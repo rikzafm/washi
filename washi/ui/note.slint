@@ -255,6 +255,10 @@ export component NoteWindow inherits Window {
             root.all-notes-confirming-delete = false;
             root.all-notes-new-note();
         }
+        close-view => {
+            root.all-notes-confirming-delete = false;
+            root.all-notes-close-view();
+        }
         start-move => { root.picker-open = false; root.start-move(); }
     }
 

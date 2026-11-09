@@ -215,9 +215,16 @@ export component BlockView inherits Rectangle {
     // Level while editing (like the words); at rest the turned copy, its center where the paper's
     // tilt puts the picture's center. They swap halfway through the settle.
     property <bool> turned: root.tilt-scale > 0.5 && root.img-turned.width > 0;
-    if root.kind == BlockKind.image && !root.turned: Image {
-        x: root.image-x + (root.tilt-dx + root.shift-x) * root.tilt-scale;
-        y: root.gap-before + (root.tilt-dy + root.shift-y) * root.tilt-scale;
+    // The level picture (editing, or the first half of the settle) is cut along the paper's tilted
+    // top edge too: while editing the paper stays tilted but the picture is level, so scrolled
+    // under the top it would stick out of the paper at the high end of the edge.
+    property <length> level-x: root.image-x + (root.tilt-dx + root.shift-x) * root.tilt-scale;
+    property <length> level-y: root.gap-before + (root.tilt-dy + root.shift-y) * root.tilt-scale;
+    property <bool> level-clipped: root.level-y < root.edge-y(Theme.text-inset-left + root.level-x + root.image-width) - Theme.text-inset-top - root.y
+        || root.level-y < root.edge-y(Theme.text-inset-left + root.level-x) - Theme.text-inset-top - root.y;
+    if root.kind == BlockKind.image && !root.turned && !root.level-clipped: Image {
+        x: root.level-x;
+        y: root.level-y;
         width: root.image-width;
         height: root.image-height;
         source: root.img;
@@ -226,6 +233,35 @@ export component BlockView inherits Rectangle {
         // timer that suspended the app), so freed pixels are let go at once, not at the next redraw,
         // which a minimized window never gets.
         changed source => { }
+    }
+
+    if root.kind == BlockKind.image && !root.turned && root.level-clipped: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+
+        for col in 64: Rectangle {
+            property <length> strip-w: root.image-width / 64;
+            property <length> local-edge: root.edge-y(Theme.text-inset-left + root.level-x + (col + 0.5) * self.strip-w) - Theme.text-inset-top - root.y;
+            property <length> cut: max(root.level-y, self.local-edge);
+
+            x: root.level-x + col * self.strip-w;
+            y: self.cut;
+            width: self.strip-w + 0.5px;
+            height: max(0px, root.level-y + root.image-height - self.cut);
+            clip: true;
+
+            Image {
+                x: -col * parent.strip-w;
+                y: root.level-y - parent.cut;
+                width: root.image-width;
+                height: root.image-height;
+                source: root.img;
+                image-fit: fill;
+                changed source => { }
+            }
+        }
     }
 
     // At rest, the turned picture is cut along the paper's tilted edge in narrow vertical strips

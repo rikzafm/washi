@@ -108,6 +108,49 @@ component MarkerShape inherits Path {
     Close { }
 }
 
+// The frame (or the grip) of a selected picture: a quadrilateral whose corners follow the paper's
+// tilt like the picture does (`ts` is how much of the tilt is on: 1 at rest, 0 while editing), so
+// the frame stays on the picture after the note leaves editing.
+component HandleShape inherits Path {
+    in property <SelRect> r;
+    in property <float> ts;
+    in property <length> shift-x;
+    in property <length> shift-y;
+    in property <length> paper-w;
+    in property <length> paper-h;
+    in property <bool> outline: true;
+    in property <color> ink;
+    property <float> sn: Theme.text-tilt.sin();
+    property <float> cs: Theme.text-tilt.cos();
+    property <float> u0: root.r.x / 1px;
+    property <float> v0: root.r.y / 1px;
+    property <float> u1: (root.r.x + root.r.width) / 1px;
+    property <float> v1: (root.r.y + root.r.height) / 1px;
+    pure function px(u: float, v: float) -> float {
+        return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
+    }
+    pure function py(u: float, v: float) -> float {
+        return v + ((u - root.paper-w / 2px) * root.sn + (v - root.paper-h / 2px) * (root.cs - 1) + root.shift-y / 1px) * root.ts;
+    }
+    property <float> pad: 4;
+    property <float> ox: min(min(px(root.u0, root.v0), px(root.u0, root.v1)), min(px(root.u1, root.v0), px(root.u1, root.v1))) - root.pad;
+    property <float> oy: min(min(py(root.u0, root.v0), py(root.u0, root.v1)), min(py(root.u1, root.v0), py(root.u1, root.v1))) - root.pad;
+    x: root.ox * 1px;
+    y: root.oy * 1px;
+    width: (max(max(px(root.u0, root.v0), px(root.u0, root.v1)), max(px(root.u1, root.v0), px(root.u1, root.v1))) - root.ox + root.pad) * 1px;
+    height: (max(max(py(root.u0, root.v0), py(root.u0, root.v1)), max(py(root.u1, root.v0), py(root.u1, root.v1))) - root.oy + root.pad) * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    fill: root.outline ? transparent : root.ink;
+    stroke: root.ink;
+    stroke-width: root.outline ? 1px : 0px;
+    MoveTo { x: px(root.u0, root.v0) - root.ox; y: py(root.u0, root.v0) - root.oy; }
+    LineTo { x: px(root.u1, root.v0) - root.ox; y: py(root.u1, root.v0) - root.oy; }
+    LineTo { x: px(root.u1, root.v1) - root.ox; y: py(root.u1, root.v1) - root.oy; }
+    LineTo { x: px(root.u0, root.v1) - root.ox; y: py(root.u0, root.v1) - root.oy; }
+    Close { }
+}
+
 // The note's text, in the paper's frame (fixed insets, not proportions of the size). `width` and
 // `height` are the paper's.
 //
@@ -256,21 +299,35 @@ export component TextLayer inherits Rectangle {
         background: Theme.selection-over;
     }
 
-    for r in root.runs: Text {
-        visible: r.block != root.composing-block && self.y + r.pitch >= root.edge-y(self.x + self.width / 2);
-        x: r.x + (r.dx + root.shift-x) * root.tilt-scale;
-        y: r.y + (r.dy + root.shift-y) * root.tilt-scale;
-        text: r.text;
-        wrap: no-wrap;
-        // The software renderer clips a text to its box, and an italic glyph (the top of an L or
-        // an I) leans out past its advance: at the end of a run the box needs room for the slant.
-        width: self.preferred-width + (r.italic ? r.size * 0.3 : 0px);
-        font-family: Theme.handwriting;
-        font-size: r.size;
-        font-weight: r.bold ? 700 : 400;
-        font-italic: r.italic;
-        line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
-        color: r.hint ? Theme.ink-hint : r.ink;
+    // Each word sits in a box whose top follows the paper's tilted top edge, so a word that is
+    // partly scrolled off the top is cut there instead of showing whole above the paper.
+    for r in root.runs: Rectangle {
+        property <length> run-x: r.x + (r.dx + root.shift-x) * root.tilt-scale;
+        property <length> run-y: r.y + (r.dy + root.shift-y) * root.tilt-scale;
+        property <length> run-w: word.preferred-width + (r.italic ? r.size * 0.3 : 0px);
+        property <length> cut: max(self.run-y, root.edge-y(self.run-x + self.run-w / 2));
+        visible: r.block != root.composing-block && self.run-y + r.pitch >= root.edge-y(self.run-x + self.run-w / 2);
+        x: self.run-x;
+        y: self.cut;
+        width: self.run-w;
+        height: max(0px, self.run-y + r.pitch - self.cut);
+        clip: true;
+
+        word := Text {
+            x: 0px;
+            y: parent.run-y - parent.cut;
+            text: r.text;
+            wrap: no-wrap;
+            // The software renderer clips a text to its box, and an italic glyph (the top of an L or
+            // an I) leans out past its advance: at the end of a run the box needs room for the slant.
+            width: self.preferred-width + (r.italic ? r.size * 0.3 : 0px);
+            font-family: Theme.handwriting;
+            font-size: r.size;
+            font-weight: r.bold ? 700 : 400;
+            font-italic: r.italic;
+            line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
+            color: r.hint ? Theme.ink-hint : r.ink;
+        }
     }
 
     // underlines, strike-throughs and list bullets: drawn by the app, level while editing
@@ -374,15 +431,15 @@ export component TextLayer inherits Rectangle {
     }
 
     // a selected picture: its frame, and the grip that resizes it
-    for h[i] in root.image-handles: Rectangle {
-        x: h.x;
-        y: h.y;
-        width: h.width;
-        height: h.height;
-        background: i == 0 ? transparent : Theme.ink;
-        border-width: i == 0 ? 1px : 0px;
-        border-color: Theme.ink;
-        border-radius: i == 0 ? 0px : 2px;
+    for h[i] in root.image-handles: HandleShape {
+        r: h;
+        ts: root.tilt-scale;
+        shift-x: root.shift-x;
+        shift-y: root.shift-y;
+        paper-w: root.paper-w;
+        paper-h: root.paper-h;
+        outline: i == 0;
+        ink: Theme.ink;
     }
 
     // The note owns the pointer: transparent, over the fields (which no longer see the mouse).

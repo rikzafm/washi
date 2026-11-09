@@ -94,6 +94,8 @@ export component AllNotesSidebar inherits Rectangle {
     callback select-note(int);
     callback open-note(int);
     callback new-note();
+    /// The x at the top right was clicked: close the list.
+    callback close-view();
     /// The user pressed the sidebar itself (not a row or the button): the platform drags the window.
     callback start-move();
 
@@ -181,6 +183,36 @@ export component AllNotesSidebar inherits Rectangle {
         font-family: "Shadows Into Light";
         font-size: 44px;
         color: #2B2F36;
+    }
+
+    // Close (x) at the panel's top right: closes the list.
+    Rectangle {
+        x: Tilt.x(root.pf, 91.0, root.top-v + 10.0) * 1px;
+        y: Tilt.y(root.pf, 91.0, root.top-v + 10.0) * 1px;
+        width: 36px;
+        height: 36px;
+        border-radius: 18px;
+        background: close-hit.has-hover ? #00000012 : transparent;
+        accessible-role: button;
+        accessible-label: "Close notes";
+
+        Path {
+            x: 10px;
+            y: 10px;
+            width: 16px;
+            height: 16px;
+            viewbox-width: 16;
+            viewbox-height: 16;
+            commands: "M 2 2 L 14 14 M 14 2 L 2 14";
+            stroke: #5B616B;
+            stroke-width: 1.8px;
+            stroke-line-cap: round;
+        }
+
+        close-hit := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.close-view(); }
+        }
     }
 
     Text {
