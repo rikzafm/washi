@@ -1021,6 +1021,29 @@ impl Harness {
         }
     }
 
+    /// Click a Sidebar tab (0 General, 1 Font & Style, 2 Shortcuts, 3 Privacy).
+    pub fn settings_click_tab(&mut self, tab: i32) {
+        if let Some(s) = self.app.as_ref().and_then(|a| a.settings()) {
+            s.ui().invoke_tab_clicked(tab);
+        }
+        self.settle();
+    }
+
+    /// The tab lit in the Sidebar (changes on click).
+    pub fn settings_selected_tab(&self) -> i32 {
+        self.app.as_ref().and_then(|a| a.settings()).map_or(-1, |s| s.ui().get_selected_tab())
+    }
+
+    /// The tab drawn on the Paper (changes at the cross-fade's midpoint).
+    pub fn settings_shown_tab(&self) -> i32 {
+        self.app.as_ref().and_then(|a| a.settings()).map_or(-1, |s| s.ui().get_shown_tab())
+    }
+
+    /// How visible the Settings content is.
+    pub fn settings_content_opacity(&self) -> f32 {
+        self.app.as_ref().and_then(|a| a.settings()).map_or(-1.0, |s| s.ui().get_content_opacity())
+    }
+
     /// Press the Sidebar's X.
     pub fn settings_close(&mut self) {
         if let Some(s) = self.app.as_ref().and_then(|a| a.settings()) {

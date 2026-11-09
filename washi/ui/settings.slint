@@ -16,6 +16,38 @@ export global SettingsMetrics {
     out property <length> paper-min-h: 600px;
     out property <length> pad-top: 38px;
     out property <length> pad-x: 36px;
+    out property <length> pad-bottom: 44px;
+    /// The title's row: a 48px title and the gap under it.
+    out property <length> title-h: 58px;
+    out property <length> gap: 18px;
+    out property <length> row2-h: 64px;
+    out property <length> heading-h: 36px;
+    out property <length> tile-h: 74px;
+    out property <length> note-h: 54px;
+}
+
+// Each tab's content height is a pure sum of the row metrics, so the tween target is known before the
+// tab is shown. Tabs without content yet show their layout shell (nothing to add up).
+export global GeneralTabMetrics {
+    // 2 toggles with hints, "Storage" + 2 folder rows, "Resource use" + tiles, uninstall row.
+    out property <length> content-h:
+        2 * SettingsMetrics.row2-h
+        + SettingsMetrics.gap + SettingsMetrics.heading-h + 2 * SettingsMetrics.row2-h
+        + SettingsMetrics.gap + SettingsMetrics.heading-h + SettingsMetrics.tile-h
+        + SettingsMetrics.gap + SettingsMetrics.row2-h;
+}
+
+export global StyleTabMetrics {
+    out property <length> content-h: 0px;
+}
+
+export global ShortcutsTabMetrics {
+    // 11 shortcut rows of 44px, a note box and the gap above it.
+    out property <length> content-h: 11 * 44px + SettingsMetrics.note-h + SettingsMetrics.gap;
+}
+
+export global PrivacyTabMetrics {
+    out property <length> content-h: 0px;
 }
 
 /// One tab label in the Sidebar, drawn in the panel's tilted frame `f`; `v0` is its top.
@@ -24,6 +56,7 @@ component SidebarTab inherits Rectangle {
     in property <bool> selected: false;
     in property <Frame> f;
     in property <float> v0;
+    callback clicked();
 
     x: 0px;
     y: 0px;
@@ -52,10 +85,22 @@ component SidebarTab inherits Rectangle {
         color: #2B2F36;
         vertical-alignment: center;
     }
+
+    TouchArea {
+        x: Tilt.x(root.f, 0.0, root.v0 + 24.0) * 1px - 123px;
+        y: Tilt.y(root.f, 0.0, root.v0 + 24.0) * 1px - 24px;
+        width: 246px;
+        height: 48px;
+        mouse-cursor: pointer;
+        accessible-role: tab;
+        accessible-label: root.text;
+        clicked => { root.clicked(); }
+    }
 }
 
 component SettingsSidebar inherits Rectangle {
     in property <int> selected-tab: 0;
+    callback tab-clicked(int);
     callback close-clicked();
     /// The user pressed the Sidebar itself: the platform drags the window.
     callback start-move();
@@ -141,6 +186,7 @@ component SettingsSidebar inherits Rectangle {
         v0: root.top-v + 72.0 + i * 52.0;
         text: label;
         selected: i == root.selected-tab;
+        clicked => { root.tab-clicked(i); }
     }
 }
 
@@ -154,15 +200,27 @@ export component SettingsWindow inherits Window {
     in property <bool> pinned: false;
     always-on-top: root.pinned;
 
+    /// The tab lit in the Sidebar (changes on click) and the one drawn on the Paper (changes at the
+    /// midpoint of the cross-fade, when the content is invisible).
     in property <int> selected-tab: 0;
+    in property <int> shown-tab: 0;
     /// How much of the Sidebar's strip is out (0 to `SettingsMetrics.strip`): the window grows left
     /// by this much and the Sidebar slides out from behind the Paper's left edge.
     in property <length> strip: SettingsMetrics.strip;
     /// The Settings content (not the Paper or Sidebar): faded in while the note turns into the page.
     in property <float> content-opacity: 1;
 
+    callback tab-clicked(int);
     callback close-clicked();
     callback start-move();
+
+    /// The Paper height a tab needs (Rust reads it for the tween target).
+    public pure function paper-height-for(tab: int) -> length {
+        return max(SettingsMetrics.paper-min-h, SettingsMetrics.pad-top + SettingsMetrics.title-h
+            + (tab == 0 ? GeneralTabMetrics.content-h : tab == 1 ? StyleTabMetrics.content-h
+                : tab == 2 ? ShortcutsTabMetrics.content-h : PrivacyTabMetrics.content-h)
+            + SettingsMetrics.pad-bottom);
+    }
 
     property <length> margin: PaperTheme.margin;
     property <length> note-w: root.width - root.strip;
@@ -195,6 +253,7 @@ export component SettingsWindow inherits Window {
         width: SettingsMetrics.strip;
         height: root.height;
         selected-tab: root.selected-tab;
+        tab-clicked(i) => { root.tab-clicked(i); }
         close-clicked => { root.close-clicked(); }
         start-move => { root.start-move(); }
     }
@@ -219,14 +278,14 @@ export component SettingsWindow inherits Window {
         Text {
             x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
             y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
-            text: "General";
+            text: ["General", "Font & Style", "Shortcuts", "Privacy"][root.shown-tab];
             opacity: root.content-opacity;
             font-family: "Shadows Into Light";
             font-size: 48px;
             color: #2B2F36;
         }
 
-        for label[i] in ["Start with Windows", "Always on top", "Installed folder", "Database folder", "Resource use"] : Text {
+        for label[i] in (root.shown-tab == 0 ? ["Start with Windows", "Always on top", "Installed folder", "Database folder", "Resource use"] : []) : Text {
             x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
             y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
             text: label;

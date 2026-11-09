@@ -74,6 +74,8 @@ pub fn fit_on_screen(paper: RectF, strip: f32, areas: &[RectF]) -> RectF {
 pub const NOTE_FADE: Duration = Duration::from_millis(90);
 /// The Paper's growth to the Settings size (and back), ms.
 pub const GROW: Duration = Duration::from_millis(240);
+/// A tab switch: the Paper's height tween and the content cross-fade, ms.
+pub const TAB_SWITCH: Duration = Duration::from_millis(200);
 /// One frame of the transition.
 pub const TICK: Duration = Duration::from_millis(16);
 
@@ -81,6 +83,7 @@ pub const TICK: Duration = Duration::from_millis(16);
 pub enum Ease {
     Linear,
     OutCubic,
+    InOutCubic,
 }
 
 impl Ease {
@@ -88,6 +91,13 @@ impl Ease {
         match self {
             Ease::Linear => t,
             Ease::OutCubic => 1.0 - (1.0 - t).powi(3),
+            Ease::InOutCubic => {
+                if t < 0.5 {
+                    4.0 * t * t * t
+                } else {
+                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+                }
+            }
         }
     }
 }
@@ -124,6 +134,8 @@ impl Tween {
 pub struct Pose {
     pub paper: RectF,
     pub strip: f32,
+    /// How visible the page's content is (0 to 1).
+    pub content: f32,
 }
 
 fn lerp(a: f32, b: f32, e: f32) -> f32 {
@@ -136,7 +148,32 @@ pub fn grow_pose(from: RectF, to: RectF, e: f32) -> Pose {
     Pose {
         paper: RectF { x: lerp(from.x, to.x, e), y: lerp(from.y, to.y, e), w: lerp(from.w, to.w, e), h: lerp(from.h, to.h, e) },
         strip: SIDEBAR_STRIP * e,
+        content: e,
     }
+}
+
+/// `a` to `b` at `e`.
+pub fn lerp_rect(a: RectF, b: RectF, e: f32) -> RectF {
+    RectF { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e) }
+}
+
+/// The content cross-fade of a tab switch at `t` (0 to 1 over `TAB_SWITCH`): the old content fades out
+/// over the first half, the new fades in over the second. Returns the opacity and whether the new
+/// content is the one shown (the second half).
+pub fn tab_fade(t: f32) -> (f32, bool) {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.5 {
+        (1.0 - 2.0 * t, false)
+    } else {
+        (2.0 * t - 1.0, true)
+    }
+}
+
+/// Where in the cross-fade a switch that starts while the content is at `opacity` begins, so the
+/// fade carries on from the current opacity instead of jumping. Always in the fade-out half: whichever
+/// content is on screen goes out first.
+pub fn tab_fade_resume(opacity: f32) -> f32 {
+    (1.0 - opacity.clamp(0.0, 1.0)) / 2.0
 }
 
 #[cfg(test)]
@@ -168,8 +205,8 @@ mod tests {
     fn grow_pose_ends_are_the_note_and_the_page() {
         let note = RectF { x: 342.0, y: 142.0, w: 363.0, h: 384.0 };
         let page = RectF { x: 400.0, y: 100.0, w: PAPER_W, h: PAPER_MIN_H };
-        assert_eq!(grow_pose(note, page, 0.0), Pose { paper: note, strip: 0.0 });
-        assert_eq!(grow_pose(note, page, 1.0), Pose { paper: page, strip: SIDEBAR_STRIP });
+        assert_eq!(grow_pose(note, page, 0.0), Pose { paper: note, strip: 0.0, content: 0.0 });
+        assert_eq!(grow_pose(note, page, 1.0), Pose { paper: page, strip: SIDEBAR_STRIP, content: 1.0 });
     }
 
     #[test]
@@ -199,5 +236,40 @@ mod tests {
         let area = [RectF { x: 0.0, y: 0.0, w: 1920.0, h: 1040.0 }];
         let p = RectF { x: 800.0, y: 100.0, w: PAPER_W, h: PAPER_MIN_H };
         assert_eq!(fit_on_screen(p, SIDEBAR_STRIP, &area), p);
+    }
+
+    #[test]
+    fn in_out_cubic_is_slow_at_the_ends_and_exact_at_them() {
+        let t = Tween::new(0.0, 1.0, ms(0), ms(200), Ease::InOutCubic);
+        assert_eq!(t.sample(ms(0)).0, 0.0);
+        assert_eq!(t.sample(ms(100)).0, 0.5);
+        assert!(t.sample(ms(20)).0 < 0.1, "eases in");
+        assert!(t.sample(ms(180)).0 > 0.9, "eases out");
+        assert_eq!(t.sample(ms(200)), (1.0, true));
+    }
+
+    #[test]
+    fn tab_fade_goes_out_then_in_and_swaps_at_zero() {
+        assert_eq!(tab_fade(0.0), (1.0, false));
+        assert_eq!(tab_fade(0.25), (0.5, false));
+        assert_eq!(tab_fade(0.5), (0.0, true));
+        assert_eq!(tab_fade(0.75), (0.5, true));
+        assert_eq!(tab_fade(1.0), (1.0, true));
+    }
+
+    #[test]
+    fn a_retarget_resumes_the_fade_at_the_same_opacity() {
+        for o in [1.0, 0.7, 0.3, 0.0] {
+            let (again, second_half) = tab_fade(tab_fade_resume(o));
+            assert!((again - o).abs() < 1e-6 && !second_half || o == 0.0, "{o} -> {again}");
+        }
+    }
+
+    #[test]
+    fn lerp_rect_changes_only_what_differs() {
+        let a = RectF { x: 400.0, y: 100.0, w: PAPER_W, h: 600.0 };
+        let b = RectF { h: 660.0, ..a };
+        let m = lerp_rect(a, b, 0.5);
+        assert_eq!((m.x, m.y, m.w, m.h), (400.0, 100.0, PAPER_W, 630.0));
     }
 }
