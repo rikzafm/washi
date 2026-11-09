@@ -177,10 +177,7 @@ impl App {
         let mut rows = db.open_notes().map_err(StartError::Db)?;
         if rows.is_empty() {
             let id = db.create_note(now).map_err(StartError::Db)?;
-            let on_top = db.new_notes_on_top();
-            if on_top {
-                db.set_always_on_top(id, true).map_err(StartError::Db)?;
-            }
+            let on_top = db.apply_new_note_defaults(id);
             rows.push(NoteRow { id, content: String::new(), geometry: None, always_on_top: on_top });
         }
         let suspend = SuspendController::new(env.signals.clone(), env.power.clone());
@@ -1564,10 +1561,7 @@ impl App {
         if let Some(g) = geometry {
             let _ = self.0.db.save_geometry(id, g);
         }
-        let on_top = self.0.db.new_notes_on_top();
-        if on_top {
-            let _ = self.0.db.set_always_on_top(id, true);
-        }
+        let on_top = self.0.db.apply_new_note_defaults(id);
         if let Err(e) = self.open_row(&NoteRow { id, content: String::new(), geometry, always_on_top: on_top }) {
             self.0.env.dialogs.error(&e.to_string());
             return None;

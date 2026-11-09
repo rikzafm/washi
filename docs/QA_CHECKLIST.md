@@ -67,6 +67,16 @@ Unchecked on purpose, like the rest of this file. Run on the release build.
 - [ ] Contrast: the lowest ink-on-marker pair over the ten inks and nine markers is **3.62:1** (Orange ink `#B8581A` on Purple marker `#E8DEEE`; Orange on Blue, Brown and Orange markers are next, up to 3.68). Every pair passes the spec's 3:1 (large handwriting) but 57 of the 90 pairs are under 4.5:1, so small non-handwriting text would not pass. Look at Orange on Purple, Orange on Blue and Yellow ink on its markers at 100% scale in the handwriting font and confirm they read. Every ink on the paper (`#FFFFFD`) is at least 4.71:1 (lowest: Orange).
 - [ ] Older build: open a note saved with colors in 0.1.0 without the feature: the `<c=blue>` tags show as text (accepted, see the release notes).
 
+## Settings page (real desktop)
+
+- [ ] Open/close transition at 100% and 150% display scale: no tearing or flicker, and after closing, the window is exactly on the note's original position and size (compare before/after).
+- [ ] The tab height tween (switching tabs) is smooth and ends at the right height with no clipped rows.
+- [ ] Start with Windows: the General toggle and the right-click menu check mark agree. Flip it in the menu while General is visible: the toggle follows within a second. Flip it in General: the menu agrees on the next open.
+- [ ] Resource use tiles show plausible memory, CPU, database size and open-note count, update about once a second while General is showing, and stop when you switch tab (CPU in Task Manager returns to idle).
+- [ ] Always on top default: turn it on, create a new note (Ctrl+N and the menu): it starts on top. Turn it off: new notes do not. Existing notes keep their own setting.
+- [ ] Uninstall: with a real `unins000.exe` beside `washi.exe`, the row is enabled; Cancel does nothing; Confirm starts the uninstaller and Washi exits with notes saved. Without it the row is disabled.
+- [ ] Shortcuts tab: every shortcut listed does what it says with the real keys on a note, and nothing real is missing from the list.
+
 ## DPI and multi-monitor
 
 - [ ] 100%, 125%, 150%, 200% display scale: the note looks right at each (the geometry is checked by `tools/capture.ps1`; look at the paper edge, tape and fonts).

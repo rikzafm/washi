@@ -198,6 +198,18 @@ impl Db {
         Ok(())
     }
 
+    /// Apply the new-note defaults to a note just created and return whether it starts Always on
+    /// top. The preference write is best effort: a failure is logged and never stops a note opening.
+    pub fn apply_new_note_defaults(&self, id: NoteId) -> bool {
+        let on_top = self.new_notes_on_top();
+        if on_top {
+            if let Err(e) = self.set_always_on_top(id, true) {
+                eprintln!("washi: could not save always-on-top for new note {id}: {e}");
+            }
+        }
+        on_top
+    }
+
     pub fn set_always_on_top(&self, id: NoteId, on: bool) -> Result<(), DbError> {
         self.conn
             .execute("UPDATE notes SET always_on_top = ?1 WHERE id = ?2", rusqlite::params![on as i64, id])?;
@@ -364,6 +376,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 1000).unwrap();
         (dir, db)
+    }
+
+    #[test]
+    fn new_note_defaults_follow_the_preference() {
+        let (_dir, db) = test_db();
+        let a = db.create_note(1).unwrap();
+        assert!(!db.apply_new_note_defaults(a));
+        assert!(!db.open_notes().unwrap().iter().any(|r| r.always_on_top));
+        db.set_new_notes_on_top(true).unwrap();
+        let b = db.create_note(2).unwrap();
+        assert!(db.apply_new_note_defaults(b));
+        let rows = db.open_notes().unwrap();
+        assert!(rows.iter().find(|r| r.id == b).unwrap().always_on_top);
+        assert!(!rows.iter().find(|r| r.id == a).unwrap().always_on_top);
     }
 
     #[test]

@@ -145,7 +145,9 @@ impl General {
     }
 
     fn toggle_on_top(&self) {
-        let _ = self.deps.db.set_new_notes_on_top(!self.deps.db.new_notes_on_top());
+        if let Err(e) = self.deps.db.set_new_notes_on_top(!self.deps.db.new_notes_on_top()) {
+            self.deps.env.dialogs.error(&format!("Washi could not save that setting: {e}"));
+        }
         self.refresh_toggles();
     }
 
@@ -179,6 +181,7 @@ impl General {
 
     fn refresh_stats(&self) {
         let Some(ui) = self.ui.upgrade() else { return };
+        ui.set_start_with_windows(self.deps.env.startup.is_enabled()); // the right-click menu may have changed it
         let s = &self.deps.env.stats;
         let cpu = self.sampler.borrow_mut().sample((self.now)(), s.cpu_time(), s.processors());
         ui.set_stat_memory(fmt_bytes(s.private_working_set()).into());

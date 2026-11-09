@@ -85,3 +85,17 @@ Switch to the fallback only if it is not.
 
 Verified in tests: the timer stops at rest (no idle CPU), the transition is wall-clock based (a late frame
 skips ahead instead of stretching), and end states equal the ticket 01 geometry.
+
+## Settings General tab: 1 Hz stats timer
+
+While (and only while) the General tab is showing, a 1 s repeating timer refreshes Resource use. Each
+tick reads process stats (private working set via GetProcessMemoryInfo, CPU time via GetProcessTimes),
+the database file metadata (size of the database files, no query), the open-note count, and the Start
+with Windows registry value. It stops when another tab is shown or Settings closes, so it adds nothing
+to the closed-Settings idle figures above.
+
+Against goal G4 (idle CPU 0%): the cost is a few cheap syscalls and a handful of property sets per
+second, but it is not zero, and the repainting window wakes the event loop every tick. That is accepted
+while General is on screen (a deliberate, user-opened view); the CPU figure it shows includes its own
+cost. Idle CPU of Washi with Settings open on General has NOT been measured, and the transition frame
+cost (above) is still NOT yet measured.

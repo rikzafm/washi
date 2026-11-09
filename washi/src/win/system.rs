@@ -28,15 +28,15 @@ impl ProcessStats for Win32Stats {
     fn cpu_time(&self) -> Duration {
         // SAFETY: all four out-pointers are valid FILETIMEs.
         unsafe {
-            let mut a: FILETIME = std::mem::zeroed();
-            let mut b: FILETIME = std::mem::zeroed();
-            let mut k: FILETIME = std::mem::zeroed();
-            let mut u: FILETIME = std::mem::zeroed();
-            if GetProcessTimes(GetCurrentProcess(), &mut a, &mut b, &mut k, &mut u) == 0 {
+            let mut creation: FILETIME = std::mem::zeroed();
+            let mut exit: FILETIME = std::mem::zeroed();
+            let mut kernel: FILETIME = std::mem::zeroed();
+            let mut user: FILETIME = std::mem::zeroed();
+            if GetProcessTimes(GetCurrentProcess(), &mut creation, &mut exit, &mut kernel, &mut user) == 0 {
                 return Duration::ZERO;
             }
-            let t = |f: FILETIME| (((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64) * 100;
-            Duration::from_nanos(t(k) + t(u))
+            let to_nanos = |f: FILETIME| (((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64) * 100;
+            Duration::from_nanos(to_nanos(kernel) + to_nanos(user))
         }
     }
 
@@ -47,6 +47,33 @@ impl ProcessStats for Win32Stats {
             GetSystemInfo(&mut si);
             si.dwNumberOfProcessors.max(1)
         }
+    }
+}
+
+/// Inno Setup's `unins000.exe`, `unins001.exe`, ... Byte-wise, so a non-ASCII name cannot panic.
+fn is_uninstaller_name(n: &str) -> bool {
+    n.len() == 12 && n.starts_with("unins") && n.ends_with(".exe") && n.as_bytes()[5..8].iter().all(u8::is_ascii_digit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_uninstaller_name;
+
+    #[test]
+    fn recognises_inno_uninstallers() {
+        assert!(is_uninstaller_name("unins000.exe"));
+        assert!(is_uninstaller_name("unins012.exe"));
+        assert!(!is_uninstaller_name("unins00.exe"));
+        assert!(!is_uninstaller_name("uninsabc.exe"));
+        assert!(!is_uninstaller_name("unins000.dll"));
+    }
+
+    #[test]
+    fn non_ascii_twelve_byte_name_does_not_panic() {
+        // 12 bytes, with a 3-byte char where the digits should be.
+        let n = "unins\u{20ac}.exe";
+        assert_eq!(n.len(), 12);
+        assert!(!is_uninstaller_name(n));
     }
 }
 
@@ -65,9 +92,7 @@ impl Shell for Win32Shell {
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| {
-                p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-                    n.len() == 12 && n.starts_with("unins") && n.ends_with(".exe") && n[5..8].chars().all(|c| c.is_ascii_digit())
-                })
+                p.file_name().and_then(|n| n.to_str()).is_some_and(is_uninstaller_name)
             })
             .min()
     }
