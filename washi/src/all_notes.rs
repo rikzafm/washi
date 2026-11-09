@@ -16,7 +16,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-/// The strip the window grows by on the left (logical px). Matches `AllNotesMetrics.sidebar-w`.
+/// The strip the window grows by on the left (logical px). Matches `SidebarPanel.strip` (ui/sidebar-panel.slint).
 pub const SIDEBAR_WIDTH: i32 = 282;
 
 /// The transparent margin around a note's paper (`PaperTheme.margin`).

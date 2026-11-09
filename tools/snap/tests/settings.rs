@@ -104,6 +104,26 @@ fn either_tape_drags_the_settings_window() {
     assert_eq!(moves(&h), before + 2, "bottom tape");
 }
 
+/// The Sidebar's panel is the All notes one (270 wide, centred at x = 143, so its left edge is at 8):
+/// a Tab and the X are pressed where they sit on it, at spots the old, further-right panel missed.
+#[test]
+fn the_sidebars_tabs_and_close_are_clicked_where_the_panel_puts_them() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    let (x, y, _, hh) = window_at(&h);
+    let (wx, wy, _, _) = h.settings_native_window_geometry().unwrap();
+    let (px, py) = ((x - wx) as f32, (y - wy) as f32);
+    // The 600-tall panel is centred on the window; Tab 2 is 189..237 down it, 12..258 across.
+    let top = py + hh as f32 / 2.0 - 300.0;
+    h.settings_press_at(px + 28.0, top + 213.0);
+    assert_eq!(h.settings_selected_tab(), 2, "the Shortcuts Tab at its left end");
+    h.advance_frames(ms(600));
+    // The X: 44px around (238, 32) on the panel.
+    h.settings_press_at(px + 232.0, top + 32.0);
+    h.advance_frames(ms(600));
+    assert!(!h.is_settings_open(), "the X closed Settings");
+}
+
 #[test]
 fn escape_closes_settings() {
     let mut h = Harness::new();
