@@ -1,4 +1,5 @@
-// Settings > General: Start with Windows, Always on top (the default for new notes), the folders,
+// Settings > General: Start with Windows, Always on top (the default for new notes), where notes left
+// in All Notes go, the folders,
 // Resource use and the Uninstall row. Laid out like the mockup's CSS: blocks 18px apart, rows with a
 // 2px dotted rule, every height measured from the rows themselves (`bottom` is the end of the last
 // block, in paper coordinates).
@@ -12,6 +13,8 @@ export component GeneralTab inherits Rectangle {
     in property <float> top;
     in property <bool> start-with-windows;
     in property <bool> new-notes-on-top;
+    in property <bool> park-beside;
+    callback set-park-beside(bool);
     in property <string> install-dir;
     in property <string> data-dir;
     in property <string> stat-memory;
@@ -30,7 +33,7 @@ export component GeneralTab inherits Rectangle {
     callback uninstall-cancel();
     callback uninstall-confirm();
 
-    property <float> storage-y: root.top + toggle-1.total + toggle-2.total + 18.0;
+    property <float> storage-y: root.top + toggle-1.total + toggle-2.total + park-row.total + 18.0;
     property <float> resource-y: root.storage-y + 38.0 + folder-1.total + folder-2.total + 18.0;
     property <float> tiles-y: root.resource-y + 38.0 + 10.0;
     property <float> uninstall-y: root.tiles-y + 75.6 + 18.0;
@@ -58,13 +61,33 @@ export component GeneralTab inherits Rectangle {
         pf: root.pf;
         dots: root.dots;
         row-y: root.top + toggle-1.total;
-        rule: false;
         label: "Always on top";
         hint: "Keeps notes above other windows. Off by default";
         Switch {
             checked: root.new-notes-on-top;
             accessible-name: "Always on top for new notes";
             toggled => { root.toggle-on-top(); }
+        }
+    }
+
+    park-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.top + toggle-1.total + toggle-2.total;
+        rule: false;
+        label: "Notes left in All Notes";
+        hint: "When you switch away from a note";
+        PillButton {
+            text: "To the Back";
+            accessible-name: "Notes left in All Notes go to the back";
+            chosen: !root.park-beside;
+            clicked => { root.set-park-beside(false); }
+        }
+        PillButton {
+            text: "To the Side";
+            accessible-name: "Notes left in All Notes go to the side";
+            chosen: root.park-beside;
+            clicked => { root.set-park-beside(true); }
         }
     }
 

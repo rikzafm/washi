@@ -117,6 +117,11 @@ impl Tween {
         (self.from + (self.to - self.from) * self.ease.at(t), t >= 1.0)
     }
 
+    /// How far through its time the tween is at `now` (0 to 1, before easing).
+    pub fn progress(&self, now: Duration) -> f32 {
+        if self.dur.is_zero() { 1.0 } else { (now.saturating_sub(self.start).as_secs_f32() / self.dur.as_secs_f32()).min(1.0) }
+    }
+
     /// The same tween with its clock restarted at `now`.
     pub fn restarted(&self, now: Duration) -> Self {
         Tween { start: now, ..*self }
@@ -151,23 +156,33 @@ pub fn lerp_rect(a: RectF, b: RectF, e: f32) -> RectF {
     RectF { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e) }
 }
 
-/// The content cross-fade of a tab switch at `t` (0 to 1 over `TAB_SWITCH`): the old content fades out
-/// over the first half, the new fades in over the second. Returns the opacity and whether the new
-/// content is the one shown (the second half).
-pub fn tab_fade(t: f32) -> (f32, bool) {
-    let t = t.clamp(0.0, 1.0);
-    if t < 0.5 {
-        (1.0 - 2.0 * t, false)
-    } else {
-        (2.0 * t - 1.0, true)
-    }
+/// How visible a tab's content is the moment it is shown. It never starts blank: a page that goes
+/// blank between tabs reads as the UI disappearing.
+pub const TAB_FROM_OPACITY: f32 = 0.45;
+/// How far below its place (px) a tab's content starts; it settles up into place.
+pub const TAB_DROP: f32 = 6.0;
+
+/// The new tab's content settling in at `t` (0 to 1 over `TAB_SWITCH`): its opacity and how far
+/// below its place it is drawn. The content is swapped at once, at `t = 0`.
+pub fn tab_settle(t: f32) -> (f32, f32) {
+    let e = Ease::OutCubic.at(t.clamp(0.0, 1.0));
+    (TAB_FROM_OPACITY + (1.0 - TAB_FROM_OPACITY) * e, TAB_DROP * (1.0 - e))
 }
 
-/// Where in the cross-fade a switch that starts while the content is at `opacity` begins, so the
-/// fade carries on from the current opacity instead of jumping. Always in the fade-out half: whichever
-/// content is on screen goes out first.
-pub fn tab_fade_resume(opacity: f32) -> f32 {
-    (1.0 - opacity.clamp(0.0, 1.0)) / 2.0
+/// The smallest window that covers both `a` and `b`.
+pub fn union(a: Geometry, b: Geometry) -> Geometry {
+    let (left, top) = (a.x.min(b.x), a.y.min(b.y));
+    let right = (a.x + a.w as i32).max(b.x + b.w as i32);
+    let bottom = (a.y + a.h as i32).max(b.y + b.h as i32);
+    Geometry { x: left, y: top, w: (right - left) as u32, h: (bottom - top) as u32 }
+}
+
+/// Whether `inner` lies inside `outer`.
+pub fn contains(outer: Geometry, inner: Geometry) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.x + inner.w as i32 <= outer.x + outer.w as i32
+        && inner.y + inner.h as i32 <= outer.y + outer.h as i32
 }
 
 #[cfg(test)]
@@ -240,20 +255,24 @@ mod tests {
     }
 
     #[test]
-    fn tab_fade_goes_out_then_in_and_swaps_at_zero() {
-        assert_eq!(tab_fade(0.0), (1.0, false));
-        assert_eq!(tab_fade(0.25), (0.5, false));
-        assert_eq!(tab_fade(0.5), (0.0, true));
-        assert_eq!(tab_fade(0.75), (0.5, true));
-        assert_eq!(tab_fade(1.0), (1.0, true));
+    fn a_tab_settles_in_from_half_visible_and_a_little_low() {
+        assert_eq!(tab_settle(0.0), (TAB_FROM_OPACITY, TAB_DROP));
+        let (o, dy) = tab_settle(0.5);
+        assert!(o > 0.85 && dy < 1.0, "ease-out: mostly settled halfway: {o} {dy}");
+        assert_eq!(tab_settle(1.0), (1.0, 0.0));
+        for i in 0..=10 {
+            assert!(tab_settle(i as f32 / 10.0).0 >= TAB_FROM_OPACITY, "never blank");
+        }
     }
 
     #[test]
-    fn a_retarget_resumes_the_fade_at_the_same_opacity() {
-        for o in [1.0, 0.7, 0.3, 0.0] {
-            let (again, second_half) = tab_fade(tab_fade_resume(o));
-            assert!((again - o).abs() < 1e-6 && !second_half || o == 0.0, "{o} -> {again}");
-        }
+    fn union_covers_both_and_contains_agrees() {
+        let a = Geometry { x: 100, y: 100, w: 400, h: 500 };
+        let b = Geometry { x: 50, y: 120, w: 300, h: 700 };
+        let u = union(a, b);
+        assert_eq!(u, Geometry { x: 50, y: 100, w: 450, h: 720 });
+        assert!(contains(u, a) && contains(u, b));
+        assert!(!contains(a, b));
     }
 
     #[test]

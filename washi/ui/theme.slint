@@ -6,6 +6,16 @@ export global Theme {
     out property <angle> text-tilt: 1.45deg;
     // The text settles flat over this long when editing starts, and back when it ends.
     out property <duration> settle: 120ms;
+    out property <duration> settle-in: 90ms;
+    // Another note shown in the same window (All Notes): its text settles in from a little lower
+    // and from half-faded over this long. It never starts blank, so the switch never flashes.
+    out property <duration> switch-settle: 200ms;
+    out property <length> switch-drop: 6px;
+    out property <float> switch-from-opacity: 0.45;
+    // All Notes opening: the sidebar slides out from behind the paper's left edge.
+    out property <duration> sidebar-intro: 220ms;
+    out property <length> sidebar-intro-shift: 28px;
+    out property <float> sidebar-intro-from: 0.2;
     // At rest the text is drawn in pieces at most this wide, each on the tilted baseline.
     out property <length> step-width: 16px;
 

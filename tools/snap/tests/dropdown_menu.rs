@@ -205,7 +205,7 @@ fn menu_button_hover_fade_and_persists_while_dropdown_open() {
     h.advance(ms(0));
     h.advance(ms(60));
     assert!(h.menu_button_opacity(0) < 1.0);
-    h.advance(ms(60));
+    h.advance(ms(110));
     assert_eq!(h.menu_button_opacity(0), 0.0);
     assert!(!h.menu_button_shown(0));
 
@@ -223,7 +223,7 @@ fn menu_button_hover_fade_and_persists_while_dropdown_open() {
     h.invoke_dropdown_dismiss();
     assert!(!h.is_dropdown_open());
     h.advance(ms(0));
-    h.advance(ms(120));
+    h.advance(ms(170));
     assert_eq!(h.menu_button_opacity(0), 0.0);
     assert!(!h.menu_button_shown(0));
 }
@@ -509,7 +509,8 @@ fn all_notes_sidebar_selection_and_new_note_button() {
     assert_eq!(h.all_notes_selected_id(), Some(new_id));
     assert_eq!(h.all_notes_confirming_delete(), Some(false));
 
-    // The editor window is the note's window plus the sidebar's strip on the left
+    // The editor window is the note's window plus the sidebar's strip on the left (once it has slid in)
+    h.advance(ms(300));
     let (w, h_px, pixels) = h.render_all_notes().expect("render all notes");
     assert_eq!((w, h_px), (447 + 282, 468));
     // the sidebar's slate backing at the middle of its left edge area

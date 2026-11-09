@@ -20,6 +20,29 @@ fn ms(n: u64) -> Duration {
 const TABS: [&str; 4] = ["general", "style", "shortcuts", "privacy"];
 /// The mockup's Paper heights (its DOM, 1x): the content's height plus 38 above and 44 below, at least 600.
 const MOCKUP_PAPER_H: [f32; 4] = [658.4, 603.2, 766.8, 600.0];
+/// The General row added after the mockup ("Notes left in All Notes"): its height with the rule.
+const PARK_ROW_H: f32 = 82.0;
+/// General's rows above that one end about here in the window: only this much of General's Paper
+/// can be held against its mockup (everything below moved down by the new row, and the Sidebar,
+/// centred on the taller window, moved down by half of it).
+const GENERAL_COMPARED_H: u32 = 248;
+
+/// The Paper height a tab should have: the mockup's, plus the row added to General since.
+fn want_paper_h(i: usize) -> f32 {
+    MOCKUP_PAPER_H[i] + if i == 0 { PARK_ROW_H } else { 0.0 }
+}
+
+/// The top `rows` of an image, right of the Sidebar's strip.
+fn paper_top_rows(img: &(u32, u32, Vec<u8>), rows: u32) -> (u32, u32, Vec<u8>) {
+    let left = STRIP as u32;
+    let w = img.0 - left;
+    let mut out = Vec::with_capacity((w * rows * 3) as usize);
+    for y in 0..rows {
+        let start = ((y * img.0 + left) * 3) as usize;
+        out.extend_from_slice(&img.2[start..start + (w * 3) as usize]);
+    }
+    (w, rows, out)
+}
 const MARGIN: f32 = 42.0;
 const STRIP: f32 = 282.0;
 const PAPER_W: f32 = 520.0;
@@ -154,7 +177,9 @@ fn every_tab_looks_like_the_mockup() {
         dump(&format!("settings-{tab}.png"), &shot);
         let want = reference(tab);
         assert_eq!(shot.0, want.0, "{tab}: window width");
-        assert!((shot.1 as i32 - want.1 as i32).abs() <= 3, "{tab}: window height {} against the mockup's {}", shot.1, want.1);
+        let extra = (want_paper_h(i) - MOCKUP_PAPER_H[i]).round() as i32;
+        assert!((shot.1 as i32 - want.1 as i32 - extra).abs() <= 3, "{tab}: window height {} against the mockup's {} + {extra}", shot.1, want.1);
+        let (shot, want) = if i == 0 { (paper_top_rows(&shot, GENERAL_COMPARED_H), paper_top_rows(&want, GENERAL_COMPARED_H)) } else { (shot, want) };
         let (mean, far) = block_difference(&shot, &want);
         assert!(mean < 2.6, "{tab}: blocks differ by {mean:.2} levels on average");
         assert!(far < 0.02, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
@@ -185,7 +210,7 @@ fn each_paper_is_as_tall_as_its_content_needs() {
         let bottoms = h.settings_content_bottoms();
         assert!(paper >= bottoms[i] + 44.0 - 0.5, "{tab}: Paper {paper} is shorter than its content {} plus the 44px padding", bottoms[i]);
         assert!(paper >= 600.0, "{tab}: Paper {paper} is under the 600px minimum");
-        assert!((paper - MOCKUP_PAPER_H[i]).abs() <= 3.0, "{tab}: Paper {paper} against the mockup's {}", MOCKUP_PAPER_H[i]);
+        assert!((paper - want_paper_h(i)).abs() <= 3.0, "{tab}: Paper {paper} against {}", want_paper_h(i));
     }
 }
 
@@ -217,7 +242,7 @@ fn settings_opens_at_the_height_of_the_general_tab() {
     // General is taller than 600: the page must not open at 600 and wait for a tab switch.
     let h = open_on(0);
     let (_, _, _, wh) = h.settings_window_geometry().unwrap();
-    assert!((wh as f32 - 2.0 * MARGIN - MOCKUP_PAPER_H[0]).abs() <= 3.0, "opened at window height {wh}");
+    assert!((wh as f32 - 2.0 * MARGIN - want_paper_h(0)).abs() <= 3.0, "opened at window height {wh}");
 }
 
 #[test]
@@ -233,7 +258,7 @@ fn switching_tabs_mid_tween_still_ends_at_the_right_height() {
     h.advance_frames(ms(600));
     let (_, _, _, wh) = h.settings_window_geometry().unwrap();
     let paper = wh as f32 - 2.0 * MARGIN;
-    assert!((paper - MOCKUP_PAPER_H[0]).abs() <= 3.0, "ended at {paper}");
+    assert!((paper - want_paper_h(0)).abs() <= 3.0, "ended at {paper}");
     let shot = rendered(&h);
     assert_eq!(ink_in_bottom_padding(&shot), 0);
 }

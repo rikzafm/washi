@@ -11,3 +11,8 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Debug builds still optimize the dependencies: Slint's software renderer draws every frame on the
+# CPU, and unoptimized it is slow enough to make every animation stutter in `cargo run`.
+[profile.dev.package."*"]
+opt-level = 2

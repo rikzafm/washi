@@ -164,19 +164,20 @@ impl Db {
         Ok(NoteRow { id: r.get(0)?, content: r.get(1)?, geometry, always_on_top: r.get::<_, i64>(6)? != 0 })
     }
 
-    /// Whether the text fades into the paper above the toolbar (default) or is cut cleanly.
-    pub fn fade_text_edge(&self) -> bool {
+    /// Where an open note goes when All Notes switches away from it (Settings › General): beside the
+    /// All Notes window when there is room (true, the default) or straight behind it (false).
+    pub fn park_notes_beside(&self) -> bool {
         self.conn
-            .query_row("SELECT value FROM meta WHERE key='fade_text_edge'", [], |r| r.get::<_, String>(0))
-            .map(|v| v != "0")
+            .query_row("SELECT value FROM meta WHERE key='park_notes'", [], |r| r.get::<_, String>(0))
+            .map(|v| v != "back")
             .unwrap_or(true)
     }
 
-    pub fn set_fade_text_edge(&self, on: bool) -> Result<(), DbError> {
+    pub fn set_park_notes_beside(&self, beside: bool) -> Result<(), DbError> {
         self.conn.execute(
-            "INSERT INTO meta(key, value) VALUES ('fade_text_edge', ?1)
+            "INSERT INTO meta(key, value) VALUES ('park_notes', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            [if on { "1" } else { "0" }],
+            [if beside { "side" } else { "back" }],
         )?;
         Ok(())
     }

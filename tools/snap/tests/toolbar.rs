@@ -28,11 +28,11 @@ fn the_toolbar_is_hidden_until_the_pointer_is_over_the_note() {
 }
 
 #[test]
-fn pointer_enters_the_toolbar_fades_in_over_120_ms() {
+fn pointer_enters_the_toolbar_fades_in_over_100_ms() {
     let mut h = note();
     h.pointer_move(0, 5.0, 5.0);
     h.advance(ms(0));
-    h.advance(ms(60));
+    h.advance(ms(50));
     let half = h.toolbar_opacity(0);
     assert!(half > 0.0 && half < 1.0, "halfway through the fade: {half}");
     assert!(h.toolbar_visible(0));
@@ -48,10 +48,10 @@ fn pointer_leaves_the_toolbar_fades_out_and_stops_taking_part() {
     assert_eq!(h.toolbar_opacity(0), 1.0);
     h.pointer_exit(0);
     h.advance(ms(0));
-    h.advance(ms(60));
+    h.advance(ms(80));
     let half = h.toolbar_opacity(0);
     assert!(half > 0.0 && half < 1.0, "halfway through the fade: {half}");
-    h.advance(ms(60));
+    h.advance(ms(90));
     assert_eq!(h.toolbar_opacity(0), 0.0);
     assert!(!h.toolbar_visible(0));
 }

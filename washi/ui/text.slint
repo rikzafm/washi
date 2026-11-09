@@ -246,9 +246,10 @@ export component TextLayer inherits Rectangle {
     in-out property <int> focused-block: -1;
     // 0 at rest, 1 while editing
     property <float> flat: focused-block >= 0 ? 1 : 0;
+    // Into editing quickly (the caret shows once the text is flat), back to rest more gently.
     animate flat {
-        duration: Theme.settle;
-        easing: ease-in-out;
+        duration: root.focused-block >= 0 ? Theme.settle-in : Theme.settle;
+        easing: root.focused-block >= 0 ? ease-out : ease-in-out;
     }
     /// How much of the resting tilt the words still carry: 1 at rest, 0 while editing.
     out property <float> tilt-scale: 1 - flat;

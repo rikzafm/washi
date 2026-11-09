@@ -15,7 +15,7 @@ export { SettingsWindow } from "settings.slint";
 export { ShortcutRow } from "settings-pages.slint";
 export { DeleteNoteDialog } from "delete-dialog.slint";
 export { PaletteEntry, PickerPalette } from "color-picker.slint";
-import { Toolbar, ToolbarMetrics, MenuButton, Frame } from "toolbar.slint";
+import { Toolbar, ToolbarMetrics, MenuButton, Frame, TRect } from "toolbar.slint";
 import { ColorPicker, ColorPickerNav, PickerPalette } from "color-picker.slint";
 import { WindowHandles } from "resize-zones.slint";
 import { ScrollBar, ScrollMetrics } from "scroll.slint";
@@ -36,8 +36,6 @@ export component NoteWindow inherits Window {
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
     in property <string> window-title: "Washi";
     in property <bool> pinned: false;
-    /// Fade the text into the paper above the toolbar (false: cut it cleanly).
-    in property <bool> fade-edge: true;
     in property <image> app-icon;
     title: window-title;
     always-on-top: pinned;
@@ -140,6 +138,25 @@ export component NoteWindow inherits Window {
     /// The note's own content (text, toolbar, menu button, scrollbar): faded out while the note turns
     /// into the Settings page. The paper, shadow and tapes stay.
     in property <float> content-opacity: 1;
+    /// The first block takes the focus when it is made (a note opening). Off for the All Notes
+    /// editor: picking a note in the list must not put a caret in it.
+    in property <bool> autofocus: true;
+    /// Give the keyboard to the note's own key handling (Esc, shortcuts) with no field focused.
+    public function focus-keys() { keys.focus(); }
+    /// Bumped by Rust when the window starts showing another note (All Notes): the text settles in.
+    in property <int> switch-serial: 0;
+    // 0 the moment another note is shown, 1 at rest. `settle-jump` makes the step to 0 instant.
+    property <bool> settle-jump: false;
+    property <float> settle: 1;
+    animate settle { duration: root.settle-jump ? 0ms : Theme.switch-settle; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    changed switch-serial => {
+        root.settle-jump = true;
+        root.settle = 0;
+        root.settle-jump = false;
+        root.settle = 1;
+    }
+    /// How far the text has settled after a switch (1 at rest), for the tests.
+    out property <float> switch-settle: root.settle;
     in-out property <int> text-resync: 0;
     /// Block `i` was edited to this text.
     callback block-edited(int, string, int);
@@ -240,9 +257,25 @@ export component NoteWindow inherits Window {
         sn: Math.sin(root.tilt),
     };
 
+    // All Notes opening: the sidebar slides out from behind the paper (0 just opened, 1 at rest).
+    property <bool> intro-jump: false;
+    property <float> intro: 1;
+    animate intro { duration: root.intro-jump ? 0ms : Theme.sidebar-intro; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    changed all-notes-open => {
+        if (root.all-notes-open) {
+            root.intro-jump = true;
+            root.intro = 0;
+            root.intro-jump = false;
+            root.intro = 1;
+        }
+    }
+    /// How far the All Notes sidebar has slid in (1 at rest), for the tests.
+    out property <float> all-notes-intro: root.intro;
+
     // The sidebar (All Notes): left of the paper, in the strip the window grew by.
     if root.all-notes-open : AllNotesSidebar {
-        x: 0px;
+        x: (1 - root.intro) * Theme.sidebar-intro-shift;
+        opacity: Theme.sidebar-intro-from + (1 - Theme.sidebar-intro-from) * root.intro;
         y: 0px;
         width: AllNotesMetrics.sidebar-w;
         height: root.height;
@@ -302,7 +335,7 @@ export component NoteWindow inherits Window {
             }
         }
 
-        FocusScope {
+        keys := FocusScope {
             // While the popover is open its keys are taken here, before the focused text field sees
             // them: the field keeps the focus, the caret and the range, and the popover has no
             // focus of its own (its hit areas never take it). Space and Enter pick only once an
@@ -349,20 +382,22 @@ export component NoteWindow inherits Window {
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             text-view := Rectangle {
-                opacity: root.content-opacity;
+                opacity: root.content-opacity * (Theme.switch-from-opacity + (1 - Theme.switch-from-opacity) * root.settle);
                 x: root.margin;
                 // The tilted paper's top edge rises by half the paper width times sin(tilt) at the left.
                 // The clip starts at the highest point of the tilted top edge so images and text can reach the tilted edge.
                 y: root.paper-top - root.tilt-allowance;
                 width: root.note-w - 2 * root.margin;
-                // The tilted band's top edge rises by the same amount at the left;
-                // text may not reach into it, and a level clip cannot follow the tilt.
-                height: root.paper-bottom - ToolbarMetrics.band-height - Theme.text-bottom-gap - self.y - root.tilt-allowance;
+                // The tilted band's top edge swings by the same amount either side of level, and a
+                // level clip cannot follow it: the clip reaches the lowest point and the tilted
+                // cover below (see `band-cover`) hides what lies past the tilted edge.
+                height: root.paper-bottom - ToolbarMetrics.band-height - Theme.text-bottom-gap - self.y + root.tilt-allowance;
                 clip: true;
 
                 text-layer := TextLayer {
+                    allow-autofocus: root.autofocus;
                     x: 0px;
-                    y: -root.scroll-y - (text-view.y - root.paper-top);
+                    y: -root.scroll-y - (text-view.y - root.paper-top) + (1 - root.settle) * Theme.switch-drop;
                     width: root.note-w - 2 * root.margin;
                     // at least the text's height, or the blocks' layout would squeeze them together
                     height: max(root.paper-bottom - root.paper-top, root.content);
@@ -406,25 +441,28 @@ export component NoteWindow inherits Window {
                     block-key(i, k, o) => { return root.block-key(i, k, o); }
                     caret-moved(i, o, a) => { root.caret-moved(i, o, a); }
                 }
+            }
+        }
 
-                // Where more text lies below, the last line fades into the paper instead of being cut
-                // in half by the clip. (Touches pass through: it is not a TouchArea.)
-                Rectangle {
-                    y: parent.height - 56px;
-                    height: 56px;
-                    visible: root.fade-edge && root.scroll-y < root.max-scroll - 1px;
-                    // A smoothstep ramp (eased at both ends) so there is no visible start or edge.
-                    background: @linear-gradient(180deg,
-                        PaperTheme.paper-color.transparentize(1.0) 0%,
-                        PaperTheme.paper-color.transparentize(0.98) 12.5%,
-                        PaperTheme.paper-color.transparentize(0.9) 25%,
-                        PaperTheme.paper-color.transparentize(0.75) 37.5%,
-                        PaperTheme.paper-color.transparentize(0.5) 50%,
-                        PaperTheme.paper-color.transparentize(0.25) 62.5%,
-                        PaperTheme.paper-color.transparentize(0.1) 75%,
-                        PaperTheme.paper-color.transparentize(0.02) 87.5%,
-                        PaperTheme.paper-color 100%);
-                }
+        // The tilted top edge of the toolbar band: a paper-colored cover that hides what the level
+        // clip lets through, so the text is cut cleanly along the paper's own tilt.
+        // (Touches pass through: none of these is a TouchArea.)
+        band-cover := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: root.note-w;
+            height: root.height;
+            property <float> pw: (root.note-w - 2 * root.margin) / 1px;
+            property <float> ph: (root.height - 2 * root.margin) / 1px;
+            property <float> vb: self.ph / 2.0 - (ToolbarMetrics.band-height + Theme.text-bottom-gap) / 1px;
+
+            TRect {
+                f: root.paper-frame;
+                u0: -parent.pw / 2.0;
+                v0: parent.vb;
+                w: parent.pw;
+                h: parent.ph / 2.0 - parent.vb;
+                fill: PaperTheme.paper-color;
             }
         }
 
@@ -485,9 +523,10 @@ export component NoteWindow inherits Window {
                 root.picker-open = false;
                 if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
             }
-            opacity: root.content-opacity * ((paper-touch.has-hover || self.any-pressed || root.dropdown-open) ? 1 : 0);
+            property <bool> wanted: paper-touch.has-hover || self.any-pressed || root.dropdown-open;
+            opacity: root.content-opacity * (self.wanted ? 1 : 0);
             visible: !root.all-notes-open && self.opacity > 0;
-            animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
+            animate opacity { duration: self.wanted ? ToolbarMetrics.fade : ToolbarMetrics.fade-out; easing: self.wanted ? ease-out : ease-in-out; }
         }
 
         // The top-right "..." trigger button for the dropdown menu
@@ -497,9 +536,10 @@ export component NoteWindow inherits Window {
             dv: -(root.height - 2 * root.margin) / 2px + ToolbarMetrics.menu-button-top-inset / 1px;
             active: root.dropdown-open;
             clicked => { root.open-dropdown(); }
-            opacity: root.content-opacity * ((paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open) ? 1 : 0);
+            property <bool> wanted: paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open;
+            opacity: root.content-opacity * (self.wanted ? 1 : 0);
             visible: self.opacity > 0;
-            animate opacity { duration: ToolbarMetrics.fade; easing: ease-out; }
+            animate opacity { duration: self.wanted ? ToolbarMetrics.fade : ToolbarMetrics.fade-out; easing: self.wanted ? ease-out : ease-in-out; }
         }
 
         // While All Notes is open, its action bar takes the toolbar's place.

@@ -6,10 +6,15 @@
 //! puts the host back exactly where it was and fades its text in (40 ms). Same pattern as All notes: the
 //! Settings window is a separate window, the note stays alive underneath.
 //!
-//! The window's bounds are set by an 8 ms timer from a wall-clock tween (so a slow frame skips ahead
+//! The page's bounds are set by an 8 ms timer from a wall-clock tween (so a slow frame skips ahead
 //! instead of stretching the animation, and the harness can sample any instant). The timer holds the
 //! system's 1 ms timer resolution while it runs: at the default ~15.6 ms grid a 16 ms timer fires every
 //! ~31 ms.
+//!
+//! The native window is not resized every frame (that is what made the transitions choppy: each resize
+//! is a round trip through the window manager and a new framebuffer). At the start of a transition the
+//! window becomes a transparent canvas covering every pose the transition passes through, the page
+//! moves and grows inside it, and once the page rests the window is trimmed to it.
 
 pub mod anim;
 pub mod shortcuts;
@@ -20,7 +25,7 @@ pub mod tape;
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
 use crate::storage::Geometry;
-use anim::{fit_on_screen, grow_pose, logical_areas, paper_of_note, window_bounds, lerp_rect, tab_fade, tab_fade_resume, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK};
+use anim::{contains, fit_on_screen, grow_pose, logical_areas, paper_of_note, tab_settle, union, window_bounds, lerp_rect, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK};
 use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -55,9 +60,8 @@ enum Phase {
     Swap { then: Box<Phase>, closing: bool },
     /// The note (e = 0) and the Settings page (e = 1).
     Morph { tween: Tween, closing: bool },
-    /// The Paper's height tweens to the tab's, and the content cross-fades. `fade_start` is when the fade
-    /// began (earlier than the tween when a switch retargets mid-fade, so the opacity stays continuous).
-    Tab { h: Tween, fade_start: Duration, to_tab: i32, swapped: bool },
+    /// The Paper's height tweens to the tab's, and the new tab's content (shown at once) settles in.
+    Tab { h: Tween },
     /// At rest (the tick timer is stopped).
     Open,
     /// Settings hidden again; the host fades its text back in.
@@ -83,6 +87,10 @@ pub struct SettingsView {
     host_window: Geometry,
     /// Where the Settings window was last put (to tell a drag by the user from where we placed it).
     placed: Cell<Geometry>,
+    /// The window as it is now (logical px): where we put it, moved by any drag since.
+    canvas: Cell<Geometry>,
+    /// How many times the native window has been moved or resized by the view (for the tests).
+    resizes: Cell<u32>,
     phase: RefCell<Phase>,
     tick: slint::Timer,
     /// Whether the fine (1 ms) system timer resolution is held for the frame timer.
@@ -120,6 +128,8 @@ impl SettingsView {
             host,
             host_window,
             placed: Cell::new(host_window),
+            canvas: Cell::new(host_window),
+            resizes: Cell::new(0),
             phase: RefCell::new(Phase::Swap {
                 then: Box::new(Phase::Morph { tween: Tween::new(0.0, 1.0, now, GROW, Ease::OutCubic), closing: false }),
                 closing: false,
@@ -140,7 +150,9 @@ impl SettingsView {
         view.wire(Rc::downgrade(&view));
         view.morph_to.set(view.open_paper());
         // Settings shows at once, exactly on the note's Paper (blank, as the note's text is gone beneath
-        // it); the grow starts on the next frame, when the host's window is hidden.
+        // it); the grow starts on the next frame, when the host's window is hidden. The window already
+        // covers the whole grow, so it is not resized while it plays.
+        view.reserve(window_bounds(view.morph_from.get(), 0.0), window_bounds(view.morph_to.get(), SIDEBAR_STRIP));
         view.apply(grow_pose(view.morph_from.get(), view.morph_to.get(), 0.0));
         let _ = view.ui.show();
         view.start_ticking();
@@ -156,17 +168,83 @@ impl SettingsView {
         fit_on_screen(want, SIDEBAR_STRIP, &areas)
     }
 
-    /// Draw `pose`: strip and content first, then the window's bounds in one step.
+    /// Draw `pose` inside the window. The window only changes if the pose falls outside it (a
+    /// transition that did not reserve room for it).
     fn apply(&self, pose: Pose) {
         self.strip.set(pose.strip);
         self.ui.set_strip(pose.strip);
         self.paper.set(pose.paper);
         self.ui.set_content_opacity(pose.content);
-        self.place(window_bounds(pose.paper, pose.strip));
+        let page = window_bounds(pose.paper, pose.strip);
+        if !contains(self.canvas.get(), page) {
+            self.place(union(self.canvas.get(), page));
+        }
+        self.show_page(page);
+    }
+
+    /// Put the page (Sidebar strip, margin and Paper) at `page`, screen logical px, in the window.
+    fn show_page(&self, page: Geometry) {
+        let c = self.canvas.get();
+        self.ui.set_page_x((page.x - c.x) as f32);
+        self.ui.set_page_y((page.y - c.y) as f32);
+        self.ui.set_page_w(page.w as f32);
+        self.ui.set_page_h(page.h as f32);
+    }
+
+    /// Where the page is on screen (logical px).
+    pub fn page_geometry(&self) -> Geometry {
+        let c = self.canvas.get();
+        let ui = &self.ui;
+        Geometry {
+            x: c.x + ui.get_page_x().round() as i32,
+            y: c.y + ui.get_page_y().round() as i32,
+            w: ui.get_page_w().round().max(1.0) as u32,
+            h: ui.get_page_h().round().max(1.0) as u32,
+        }
+    }
+
+    /// How many times the view has moved or resized the native window so far.
+    pub fn window_resizes(&self) -> u32 {
+        self.resizes.get()
+    }
+
+    /// The user may have dragged the window since we placed it: follow it.
+    fn sync_canvas(&self) {
+        let w = self.ui.window();
+        let s = w.scale_factor();
+        let p = w.position();
+        let c = self.canvas.get();
+        self.canvas.set(Geometry { x: (p.x as f32 / s).round() as i32, y: (p.y as f32 / s).round() as i32, ..c });
+    }
+
+    /// Before a transition from page bounds `a` to `b`: make the window cover both (with a pixel of
+    /// slack for rounding) in one move, and keep the page where it is on screen.
+    fn reserve(&self, a: Geometry, b: Geometry) {
+        let u = union(a, b);
+        if contains(self.canvas.get(), u) {
+            return;
+        }
+        let want = Geometry { x: u.x - 1, y: u.y - 1, w: u.w + 2, h: u.h + 2 };
+        {
+            let page = self.page_geometry();
+            self.place(want);
+            self.show_page(page);
+        }
+    }
+
+    /// The page rests: trim the window to it.
+    fn fit(&self) {
+        let page = self.page_geometry();
+        if self.canvas.get() != page {
+            self.place(page);
+            self.show_page(page);
+        }
     }
 
     fn place(&self, g: Geometry) {
         self.placed.set(g);
+        self.canvas.set(g);
+        self.resizes.set(self.resizes.get() + 1);
         let w = self.ui.window();
         let s = w.scale_factor();
         let phys = |v: i32| (v as f32 * s).round() as i32;
@@ -223,30 +301,36 @@ impl SettingsView {
         }
         let fit = fit_on_screen(RectF { h, ..now }, SIDEBAR_STRIP, &self.areas());
         self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, content: 1.0 });
+        self.fit();
     }
 
     fn areas(&self) -> Vec<RectF> {
         logical_areas(&(self.hooks.work_areas)(), self.ui.window().scale_factor())
     }
 
-    /// A Sidebar tab was pressed: light it up at once, tween the Paper's height to the tab's and
-    /// cross-fade the content. Starting from wherever the last tween is, so a retarget is smooth.
+    /// A Sidebar tab was pressed: light it up and show its content at once, then tween the Paper's
+    /// height to the tab's while the content settles in. Starting from wherever the last tween is, so
+    /// a retarget is smooth.
     pub fn select_tab(&self, to: i32) {
         if !matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. }) || to == self.tab.get() {
             return;
         }
         let now = self.now();
         self.ui.set_selected_tab(to);
+        self.ui.set_shown_tab(to);
         let resting = matches!(*self.phase.borrow(), Phase::Open);
         // At rest the Paper is where the user left it; mid-tween it is where the last frame put it.
         let from = if resting { self.actual_paper() } else { self.paper.get() };
-        let opacity = self.ui.get_content_opacity();
-        let fade_start = now.saturating_sub(TAB_SWITCH.mul_f32(tab_fade_resume(opacity)));
         let want = RectF { h: self.ui.invoke_paper_height_for(to).max(PAPER_MIN_H), ..from };
+        let target = fit_on_screen(want, SIDEBAR_STRIP, &self.areas());
         self.tab_from.set(from);
-        self.tab_to.set(fit_on_screen(want, SIDEBAR_STRIP, &self.areas()));
+        self.tab_to.set(target);
         self.tab.set(to);
-        *self.phase.borrow_mut() = Phase::Tab { h: Tween::new(0.0, 1.0, now, TAB_SWITCH, Ease::OutCubic), fade_start, to_tab: to, swapped: false };
+        self.reserve(window_bounds(from, SIDEBAR_STRIP), window_bounds(target, SIDEBAR_STRIP));
+        let (content, dy) = tab_settle(0.0);
+        self.apply(Pose { paper: from, strip: SIDEBAR_STRIP, content });
+        self.ui.set_content_dy(dy);
+        *self.phase.borrow_mut() = Phase::Tab { h: Tween::new(0.0, 1.0, now, TAB_SWITCH, Ease::OutCubic) };
         self.start_ticking();
         self.sync_general();
     }
@@ -308,11 +392,26 @@ impl SettingsView {
         let phase = self.phase.borrow().clone();
         let next: Option<Phase> = match phase {
             Phase::Swap { then, closing } => {
+                // The window that goes away does so once the one taking over has drawn its first
+                // frame: hiding it at once left a frame with neither on screen (a flicker).
                 if closing {
-                    let _ = self.ui.hide();
+                    let ui = self.ui.as_weak();
+                    slint::Timer::single_shot(crate::all_notes::SWAP_OVERLAP, move || {
+                        if let Some(ui) = ui.upgrade() {
+                            let _ = ui.hide();
+                        }
+                    });
                 } else {
-                    (self.hooks.desktop_visible)(self.host, false);
+                    // the host's paper goes blank at once, the same blank paper Settings starts as
                     (self.hooks.host_content)(self.host, 0.0);
+                    let (hide, host) = (self.hooks.desktop_visible.clone(), self.host);
+                    let me = self.me.clone();
+                    slint::Timer::single_shot(crate::all_notes::SWAP_OVERLAP, move || {
+                        // not if Settings already closed back onto the host meanwhile
+                        if me.upgrade().is_some_and(|v| !matches!(*v.phase.borrow(), Phase::Done | Phase::NoteFadeIn { .. } | Phase::Swap { closing: true, .. })) {
+                            hide(host, false);
+                        }
+                    });
                 }
                 Some(then.restarted(now))
             }
@@ -340,21 +439,12 @@ impl SettingsView {
                     None
                 }
             }
-            Phase::Tab { h, fade_start, to_tab, swapped } => {
-                let (e, h_done) = h.sample(now);
-                let t = now.saturating_sub(fade_start).as_secs_f32() / TAB_SWITCH.as_secs_f32();
-                let (content, second_half) = tab_fade(t);
-                if second_half && !swapped {
-                    self.ui.set_shown_tab(to_tab);
-                }
+            Phase::Tab { h } => {
+                let (e, done) = h.sample(now);
+                let (content, dy) = tab_settle(h.progress(now));
                 self.apply(Pose { paper: lerp_rect(self.tab_from.get(), self.tab_to.get(), e), strip: SIDEBAR_STRIP, content });
-                if h_done && t >= 1.0 {
-                    Some(Phase::Open)
-                } else if second_half && !swapped {
-                    Some(Phase::Tab { h, fade_start, to_tab, swapped: true })
-                } else {
-                    None
-                }
+                self.ui.set_content_dy(dy);
+                done.then_some(Phase::Open)
             }
             Phase::Open | Phase::Done => {
                 self.stop_ticking();
@@ -363,9 +453,13 @@ impl SettingsView {
         };
         if let Some(p) = next {
             let rest = matches!(p, Phase::Open | Phase::Done);
+            let open = matches!(p, Phase::Open);
             *self.phase.borrow_mut() = p;
             if rest {
                 self.stop_ticking();
+            }
+            if open {
+                self.fit();
             }
         }
         self.sync_general();
@@ -393,6 +487,9 @@ impl SettingsView {
                 Phase::Morph { tween: Tween::new(1.0, 0.0, now, GROW, Ease::OutCubic), closing: true }
             }
         };
+        // the close morph plays inside one window too
+        self.ui.set_content_dy(0.0);
+        self.reserve(self.page_geometry(), window_bounds(self.morph_from.get(), 0.0));
         *self.phase.borrow_mut() = next;
         self.start_ticking();
         self.sync_general();
@@ -410,17 +507,16 @@ impl SettingsView {
         }
     }
 
-    /// The Paper where the Settings window really is now.
+    /// The Paper where the page really is now (it may have been dragged).
     fn actual_paper(&self) -> RectF {
-        let w = self.ui.window();
-        let s = w.scale_factor();
-        let (p, sz) = (w.position(), w.size());
+        self.sync_canvas();
+        let page = self.page_geometry();
         let strip = self.strip.get();
         RectF {
-            x: p.x as f32 / s + strip + MARGIN,
-            y: p.y as f32 / s + MARGIN,
-            w: sz.width as f32 / s - strip - 2.0 * MARGIN,
-            h: sz.height as f32 / s - 2.0 * MARGIN,
+            x: page.x as f32 + strip + MARGIN,
+            y: page.y as f32 + MARGIN,
+            w: page.w as f32 - strip - 2.0 * MARGIN,
+            h: page.h as f32 - 2.0 * MARGIN,
         }
     }
 

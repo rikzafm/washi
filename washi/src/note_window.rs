@@ -31,7 +31,7 @@ fn is_minimized_position(x: i32, y: i32) -> bool {
 }
 
 struct GeometrySave {
-    id: NoteId,
+    id: Rc<Cell<NoteId>>,
     db: Rc<Db>,
     ui: slint::Weak<NoteWindow>,
     /// The last geometry seen while the window was in a normal state.
@@ -64,15 +64,15 @@ impl GeometrySave {
             return;
         }
         let Some(g) = self.current() else { return };
-        if let Err(e) = self.db.save_geometry(self.id, g) {
-            eprintln!("washi: could not save the position of note {}: {e}", self.id);
+        if let Err(e) = self.db.save_geometry(self.id.get(), g) {
+            eprintln!("washi: could not save the position of note {}: {e}", self.id.get());
             self.dirty.set(true);
         }
     }
 }
 
 struct Autosave {
-    id: NoteId,
+    id: Rc<Cell<NoteId>>,
     db: Rc<Db>,
     clock: Rc<dyn Clock>,
     ui: slint::Weak<NoteWindow>,
@@ -85,8 +85,8 @@ impl Autosave {
             return;
         }
         let Some(ui) = self.ui.upgrade() else { return };
-        if let Err(e) = self.db.save_content(self.id, ui.get_text().as_str(), self.clock.unix_millis()) {
-            eprintln!("washi: autosave of note {} failed: {e}", self.id);
+        if let Err(e) = self.db.save_content(self.id.get(), ui.get_text().as_str(), self.clock.unix_millis()) {
+            eprintln!("washi: autosave of note {} failed: {e}", self.id.get());
             self.dirty.set(true);
         }
     }
@@ -1168,7 +1168,8 @@ fn block_data(b: &Block) -> BlockData {
 }
 
 pub struct Note {
-    id: NoteId,
+    /// The note shown. Shared with the window's callbacks: the All Notes editor swaps it in place.
+    id: Rc<Cell<NoteId>>,
     ui: NoteWindow,
     doc: Rc<Doc>,
     autosave: Rc<Autosave>,
@@ -1213,6 +1214,7 @@ impl Note {
             .collect();
         ui.global::<PickerPalette>().set_entries(slint::ModelRc::from(Rc::new(VecModel::from(entries))));
         let doc = Doc::new(NoteImages::new(id, db.clone()));
+        let id: Rc<Cell<NoteId>> = Rc::new(Cell::new(id));
         doc.load(content);
         ui.set_blocks(slint::ModelRc::from(doc.model.clone()));
         ui.set_runs(slint::ModelRc::from(doc.runs.clone()));
@@ -1231,7 +1233,7 @@ impl Note {
             ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
             ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
         }
-        let autosave = Rc::new(Autosave { id, db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
+        let autosave = Rc::new(Autosave { id: id.clone(), db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
         let history_timer = Rc::new(Timer::default());
         let autoscroll = Rc::new(Timer::default());
@@ -1249,7 +1251,7 @@ impl Note {
         }
         // everything that changes the text ends here: relayout, stored text, title, autosave
         let changed: Rc<dyn Fn(Option<Caret>)> = {
-            let (autosave, timer, weak, doc, on_event) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone(), on_event.clone());
+            let (autosave, timer, weak, doc, on_event, id) = (autosave.clone(), timer.clone(), ui.as_weak(), doc.clone(), on_event.clone(), id.clone());
             Rc::new(move |focus: Option<Caret>| {
                 let text = doc.text();
                 if let Some(ui) = weak.upgrade() {
@@ -1269,7 +1271,7 @@ impl Note {
                 autosave.dirty.set(true);
                 let a = autosave.clone();
                 timer.start(TimerMode::SingleShot, AUTOSAVE_DELAY, move || a.flush());
-                on_event(id, NoteEvent::TextChanged);
+                on_event(id.get(), NoteEvent::TextChanged);
             })
         };
         {
@@ -1422,9 +1424,9 @@ impl Note {
             });
         }
         {
-            let on_event = on_event.clone();
+            let (on_event, id) = (on_event.clone(), id.clone());
             ui.window().on_close_requested(move || {
-                on_event(id, NoteEvent::WindowClosed);
+                on_event(id.get(), NoteEvent::WindowClosed);
                 CloseRequestResponse::HideWindow
             });
         }
@@ -1433,7 +1435,7 @@ impl Note {
             ui.on_text_right_click(move |x, y| doc.right_click.set(Some((x, y))));
         }
         {
-            let (on_event, weak, doc) = (on_event.clone(), ui.as_weak(), doc.clone());
+            let (on_event, weak, doc, id) = (on_event.clone(), ui.as_weak(), doc.clone(), id.clone());
             ui.on_context_menu(move |x, y| {
                 let Some(ui) = weak.upgrade() else { return };
                 let w = ui.window();
@@ -1446,14 +1448,14 @@ impl Note {
                     let c = Caret { block, offset: 0 };
                     doc.set_selection(&ui, Range { anchor: c, focus: c });
                 }
-                on_event(id, NoteEvent::ContextMenu { at, image });
+                on_event(id.get(), NoteEvent::ContextMenu { at, image });
             });
         }
         {
-            let (doc, weak, clock, on_event) = (doc.clone(), ui.as_weak(), autosave.clock.clone(), on_event.clone());
+            let (doc, weak, clock, on_event, id) = (doc.clone(), ui.as_weak(), autosave.clock.clone(), on_event.clone(), id.clone());
             ui.on_pointer_down(move |x, y, shift| {
                 if let Some(ui) = weak.upgrade() {
-                    on_event(id, NoteEvent::PointerDown);
+                    on_event(id.get(), NoteEvent::PointerDown);
                     if doc.grab_grip(&ui, (x, y)) {
                         return;
                     }
@@ -1461,7 +1463,7 @@ impl Note {
                     // a double click on a picture opens it in its own window
                     if doc.pointer.get().clicks == 2 {
                         if let Some(block) = doc.image_at(&ui, (x, y)) {
-                            on_event(id, NoteEvent::OpenImage(block));
+                            on_event(id.get(), NoteEvent::OpenImage(block));
                         }
                     }
                 }
@@ -1504,16 +1506,16 @@ impl Note {
         }
         // callbacks that only pass one event on to the app
         let forward = |ev: NoteEvent| {
-            let on_event = on_event.clone();
-            move || on_event(id, ev)
+            let (on_event, id) = (on_event.clone(), id.clone());
+            move || on_event(id.get(), ev)
         };
         ui.on_pointer_moved(forward(NoteEvent::PointerMoved));
         ui.on_start_move(forward(NoteEvent::StartMove));
         {
-            let on_event = on_event.clone();
+            let (on_event, id) = (on_event.clone(), id.clone());
             ui.on_start_resize(move |code| {
                 if let Some(edge) = ResizeEdge::from_code(code) {
-                    on_event(id, NoteEvent::StartResize(edge));
+                    on_event(id.get(), NoteEvent::StartResize(edge));
                 }
             });
         }
@@ -1523,7 +1525,7 @@ impl Note {
         ui.on_delete_note(forward(NoteEvent::Delete));
         ui.on_open_dropdown(forward(NoteEvent::OpenDropdown));
         let paste_clipboard_fn = {
-            let (doc, autosave, changed, clipboard) = (doc.clone(), autosave.clone(), changed.clone(), clipboard.clone());
+            let (doc, autosave, changed, clipboard, id) = (doc.clone(), autosave.clone(), changed.clone(), clipboard.clone(), id.clone());
             move || -> bool {
                 use crate::clipboard_html::ParsedBlock;
                 if let Some(html) = clipboard.html() {
@@ -1538,7 +1540,7 @@ impl Note {
                         let mut add_image = |rgba: Rgba| -> Option<i64> {
                             let (w, h) = (rgba.width, rgba.height);
                             let png = crate::images::encode_png(&rgba).ok()?;
-                            let image_id = db.add_image(id, "image/png", w, h, &png).ok()?;
+                            let image_id = db.add_image(id.get(), "image/png", w, h, &png).ok()?;
                             let pixels = Some(crate::note_images::to_slint(&rgba));
                             images.add(image_id, (w, h), pixels);
                             Some(image_id)
@@ -1557,7 +1559,7 @@ impl Note {
                     };
                     let (w, h) = (rgba.width, rgba.height);
                     if let Ok(png) = crate::images::encode_png(&rgba) {
-                        if let Ok(image_id) = autosave.db.add_image(id, "image/png", w, h, &png) {
+                        if let Ok(image_id) = autosave.db.add_image(id.get(), "image/png", w, h, &png) {
                             let pixels = Some(crate::note_images::to_slint(&rgba));
                             doc.images.add(image_id, (w, h), pixels);
                             let before = doc.doc.borrow().clone();
@@ -1580,12 +1582,12 @@ impl Note {
         };
 
         ui.on_paste_range(paste_clipboard_fn.clone());
-        let on_paste_img = paste_image.clone();
+        let (on_paste_img, paste_id) = (paste_image.clone(), id.clone());
         ui.on_paste_image(move || {
             if paste_clipboard_fn() {
                 return true;
             }
-            on_paste_img(id)
+            on_paste_img(paste_id.get())
         });
         {
             let doc = doc.clone();
@@ -1619,7 +1621,7 @@ impl Note {
             });
         }
         ui.show()?;
-        let geometry = Rc::new(GeometrySave { id, db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
+        let geometry = Rc::new(GeometrySave { id: id.clone(), db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
         Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, on_event, clipboard, paste_image, saves_geometry: Cell::new(true) })
     }
@@ -1636,7 +1638,7 @@ impl Note {
     /// the paragraph below it. The picture is saved in the database now; the text that refers to
     /// it follows with the usual autosave.
     pub fn add_image(&self, stored: &Stored, after: usize) -> Result<(), crate::storage::DbError> {
-        let image_id = self.autosave.db.add_image(self.id, stored.mime, stored.width, stored.height, &stored.data)?;
+        let image_id = self.autosave.db.add_image(self.id.get(), stored.mime, stored.width, stored.height, &stored.data)?;
         let pixels = crate::images::decode(&stored.data).ok().map(|p| crate::note_images::to_slint(&p));
         self.doc.images.add(image_id, (stored.width, stored.height), pixels);
         let at = self.doc.doc.borrow_mut().insert_image(after, image_id);
@@ -1708,7 +1710,7 @@ impl Note {
                 let range = self.doc.selection.get();
                 let db = self.autosave.db.clone();
                 let images = &self.doc.images;
-                let id = self.id;
+                let id = self.id.get();
                 let mut add_image = |rgba: Rgba| -> Option<i64> {
                     let (w, h) = (rgba.width, rgba.height);
                     let png = crate::images::encode_png(&rgba).ok()?;
@@ -1731,7 +1733,7 @@ impl Note {
             };
             let (w, h) = (rgba.width, rgba.height);
             if let Ok(png) = crate::images::encode_png(&rgba) {
-                if let Ok(image_id) = self.autosave.db.add_image(self.id, "image/png", w, h, &png) {
+                if let Ok(image_id) = self.autosave.db.add_image(self.id.get(), "image/png", w, h, &png) {
                     let pixels = Some(crate::note_images::to_slint(&rgba));
                     self.doc.images.add(image_id, (w, h), pixels);
                     let before = self.doc.doc.borrow().clone();
@@ -1757,7 +1759,7 @@ impl Note {
                 return true;
             }
         }
-        (self.paste_image)(self.id)
+        (self.paste_image)(self.id.get())
     }
 
     /// Paste specifically an image from clipboard at the current insertion position.
@@ -1770,7 +1772,7 @@ impl Note {
             };
             let (w, h) = (rgba.width, rgba.height);
             if let Ok(png) = crate::images::encode_png(&rgba) {
-                if let Ok(image_id) = self.autosave.db.add_image(self.id, "image/png", w, h, &png) {
+                if let Ok(image_id) = self.autosave.db.add_image(self.id.get(), "image/png", w, h, &png) {
                     let pixels = Some(crate::note_images::to_slint(&rgba));
                     self.doc.images.add(image_id, (w, h), pixels);
                     let before = self.doc.doc.borrow().clone();
@@ -1781,7 +1783,7 @@ impl Note {
                 }
             }
         }
-        (self.paste_image)(self.id)
+        (self.paste_image)(self.id.get())
     }
 
     /// Bytes of decoded pictures this note holds right now.
@@ -1798,8 +1800,8 @@ impl Note {
     /// Delete stored pictures the text no longer shows (called when the note closes).
     pub fn prune_images(&self) {
         let keep: Vec<i64> = self.doc.doc.borrow().blocks().iter().filter_map(|b| b.image_id).collect();
-        if let Err(e) = self.autosave.db.prune_images(self.id, &keep) {
-            eprintln!("washi: could not remove unused pictures of note {}: {e}", self.id);
+        if let Err(e) = self.autosave.db.prune_images(self.id.get(), &keep) {
+            eprintln!("washi: could not remove unused pictures of note {}: {e}", self.id.get());
         }
     }
 
@@ -1831,7 +1833,7 @@ impl Note {
     }
 
     pub fn id(&self) -> NoteId {
-        self.id
+        self.id.get()
     }
 
     /// Whether moving or resizing the window is saved as the note's place (default true).
@@ -1903,10 +1905,6 @@ impl Note {
         self.ui.set_pinned(on);
     }
 
-    pub fn set_fade_edge(&self, on: bool) {
-        self.ui.set_fade_edge(on);
-    }
-
     pub fn is_dropdown_open(&self) -> bool {
         self.ui.get_dropdown_open()
     }
@@ -1955,7 +1953,55 @@ impl Note {
         self.ui.set_text(self.doc.text().as_str().into());
         self.ui.set_window_title(window_title(text).into());
         self.autosave.dirty.set(true);
-        (self.on_event)(self.id, NoteEvent::TextChanged);
+        (self.on_event)(self.id.get(), NoteEvent::TextChanged);
+    }
+
+    /// Show another note in this same window (the All Notes editor): the text, pictures, undo
+    /// history, caret and scroll all become `id`'s, and the window itself is never hidden, so the
+    /// switch does not flash. Unsaved edits of the old note are saved first.
+    pub fn switch_to(&self, id: NoteId, content: &str) {
+        if id == self.id.get() {
+            return;
+        }
+        self.flush_text();
+        self.history_timer.stop();
+        self.scroll_timer.stop();
+        // the old note's field gives the keyboard up; nothing in the new note takes it
+        self.ui.invoke_focus_keys();
+        self.id.set(id);
+        self.doc.images.retarget(id);
+        self.doc.typing.set(None);
+        self.doc.typing_paint.set(None);
+        self.doc.grip.replace(None);
+        self.doc.right_click.set(None);
+        self.doc.pointer.set(Pointer::default());
+        // the fields of the old blocks vanish without saying they lost the focus
+        self.ui.set_text_focused_block(-1);
+        self.ui.set_focus_block(-1);
+        self.ui.set_scrolling(false);
+        self.ui.set_scroll_y(0.0);
+        self.doc.load(content);
+        self.doc.set_caret(START);
+        self.doc.end_range(&self.ui);
+        self.doc.show_formats(&self.ui);
+        self.doc.relayout(&self.ui);
+        self.ui.set_text(self.doc.text().as_str().into());
+        self.ui.set_window_title(window_title(content).into());
+        self.ui.set_switch_serial(self.ui.get_switch_serial() + 1);
+    }
+
+    /// Whether the first block takes the focus when the blocks are made (see `NoteWindow.autofocus`).
+    pub fn set_autofocus(&self, on: bool) {
+        self.ui.set_autofocus(on);
+        if !on {
+            self.ui.invoke_focus_keys();
+        }
+    }
+
+    /// Put the caret at the start of the note, ready for typing.
+    pub fn focus_start(&self) {
+        self.doc.set_caret(START);
+        self.doc.focus_at(&self.ui, START);
     }
 
     pub fn text(&self) -> String {

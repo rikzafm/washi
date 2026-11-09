@@ -59,6 +59,52 @@ fn settings_opens_at_the_note_hides_only_the_host_and_closes_back() {
 }
 
 #[test]
+fn the_host_stays_up_until_settings_has_drawn_and_comes_back_before_settings_goes() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_settings();
+    h.advance_frames(ms(16));
+    assert!(h.settings_shown());
+    assert!(h.note_visible(0), "the note is not hidden in the frame Settings first shows");
+    h.advance_frames(ms(60));
+    assert!(!h.note_visible(0), "then it hides");
+    h.advance_frames(ms(600));
+
+    h.settings_close();
+    let mut both = false;
+    for _ in 0..40 {
+        h.advance_frames(ms(8));
+        if h.note_visible(0) && h.settings_shown() {
+            both = true;
+        }
+        if !h.is_settings_open() {
+            break;
+        }
+    }
+    assert!(both, "the note shows before Settings hides");
+    h.advance_frames(ms(300));
+    assert!(h.note_visible(0));
+}
+
+#[test]
+fn either_tape_drags_the_settings_window() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    let (x, y, w, hh) = window_at(&h);
+    let (wx, wy, _, _) = h.settings_native_window_geometry().unwrap();
+    let (px, py) = ((x - wx) as f32, (y - wy) as f32);
+    let paper_left = px + STRIP as f32 + MARGIN as f32;
+    let moves = |h: &Harness| h.control.log.borrow().iter().filter(|c| matches!(c, snap::WindowCommand::Move(_))).count();
+    let before = moves(&h);
+    // the top-left tape (paper 36.5, 5.5) and the bottom-right one
+    h.settings_press_at(paper_left + 36.5, py + MARGIN as f32 + 5.5);
+    assert_eq!(moves(&h), before + 1, "top tape");
+    h.settings_press_at(px + w as f32 - MARGIN as f32 - 36.5, py + hh as f32 - MARGIN as f32 - 8.5);
+    assert_eq!(moves(&h), before + 2, "bottom tape");
+}
+
+#[test]
 fn escape_closes_settings() {
     let mut h = Harness::new();
     h.start().unwrap();
@@ -151,7 +197,7 @@ const FULL_W: u32 = STRIP as u32 + PAPER_W + 2 * MARGIN as u32;
 
 /// Each tab's Paper height: the laid-out content plus the Paper's padding, at least 600 (the mockup's
 /// 658, 603, 767 and 600; see settings_fidelity.rs), in whole logical px as the window has them.
-const GENERAL_H: u32 = 658;
+const GENERAL_H: u32 = 740;
 const STYLE_H: u32 = 605;
 const SHORTCUTS_H: u32 = 768;
 const PRIVACY_H: u32 = 600;
@@ -172,10 +218,10 @@ fn opening_grows_left_at_once_with_no_wait_for_a_text_fade_and_closing_comes_bac
     // Settings is on screen from the first instant, exactly on the note's Paper (no sequential fade first)
     assert!(h.settings_shown());
     assert_eq!(window_at(&h), (note.x, note.y, note.w, note.h), "starts exactly on the note's Paper");
-    h.advance_frames(ms(16)); // swap: host hidden
+    h.advance_frames(ms(16)); // swap: the host stays up until Settings has drawn
+    assert!(h.note_visible(0));
+    h.advance_frames(ms(48)); // into the morph, the host now hidden
     assert!(!h.note_visible(0));
-
-    h.advance_frames(ms(48)); // into the morph
     let (x, y, w, _) = window_at(&h);
     assert!(w > note.w && w < FULL_W, "wider than the note by part of the Sidebar: {w}");
     assert!(x < note.x && x > note.x - STRIP, "the strip is partly out: {x}");
@@ -408,13 +454,15 @@ fn switching_mid_tween_retargets_smoothly() {
     h.settings_click_tab(1); // retarget to Font & Style
     let mut last_h = paper_h(&h) as i32;
     let mut last_o = h.settings_content_opacity();
+    assert_eq!(h.settings_shown_tab(), 1, "the new tab shows at once");
     for _ in 0..20 {
         h.advance_frames(ms(16));
         let now_h = paper_h(&h) as i32;
         assert!(now_h <= last_h, "monotonic: {now_h} after {last_h}");
         last_h = now_h;
         let o = h.settings_content_opacity();
-        assert!((o - last_o).abs() <= 0.3, "opacity does not jump: {last_o} -> {o}");
+        assert!(o >= 0.45 - 1e-6, "the content never goes blank: {o}");
+        assert!(o >= last_o - 1e-6, "it only settles in: {last_o} -> {o}");
         last_o = o;
     }
     assert_eq!(last_h, STYLE_H as i32);
@@ -423,22 +471,55 @@ fn switching_mid_tween_retargets_smoothly() {
 }
 
 #[test]
-fn content_swaps_only_when_invisible() {
+fn the_new_tab_shows_at_once_and_settles_in_without_going_blank() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
     h.settings_click_tab(2);
     assert_eq!(h.settings_selected_tab(), 2, "the Sidebar lights up at once");
-    assert_eq!(h.settings_shown_tab(), 0);
-    let mut swapped = false;
-    for _ in 0..20 {
+    assert_eq!(h.settings_shown_tab(), 2, "and the content with it");
+    let (o0, dy0) = (h.settings_content_opacity(), h.settings_content_dy());
+    assert!(o0 >= 0.45 - 1e-6 && o0 < 0.6, "starts half visible: {o0}");
+    assert!(dy0 > 4.0, "a little low: {dy0}");
+    let mut last = (o0, dy0);
+    for _ in 0..12 {
         h.advance_frames(ms(16));
-        if h.settings_shown_tab() == 2 {
-            assert!(h.settings_content_opacity() <= 0.3, "swapped while visible: {}", h.settings_content_opacity());
-            swapped = true;
-            break;
-        }
+        let now = (h.settings_content_opacity(), h.settings_content_dy());
+        assert!(now.0 >= last.0 - 1e-6 && now.1 <= last.1 + 1e-6, "settles monotonically: {last:?} -> {now:?}");
+        last = now;
     }
-    assert!(swapped);
+    assert_eq!((h.settings_content_opacity(), h.settings_content_dy()), (1.0, 0.0));
+    assert!(!h.settings_ticking());
+}
+
+#[test]
+fn a_tab_switch_does_not_resize_the_window_every_frame() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    for tab in [1, 0, 2, 3, 0] {
+        let before = h.settings_window_resizes();
+        h.settings_click_tab(tab);
+        h.advance_frames(ms(250));
+        let made = h.settings_window_resizes() - before;
+        assert!(made <= 2, "tab {tab}: at most grow once and trim once, got {made}");
+        assert_eq!(h.settings_native_window_geometry(), h.settings_window_geometry(), "trimmed to the page at rest");
+    }
+}
+
+#[test]
+fn opening_and_closing_do_not_resize_the_window_every_frame() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_settings();
+    h.advance_frames(ms(600));
+    assert!(h.settings_window_resizes() <= 2, "open: {}", h.settings_window_resizes());
+    let before = h.settings_window_resizes();
+    h.settings_close();
+    h.advance_frames(ms(100));
+    assert!(h.settings_window_resizes() - before <= 1, "close: {}", h.settings_window_resizes() - before);
+    h.advance_frames(ms(500));
+    assert!(!h.is_settings_open());
 }
 
 #[test]

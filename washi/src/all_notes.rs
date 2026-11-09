@@ -3,7 +3,7 @@
 //! Opening it from a note grows that note's window to the left by the sidebar's strip and puts the
 //! list there. The paper stays where it is on screen and becomes a real editor (a `Note` of its
 //! own, with the action bar in place of the formatting toolbar); picking another row in the list
-//! swaps in an editor for that note, in the same place. The note a desktop window already shows
+//! shows that note in the same editor window (never a new one, so nothing flashes). The note a desktop window already shows
 //! stays in sync with the editor (the app copies each text change across), and the desktop window
 //! of the note being edited is hidden while the editor stands in for it.
 
@@ -18,6 +18,80 @@ use std::time::Duration;
 
 /// The strip the window grows by on the left (logical px). Matches `AllNotesMetrics.sidebar-w`.
 pub const SIDEBAR_WIDTH: i32 = 282;
+
+/// The transparent margin around a note's paper (`PaperTheme.margin`).
+const MARGIN: i32 = 42;
+/// Space between the All Notes window and a note parked beside it, and the cascade step of the
+/// next note parked on the same side (logical px).
+pub const PARK_GAP: i32 = 12;
+pub const PARK_CASCADE: i32 = 30;
+
+/// Which side of the All Notes window a note was parked on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Right,
+    Left,
+}
+
+/// A note All Notes switched away from and moved out of its way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Parked {
+    /// Where the note was before (its saved place): where it goes back to.
+    pub home: Geometry,
+    /// Where it was put, and on which side (`None`: left in place, just behind).
+    pub at: Geometry,
+    pub side: Option<Side>,
+}
+
+fn overlaps(a: (i32, i32, i32, i32), b: (i32, i32, i32, i32)) -> bool {
+    a.0 < b.0 + b.2 && b.0 < a.0 + a.2 && a.1 < b.1 + b.3 && b.1 < a.1 + a.3
+}
+
+/// What is visible of the note window `g`: its paper (x, y, w, h).
+fn paper_box(g: Geometry) -> (i32, i32, i32, i32) {
+    (g.x + MARGIN, g.y + MARGIN, g.w as i32 - 2 * MARGIN, g.h as i32 - 2 * MARGIN)
+}
+
+/// What is visible of the All Notes window `g`: the sidebar from its left edge, then the paper.
+fn all_notes_box(g: Geometry) -> (i32, i32, i32, i32) {
+    (g.x, g.y + MARGIN, g.w as i32 - MARGIN, g.h as i32 - 2 * MARGIN)
+}
+
+/// Where to put the note window `note` so its paper sits beside the All Notes window `editor`:
+/// right first, then left, `k` cascade steps in on that side. `None` when its saved place does not
+/// overlap All Notes (it can stay), or when neither side has room (it goes behind instead).
+pub fn park_beside(note: Geometry, editor: Geometry, k: [usize; 2], areas: &[ScreenRect]) -> Option<(Geometry, Side)> {
+    let e = all_notes_box(editor);
+    if !overlaps(paper_box(note), e) {
+        return None;
+    }
+    let (cx, cy) = (editor.x + editor.w as i32 / 2, editor.y + editor.h as i32 / 2);
+    let area = areas.iter().find(|a| cx >= a.x && cx < a.x + a.w && cy >= a.y && cy < a.y + a.h).or(areas.first())?;
+    let (nw, nh) = (note.w as i32, note.h as i32);
+    let place = |x: i32, step: i32| {
+        // as near the note's own height as the screen allows
+        let y = (note.y + step).min(area.y + area.h - nh + MARGIN).max(area.y - MARGIN);
+        Geometry { x, y, ..note }
+    };
+    let fits = |g: Geometry| {
+        let p = paper_box(g);
+        p.0 >= area.x && p.1 >= area.y && p.0 + p.2 <= area.x + area.w && p.1 + p.3 <= area.y + area.h && !overlaps(p, e)
+    };
+    let step = |k: usize| k as i32 * PARK_CASCADE;
+    let right = place(e.0 + e.2 + PARK_GAP - MARGIN + step(k[0]), step(k[0]));
+    if fits(right) {
+        return Some((right, Side::Right));
+    }
+    let left = place(e.0 - PARK_GAP + MARGIN - nw - step(k[1]), step(k[1]));
+    if fits(left) {
+        return Some((left, Side::Left));
+    }
+    None
+}
+
+/// How long both windows stay on screen when one takes over from the other (opening and closing
+/// All Notes): long enough for the newly shown one to draw its first frame.
+pub const SWAP_OVERLAP: Duration = Duration::from_millis(40);
 
 pub fn format_status_line(row: &AllNoteRow, now_ms: i64) -> String {
     let rel = format_relative_timestamp(row.updated_at, now_ms);
@@ -47,9 +121,12 @@ pub fn clamp_to_screen(g: Geometry, areas: &[ScreenRect]) -> Geometry {
 /// What the view needs from the app.
 #[derive(Clone)]
 pub struct Hooks {
-    /// A real editor for a note, at this window geometry (logical px, the sidebar's strip included).
+    /// A note the editor stops standing in for: put its desktop window back, out of the way of All
+    /// Notes (beside it or behind it, as Settings › General says).
+    pub park: Rc<dyn Fn(NoteId)>,
+    /// The real editor, at this window geometry (logical px, the sidebar's strip included).
     pub make_editor: Rc<dyn Fn(NoteId, &str, Geometry) -> Result<Note, slint::PlatformError>>,
-    /// Connect the window's All Notes callbacks to the app (runs for every editor made).
+    /// Connect the window's All Notes callbacks to the app.
     pub wire: Rc<dyn Fn(&NoteWindow)>,
     /// Show or hide the desktop window of a note (the one the editor stands in for).
     pub desktop_visible: Rc<dyn Fn(NoteId, bool)>,
@@ -57,15 +134,16 @@ pub struct Hooks {
 
 pub struct AllNotesView {
     host_note_id: NoteId,
-    editor: RefCell<Rc<Note>>,
+    editor: Rc<Note>,
     hooks: Hooks,
     rows: RefCell<Vec<AllNoteRow>>,
     now_ms: Cell<i64>,
     open_items: RefCell<Vec<AllNoteItem>>,
     closed_items: RefCell<Vec<AllNoteItem>>,
-    /// Editors that were replaced: dropped a moment later, not inside their own callback.
-    retired: Rc<RefCell<Vec<Rc<Note>>>>,
-    retire_timer: slint::Timer,
+    /// Hides the host's desktop window just after the editor first shows (see `open`).
+    swap_timer: slint::Timer,
+    /// Notes moved out of the way while All Notes is open; they go back when it closes.
+    parked: RefCell<std::collections::HashMap<NoteId, Parked>>,
 }
 
 impl AllNotesView {
@@ -84,17 +162,23 @@ impl AllNotesView {
             areas,
         );
         let editor = Rc::new(Self::make(&hooks, host_note_id, &content, g)?);
-        (hooks.desktop_visible)(host_note_id, false);
+        // The host hides once the editor has drawn its first frame (both show the same paper in the
+        // same place): hiding it at once left a frame with neither window on screen, a flash.
+        let swap_timer = slint::Timer::default();
+        {
+            let hide = hooks.desktop_visible.clone();
+            swap_timer.start(slint::TimerMode::SingleShot, SWAP_OVERLAP, move || hide(host_note_id, false));
+        }
         let view = Self {
             host_note_id,
-            editor: RefCell::new(editor),
+            editor,
             hooks,
             rows: RefCell::new(rows.to_vec()),
             now_ms: Cell::new(now_ms),
             open_items: RefCell::new(Vec::new()),
             closed_items: RefCell::new(Vec::new()),
-            retired: Rc::new(RefCell::new(Vec::new())),
-            retire_timer: slint::Timer::default(),
+            swap_timer,
+            parked: RefCell::new(std::collections::HashMap::new()),
         };
         view.refresh(rows, Some(host_note_id), now_ms);
         Ok(view)
@@ -103,13 +187,14 @@ impl AllNotesView {
     fn make(hooks: &Hooks, id: NoteId, content: &str, g: Geometry) -> Result<Note, slint::PlatformError> {
         let note = (hooks.make_editor)(id, content, g)?;
         note.set_saves_geometry(false);
+        note.set_autofocus(false);
         note.ui().set_all_notes_open(true);
         (hooks.wire)(note.ui());
         Ok(note)
     }
 
     fn editor(&self) -> Rc<Note> {
-        self.editor.borrow().clone()
+        self.editor.clone()
     }
 
     pub fn host_note_id(&self) -> NoteId {
@@ -134,32 +219,15 @@ impl AllNotesView {
         self.editor().set_text(text);
     }
 
-    /// Swap in an editor for `row`, in the window's place.
+    /// Show `row` in the editor, in the same window.
     fn switch_editor(&self, row: &AllNoteRow) {
-        let old = self.editor();
-        if old.id() == row.id {
+        let old = self.editor.id();
+        if old == row.id {
             return;
         }
-        old.flush_text();
-        let g = old.geometry();
-        match Self::make(&self.hooks, row.id, &row.content, g) {
-            Ok(new) => {
-                let new = Rc::new(new);
-                self.apply_lists(new.ui());
-                (self.hooks.desktop_visible)(old.id(), true);
-                (self.hooks.desktop_visible)(row.id, false);
-                *self.editor.borrow_mut() = new;
-                self.retired.borrow_mut().push(old);
-                self.retire_timer.start(slint::TimerMode::SingleShot, Duration::from_millis(0), {
-                    let retired = self.retired.clone();
-                    move || {
-                        // dropping hides the old window
-                        retired.borrow_mut().clear();
-                    }
-                });
-            }
-            Err(e) => eprintln!("washi: could not open the editor of note {}: {e}", row.id),
-        }
+        self.editor.switch_to(row.id, &row.content);
+        (self.hooks.park)(old);
+        (self.hooks.desktop_visible)(row.id, false);
     }
 
     fn apply_lists(&self, ui: &NoteWindow) {
@@ -216,6 +284,32 @@ impl AllNotesView {
         }
         self.apply_lists(self.editor().ui());
         self.apply_selection(target_row);
+    }
+
+    /// The parked note `id`, if it is.
+    pub fn parked(&self, id: NoteId) -> Option<Parked> {
+        self.parked.borrow().get(&id).copied()
+    }
+
+    /// How many notes are parked on each side now (right, left), not counting `except`.
+    pub fn parked_counts(&self, except: NoteId) -> [usize; 2] {
+        let p = self.parked.borrow();
+        let n = |s: Side| p.iter().filter(|(id, v)| **id != except && v.side == Some(s)).count();
+        [n(Side::Right), n(Side::Left)]
+    }
+
+    pub fn set_parked(&self, id: NoteId, p: Parked) {
+        self.parked.borrow_mut().insert(id, p);
+    }
+
+    /// Every parked note, emptied (All Notes closes).
+    pub fn take_parked(&self) -> Vec<(NoteId, Parked)> {
+        self.parked.borrow_mut().drain().collect()
+    }
+
+    /// Put the caret in the editor, at the start of the note (a note just made here).
+    pub fn focus_editor(&self) {
+        self.editor.focus_start();
     }
 
     pub fn select_note(&self, id: NoteId) {
@@ -337,10 +431,13 @@ impl AllNotesView {
     }
 
     /// Put the text away, give the desktop its window back and drop the editor.
+    /// Close: the desktop window of the note shown comes back first, and the editor goes a moment
+    /// later, once that window has drawn (so nothing flashes).
     pub fn close(&self) {
         let editor = self.editor();
         editor.flush();
+        self.swap_timer.stop();
         (self.hooks.desktop_visible)(editor.id(), true);
-        editor.set_visible(false);
+        slint::Timer::single_shot(SWAP_OVERLAP, move || editor.set_visible(false));
     }
 }

@@ -68,6 +68,15 @@ impl General {
             }
         });
         let me = self.me.clone();
+        ui.on_set_park_beside(move |beside| {
+            if let Some(g) = me.upgrade() {
+                if let Err(e) = g.deps.db.set_park_notes_beside(beside) {
+                    g.deps.env.dialogs.error(&format!("Washi could not save that setting: {e}"));
+                }
+                g.refresh_toggles();
+            }
+        });
+        let me = self.me.clone();
         ui.on_open_install_dir(move || {
             if let Some(g) = me.upgrade() {
                 let dir = g.deps.env.shell.install_dir();
@@ -134,6 +143,7 @@ impl General {
         if let Some(ui) = self.ui.upgrade() {
             ui.set_start_with_windows(self.deps.env.startup.is_enabled());
             ui.set_new_notes_on_top(self.deps.db.new_notes_on_top());
+            ui.set_park_beside(self.deps.db.park_notes_beside());
         }
         self.refresh_uninstall();
     }

@@ -25,7 +25,7 @@ struct Slot {
 }
 
 pub struct NoteImages {
-    note: NoteId,
+    note: Cell<NoteId>,
     db: Rc<Db>,
     slots: RefCell<HashMap<i64, Slot>>,
     /// Freed (suspended): new pictures are known by size only until [`NoteImages::thaw`].
@@ -84,7 +84,7 @@ pub fn to_slint(px: &Rgba) -> slint::Image {
 
 impl NoteImages {
     pub fn new(note: NoteId, db: Rc<Db>) -> NoteImages {
-        NoteImages { note, db, slots: RefCell::new(HashMap::new()), frozen: Cell::new(false) }
+        NoteImages { note: Cell::new(note), db, slots: RefCell::new(HashMap::new()), frozen: Cell::new(false) }
     }
 
     fn decode_stored(&self, id: i64) -> Option<((u32, u32), Option<slint::Image>)> {
@@ -92,12 +92,18 @@ impl NoteImages {
             Ok(Some(s)) => s,
             Ok(None) => return None,
             Err(e) => {
-                eprintln!("washi: could not read image {id} of note {}: {e}", self.note);
+                eprintln!("washi: could not read image {id} of note {}: {e}", self.note.get());
                 return None;
             }
         };
         let pixels = images::decode(&stored.data).ok().map(|p| to_slint(&p));
         Some(((stored.width, stored.height), pixels))
+    }
+
+    /// Show another note's pictures from now on (the All Notes editor swaps notes in place). The
+    /// pictures of the old note are forgotten by the next [`NoteImages::load`].
+    pub fn retarget(&self, note: NoteId) {
+        self.note.set(note);
     }
 
     /// Learn the images a document refers to, decoding the ones not yet known, and forget the rest.

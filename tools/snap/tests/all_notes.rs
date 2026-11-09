@@ -62,6 +62,8 @@ fn setup_mockup_all_notes() -> Harness {
     h.invoke_dropdown_all_notes();
     assert!(h.is_all_notes_open());
     assert_eq!(h.all_notes_selected_id(), Some(endfield_id));
+    // the sidebar has slid in and the host's window has handed over
+    h.advance(Duration::from_millis(300));
 
     h
 }
@@ -268,6 +270,170 @@ fn the_editor_shows_the_selected_note_and_stays_in_sync_with_its_desktop_window(
     // and an edit on the desktop reaches the editor
     h.set_note_text(grocery_idx, "# Grocery run\noat milk");
     assert!(h.all_notes_editor_text().unwrap().contains("oat milk"));
+}
+
+#[test]
+fn switching_notes_keeps_the_same_window_and_the_text_settles_in_without_a_blank_frame() {
+    let mut h = setup_mockup_all_notes();
+    let meeting_id = h.all_notes_closed_items()[0].id as i64;
+    let windows_before = snap::platform::windows().len();
+    let editor_window = h.all_notes_window_geometry();
+    h.advance(Duration::from_millis(500));
+    assert_eq!(h.all_notes_editor_settle(), Some(1.0), "at rest before the switch");
+
+    h.invoke_all_notes_select_note(meeting_id);
+    assert_eq!(h.all_notes_editor_note_id(), Some(meeting_id));
+    assert!(h.all_notes_editor_text().unwrap().contains("Meeting ideas"));
+    // no window is made or dropped: the same editor shows the other note
+    h.advance(Duration::from_millis(1));
+    assert_eq!(snap::platform::windows().len(), windows_before, "no editor window is created per switch");
+    assert_eq!(h.all_notes_window_geometry(), editor_window);
+
+    // the text settles in over the switch duration instead of jumping
+    let start = h.all_notes_editor_settle().unwrap();
+    assert!(start < 0.2, "the settle starts near 0, got {start}");
+    h.advance(Duration::from_millis(80));
+    let mid = h.all_notes_editor_settle().unwrap();
+    assert!(mid > start && mid < 1.0, "mid-settle, got {mid}");
+    h.advance(Duration::from_millis(300));
+    assert_eq!(h.all_notes_editor_settle(), Some(1.0), "settled");
+}
+
+#[test]
+fn opening_slides_the_sidebar_in_and_hands_over_from_the_host_without_a_gap() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "# Solo
+body");
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    assert!(h.is_all_notes_open());
+    assert!(h.note_visible(0), "the host stays up until the editor has drawn");
+    h.advance(Duration::from_millis(1));
+    let start = h.all_notes_intro().unwrap();
+    assert!(start < 0.2, "the sidebar starts out of place: {start}");
+    h.advance(Duration::from_millis(100));
+    let mid = h.all_notes_intro().unwrap();
+    assert!(mid > start && mid < 1.0, "sliding: {mid}");
+    assert!(!h.note_visible(0), "then the host hides");
+    h.advance(Duration::from_millis(200));
+    assert_eq!(h.all_notes_intro(), Some(1.0));
+
+    // closing shows the host first
+    h.press_all_notes_escape();
+    assert!(h.note_visible(0));
+}
+
+#[test]
+fn picking_a_note_never_puts_a_caret_in_it_but_a_new_note_gets_one() {
+    let mut h = setup_mockup_all_notes();
+    h.render_all_notes_editor();
+    assert_eq!(h.all_notes_editor_focused_block(), Some(-1), "no caret when All Notes opens");
+    for item in h.all_notes_closed_items().iter().take(3) {
+        h.invoke_all_notes_select_note(item.id as i64);
+        h.render_all_notes_editor();
+        h.advance(Duration::from_millis(50));
+        assert_eq!(h.all_notes_editor_focused_block(), Some(-1), "no caret after picking {}", item.title);
+    }
+    // Esc still reaches All Notes with no field focused
+    h.invoke_all_notes_new_note();
+    h.render_all_notes_editor();
+    assert_eq!(h.all_notes_editor_focused_block(), Some(0), "a new note is ready for typing");
+    h.press_all_notes_escape();
+    assert!(!h.is_all_notes_open());
+}
+
+/// Two open notes, the second one far away; All Notes opened from the first (at 600, 100).
+fn two_open_notes() -> (Harness, i64, i64) {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_note_text(0, "# Host\nbody");
+    let g = h.note_geometry(0);
+    h.place_note(0, washi::storage::Geometry { x: 600, y: 100, ..g });
+    h.right_click(0, Some(&["New note"]));
+    h.set_note_text(1, "# Other\nbody");
+    h.place_note(1, washi::storage::Geometry { x: 1400, y: 500, ..g });
+    let (host, other) = (h.note_id(0), h.note_id(1));
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    h.advance(Duration::from_millis(300));
+    (h, host, other)
+}
+
+fn placed_behind(h: &Harness, id: i64) -> bool {
+    h.control.log.borrow().contains(&snap::WindowCommand::PlaceBehind(id))
+}
+
+#[test]
+fn a_note_switched_away_from_parks_beside_all_notes_and_goes_home_on_close() {
+    let (mut h, host, other) = two_open_notes();
+    let host_home = h.note_geometry(0);
+    let (ax, _, aw, _) = h.all_notes_window_geometry().unwrap();
+
+    // the host lies right under All Notes: switching away parks it on the right, below All Notes
+    h.invoke_all_notes_select_note(other);
+    assert!(h.note_visible(0), "the host's window is back");
+    assert!(placed_behind(&h, host), "without the focus, below All Notes");
+    let parked = h.note_geometry(0);
+    assert!(parked.x + 42 > ax + aw as i32 - 42, "its paper is right of All Notes: {parked:?}");
+
+    // the other note was far from All Notes: it stays where it is
+    let other_home = h.note_geometry(1);
+    h.invoke_all_notes_select_note(host);
+    assert_eq!(h.note_geometry(1), other_home);
+    assert!(placed_behind(&h, other));
+
+    // closing puts the moved host back where the paper is now (its own place)
+    h.press_all_notes_escape();
+    assert!(!h.is_all_notes_open());
+    assert_eq!(h.note_geometry(0), host_home);
+    assert_eq!(h.note_geometry(1), other_home);
+}
+
+#[test]
+fn with_to_the_back_a_note_stays_in_place_behind_all_notes() {
+    let (mut h, host, other) = two_open_notes();
+    let host_home = h.note_geometry(0);
+    h.toggle_dropdown(1);
+    h.invoke_dropdown_settings();
+    h.advance_frames(Duration::from_millis(600));
+    assert!(h.settings_park_beside(), "To the Side by default");
+    h.settings_set_park_beside(false);
+    assert!(!h.settings_park_beside());
+    h.settings_press_escape();
+    h.advance_frames(Duration::from_millis(600));
+
+    h.invoke_all_notes_select_note(other);
+    assert!(h.note_visible(0));
+    assert!(placed_behind(&h, host));
+    assert_eq!(h.note_geometry(0), host_home, "not moved");
+}
+
+#[test]
+fn parking_math_tries_right_then_left_then_gives_up() {
+    use washi::all_notes::{park_beside, Side};
+    use washi::platform::ScreenRect;
+    use washi::storage::Geometry;
+    let screen = [ScreenRect::new(0, 0, 1920, 1040)];
+    let note = Geometry { x: 600, y: 100, w: 447, h: 468 };
+    let editor = Geometry { x: 318, y: 100, w: 729, h: 468 };
+    let (right, side) = park_beside(note, editor, [0, 0], &screen).unwrap();
+    assert_eq!(side, Side::Right);
+    assert_eq!(right.x + 42, editor.x + editor.w as i32 - 42 + 12, "12 px right of All Notes' paper");
+    let (second, _) = park_beside(note, editor, [1, 0], &screen).unwrap();
+    assert_eq!((second.x - right.x, second.y - right.y), (30, 30), "cascades");
+
+    // All Notes at the right edge: the left side
+    let editor_r = Geometry { x: 1150, ..editor };
+    let (left, side) = park_beside(Geometry { x: 1432, ..note }, editor_r, [0, 0], &screen).unwrap();
+    assert_eq!(side, Side::Left);
+    assert!(left.x + left.w as i32 - 42 <= editor_r.x - 12);
+
+    // no room either side: behind
+    let narrow = [ScreenRect::new(0, 0, 900, 1040)];
+    assert_eq!(park_beside(Geometry { x: 300, ..note }, Geometry { x: 18, ..editor }, [0, 0], &narrow), None);
+    // a note clear of All Notes stays put
+    assert_eq!(park_beside(Geometry { x: 1400, ..note }, editor, [0, 0], &screen), None);
 }
 
 #[test]

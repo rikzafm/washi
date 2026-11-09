@@ -128,7 +128,6 @@ const MENU_STARTUP: u32 = 6;
 const MENU_EXPORT: u32 = 7;
 const MENU_PASTE: u32 = 8;
 const MENU_PASTE_IMAGE: u32 = 9;
-const MENU_FADE: u32 = 10;
 /// The menu of a picture: cut it, copy it, delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
 /// or show it `n` percent wide (`MENU_IMAGE_SIZE + n`).
 const MENU_IMAGE_CUT: u32 = 18;
@@ -242,7 +241,6 @@ impl App {
             self.0.env.clipboard.clone(),
         )
         .map_err(StartError::Ui)?;
-        note.set_fade_edge(self.0.db.fade_text_edge());
         if row.geometry.is_some() {
             // a note saved on a monitor that is gone comes back on the main screen
             note.keep_on_screen(&self.0.env.window_control.work_areas());
@@ -656,6 +654,10 @@ impl App {
         let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
         let new_id = self.create_new_note(from);
         self.refresh_all_notes(new_id);
+        // a new note is made to be typed in
+        if let Some(v) = self.all_notes() {
+            v.focus_editor();
+        }
     }
 
     /// Open or focus the currently selected note in the All Notes window.
@@ -773,6 +775,7 @@ impl App {
     pub fn dismiss_all_notes(&self) {
         let Some(v) = self.0.all_notes.borrow_mut().take() else { return };
         let (host, paper) = (v.host_note_id(), v.paper_geometry());
+        self.unpark_notes(&v);
         v.close();
         if self.with_note(host, |n| n.place(paper)).is_some() {
             let hwnd = self.with_note(host, |n| n.hwnd()).flatten();
@@ -839,7 +842,8 @@ impl App {
                 });
                 // pictures are pasted in the note's desktop window, not here
                 let paste_image: Rc<dyn Fn(NoteId) -> bool> = Rc::new(|_| false);
-                Note::open(id, content, db.clone(), clock.clone(), Some(geometry), false, on_event, paste_image, clipboard.clone())
+                let note = Note::open(id, content, db.clone(), clock.clone(), Some(geometry), false, on_event, paste_image, clipboard.clone())?;
+                Ok(note)
             })
         };
         let wire: Rc<dyn Fn(&crate::note_window::NoteWindow)> = {
@@ -892,10 +896,76 @@ impl App {
                 }
             })
         };
-        let hooks = crate::all_notes::Hooks { make_editor, wire, desktop_visible };
+        let park: Rc<dyn Fn(NoteId)> = {
+            let weak = weak.clone();
+            Rc::new(move |id| {
+                if let Some(inner) = weak.upgrade() {
+                    App(inner).park_note(id);
+                }
+            })
+        };
+        let hooks = crate::all_notes::Hooks { park, make_editor, wire, desktop_visible };
         match AllNotesView::open(initial_selected_id, host, &rows, now_ms, &self.0.env.window_control.work_areas(), hooks) {
             Ok(view) => *self.0.all_notes.borrow_mut() = Some(Rc::new(view)),
             Err(e) => eprintln!("washi: could not open All Notes: {e}"),
+        }
+    }
+
+    /// All Notes stopped standing in for note `id`: show its desktop window again, without the focus
+    /// and below All Notes, and (with "To the Side") beside All Notes if its place is under it. The
+    /// move is temporary: its place is not saved while parked (see `unpark_notes`).
+    fn park_note(&self, id: NoteId) {
+        let Some(v) = self.all_notes() else { return };
+        if self.settings().is_some_and(|s| s.host() == id) {
+            return; // Settings stands in for its host
+        }
+        let Some(now) = self.with_note(id, |n| n.geometry()) else { return };
+        let home = v.parked(id).map_or(now, |p| p.home);
+        let editor = v.editor_handle();
+        let scale = editor.ui().window().scale_factor();
+        let areas: Vec<ScreenRect> = self
+            .0
+            .env
+            .window_control
+            .work_areas()
+            .iter()
+            .map(|a| {
+                let l = |p: i32| (p as f32 / scale).round() as i32;
+                ScreenRect::new(l(a.x), l(a.y), l(a.w), l(a.h))
+            })
+            .collect();
+        let beside = if self.0.db.park_notes_beside() {
+            crate::all_notes::park_beside(home, editor.geometry(), v.parked_counts(id), &areas)
+        } else {
+            None
+        };
+        let (at, side) = beside.map_or((home, None), |(g, s)| (g, Some(s)));
+        self.with_note(id, |n| {
+            n.set_saves_geometry(false);
+            n.ui().window().set_position(slint::LogicalPosition::new(at.x as f32, at.y as f32));
+            n.set_visible(true);
+        });
+        v.set_parked(id, crate::all_notes::Parked { home, at, side });
+        let hwnd = self.with_note(id, |n| n.hwnd()).flatten();
+        self.0.env.window_control.place_behind(id, hwnd, v.hwnd());
+    }
+
+    /// All Notes closes: parked notes save their place again. One the user dragged keeps where they
+    /// put it; the rest go back home. (The host is placed by the caller.)
+    fn unpark_notes(&self, v: &AllNotesView) {
+        for (id, p) in v.take_parked() {
+            self.with_note(id, |n| {
+                n.set_saves_geometry(true);
+                let now = n.geometry();
+                if id == v.host_note_id() {
+                    return;
+                }
+                if (now.x, now.y) != (p.at.x, p.at.y) {
+                    n.geometry_changed(); // dragged while parked: that is its place now
+                } else if p.at != p.home {
+                    n.place(p.home);
+                }
+            });
         }
     }
 
@@ -1793,7 +1863,6 @@ impl App {
             item(MENU_DELETE, "Delete", true, vec![]),
             toggle(MENU_TOP, "Always on top", pinned),
             toggle(MENU_STARTUP, "Start with Windows", self.0.env.startup.is_enabled()),
-            toggle(MENU_FADE, "Fade text edge", self.0.db.fade_text_edge()),
             item(MENU_EXPORT, "Export as Markdown\u{2026}", true, vec![]),
         ]);
         let picture = image;
@@ -1825,13 +1894,6 @@ impl App {
             Some(MENU_DELETE) => self.delete_note(id),
             Some(MENU_TOP) => self.set_always_on_top(id, !pinned),
             Some(MENU_EXPORT) => self.export_note(id),
-            Some(MENU_FADE) => {
-                let on = !self.0.db.fade_text_edge();
-                let _ = self.0.db.set_fade_text_edge(on);
-                for n in self.0.notes.borrow().iter() {
-                    n.set_fade_edge(on);
-                }
-            }
             Some(MENU_STARTUP) => {
                 let startup = &self.0.env.startup;
                 startup.set_enabled(!startup.is_enabled());

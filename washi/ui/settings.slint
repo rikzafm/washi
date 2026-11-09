@@ -212,8 +212,8 @@ export component SettingsWindow inherits Window {
     in property <bool> pinned: false;
     always-on-top: root.pinned;
 
-    /// The tab lit in the Sidebar (changes on click) and the one drawn on the Paper (changes at the
-    /// midpoint of the cross-fade, when the content is invisible).
+    /// The tab lit in the Sidebar and the one drawn on the Paper (both change on click; the new
+    /// content then settles in, see `content-dy`).
     in property <int> selected-tab: 0;
     in property <int> shown-tab: 0;
     /// How much of the Sidebar's strip is out (0 to `SettingsMetrics.strip`): the window grows left
@@ -221,6 +221,17 @@ export component SettingsWindow inherits Window {
     in property <length> strip: SettingsMetrics.strip;
     /// The Settings content (not the Paper or Sidebar): faded in while the note turns into the page.
     in property <float> content-opacity: 1;
+    /// How far below its place the content is drawn (it settles up into place after a tab switch).
+    in property <float> content-dy: 0;
+    /// The page (Sidebar strip, margin and Paper) inside the window, window px. The window is a fixed
+    /// canvas for the length of a transition (resizing a native window every frame is choppy), and the
+    /// page moves and grows inside it. Negative sizes: the whole window.
+    in property <length> page-x: 0px;
+    in property <length> page-y: 0px;
+    in property <length> page-w: -1px;
+    in property <length> page-h: -1px;
+    property <length> body-w: root.page-w >= 0px ? root.page-w : root.width;
+    property <length> body-h: root.page-h >= 0px ? root.page-h : root.height;
 
     /// The Shortcuts tab's rows.
     in property <[ShortcutRow]> shortcuts;
@@ -235,6 +246,9 @@ export component SettingsWindow inherits Window {
     // General tab (see settings-general.slint)
     in property <bool> start-with-windows;
     in property <bool> new-notes-on-top;
+    /// Notes left in All Notes go beside it (true) or behind it (false).
+    in property <bool> park-beside: true;
+    callback set-park-beside(bool);
     in property <string> install-dir;
     in property <string> data-dir;
     in property <string> stat-memory;
@@ -265,10 +279,10 @@ export component SettingsWindow inherits Window {
     /// 1 the preview's, 2 a chip, 3 the dotted rule.
     in property <[TapeShape]> preview-tapes;
     public pure function style-hit-x(id: int) -> length {
-        return root.strip + style.hit-x(id);
+        return root.page-x + root.strip + style.hit-x(id);
     }
     public pure function style-hit-y(id: int) -> length {
-        return style.hit-y(id);
+        return root.page-y + style.hit-y(id);
     }
 
     /// Where each tab's content ends, measured from the laid-out rows (paper coordinates), and the
@@ -283,14 +297,14 @@ export component SettingsWindow inherits Window {
     changed wanted-height => { root.paper-height-changed(); }
 
     property <length> margin: PaperTheme.margin;
-    property <length> note-w: root.width - root.strip;
+    property <length> note-w: root.body-w - root.strip;
     property <length> paper-w: root.note-w - 2 * root.margin;
-    property <length> paper-h: root.height - 2 * root.margin;
+    property <length> paper-h: root.body-h - 2 * root.margin;
     // The Paper's tilted frame in the note area's coordinates.
     property <PaperFrame> pf: {
         f: {
             w: root.note-w / 1px,
-            h: root.height / 1px,
+            h: root.body-h / 1px,
             cx: (root.margin + root.paper-w / 2) / 1px,
             cy: (root.margin + root.paper-h / 2) / 1px,
             cs: Math.cos(PaperTheme.paper-tilt),
@@ -317,10 +331,10 @@ export component SettingsWindow inherits Window {
     }
 
     SettingsSidebar {
-        x: root.strip - SettingsMetrics.strip;
-        y: 0px;
+        x: root.page-x + root.strip - SettingsMetrics.strip;
+        y: root.page-y;
         width: SettingsMetrics.strip;
-        height: root.height;
+        height: root.body-h;
         selected-tab: root.selected-tab;
         tab-clicked(i) => { root.tab-clicked(i); }
         close-clicked => { root.close-clicked(); }
@@ -329,10 +343,10 @@ export component SettingsWindow inherits Window {
 
     // The note area: shadow, Paper and tapes, right of the strip.
     Rectangle {
-        x: root.strip;
-        y: 0px;
+        x: root.page-x + root.strip;
+        y: root.page-y;
         width: root.note-w;
-        height: root.height;
+        height: root.body-h;
 
         // The mockup's `0 18px 26px -10px` and `0 2px 5px` shadows.
         PShadow {
@@ -360,9 +374,9 @@ export component SettingsWindow inherits Window {
 
         Paper {
             width: root.note-w;
-            height: root.height;
+            height: root.body-h;
             cx: root.note-w / 2;
-            cy: root.height / 2;
+            cy: root.body-h / 2;
             paper-w: root.paper-w;
             paper-h: root.paper-h;
             shadow: false;
@@ -372,7 +386,7 @@ export component SettingsWindow inherits Window {
         PText {
             pf: root.pf;
             a: 36.0;
-            b: 38.0;
+            b: 38.0 + root.content-dy;
             width: 448px;
             height: 52.8px;
             text: ["General", "Font & Style", "Shortcuts", "Privacy"][root.shown-tab];
@@ -387,9 +401,11 @@ export component SettingsWindow inherits Window {
             opacity: root.content-opacity;
             pf: root.pf;
             dots: root.preview-tapes[3];
-            top: SettingsMetrics.content-top;
+            top: SettingsMetrics.content-top + root.content-dy;
             start-with-windows: root.start-with-windows;
             new-notes-on-top: root.new-notes-on-top;
+            park-beside: root.park-beside;
+            set-park-beside(b) => { root.set-park-beside(b); }
             install-dir: root.install-dir;
             data-dir: root.data-dir;
             stat-memory: root.stat-memory;
@@ -413,7 +429,7 @@ export component SettingsWindow inherits Window {
             visible: root.shown-tab == 1;
             opacity: root.content-opacity;
             pf: root.pf;
-            top: SettingsMetrics.content-top;
+            top: SettingsMetrics.content-top + root.content-dy;
             tapes: root.preview-tapes;
         }
 
@@ -422,7 +438,7 @@ export component SettingsWindow inherits Window {
             opacity: root.content-opacity;
             pf: root.pf;
             dots: root.preview-tapes[3];
-            top: SettingsMetrics.content-top;
+            top: SettingsMetrics.content-top + root.content-dy;
             rows: root.shortcuts;
         }
 
@@ -431,7 +447,7 @@ export component SettingsWindow inherits Window {
             opacity: root.content-opacity;
             pf: root.pf;
             dots: root.preview-tapes[3];
-            top: SettingsMetrics.content-top;
+            top: SettingsMetrics.content-top + root.content-dy;
         }
 
         // The Paper's two tapes follow the chosen Tape color (the mockup's 113 by 33 strips, pinned
@@ -443,6 +459,14 @@ export component SettingsWindow inherits Window {
             shape: root.preview-tapes[0];
             base: TapePalette.a-light[style.tape];
             stripe: TapePalette.a-deep[style.tape];
+            // Pressing the tape drags the window, as a note's tapes do.
+            TouchArea {
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                        root.start-move();
+                    }
+                }
+            }
         }
 
         VTape {
@@ -452,6 +476,14 @@ export component SettingsWindow inherits Window {
             shape: root.preview-tapes[0];
             base: TapePalette.b-light[style.tape];
             stripe: TapePalette.b-deep[style.tape];
+            // Pressing the tape drags the window, as a note's tapes do.
+            TouchArea {
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                        root.start-move();
+                    }
+                }
+            }
         }
     }
 }

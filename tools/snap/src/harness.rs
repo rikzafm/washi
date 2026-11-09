@@ -524,7 +524,7 @@ impl Harness {
                         bottom = (bottom + dy).max(top + min.height as i32);
                     }
                 }
-                WindowCommand::BringToFront(_) => return None,
+                WindowCommand::BringToFront(_) | WindowCommand::PlaceBehind(_) => return None,
             }
             w.os_place(
                 slint::PhysicalPosition::new(left, top),
@@ -997,12 +997,30 @@ impl Harness {
         self.app.as_ref().is_some_and(|a| a.is_settings_open())
     }
 
-    /// The Settings window's place and size, logical px (physical at scale 1).
+    /// The Settings page's place and size on screen (the Sidebar strip, margin and Paper), logical
+    /// px. At rest it is the window; mid-transition the window is a larger transparent canvas.
     pub fn settings_window_geometry(&self) -> Option<(i32, i32, u32, u32)> {
+        let s = self.app.as_ref()?.settings()?;
+        let g = s.page_geometry();
+        Some((g.x, g.y, g.w, g.h))
+    }
+
+    /// The Settings native window itself, logical px (physical at scale 1).
+    pub fn settings_native_window_geometry(&self) -> Option<(i32, i32, u32, u32)> {
         let s = self.app.as_ref()?.settings()?;
         let w = s.ui().window();
         let (p, sz) = (w.position(), w.size());
         Some((p.x, p.y, sz.width, sz.height))
+    }
+
+    /// How many times the Settings view has moved or resized its native window.
+    pub fn settings_window_resizes(&self) -> u32 {
+        self.app.as_ref().and_then(|a| a.settings()).map_or(0, |s| s.window_resizes())
+    }
+
+    /// How far below its place the Settings content is drawn (it settles up after a tab switch).
+    pub fn settings_content_dy(&self) -> f32 {
+        self.app.as_ref().and_then(|a| a.settings()).map_or(0.0, |s| s.ui().get_content_dy())
     }
 
     /// Whether the Settings page's frame timer is running (it stops at rest).
@@ -1040,7 +1058,7 @@ impl Harness {
         self.app.as_ref().and_then(|a| a.settings()).map_or(-1, |s| s.ui().get_selected_tab())
     }
 
-    /// The tab drawn on the Paper (changes at the cross-fade's midpoint).
+    /// The tab drawn on the Paper (changes on click, with the Sidebar).
     pub fn settings_shown_tab(&self) -> i32 {
         self.app.as_ref().and_then(|a| a.settings()).map_or(-1, |s| s.ui().get_shown_tab())
     }
@@ -1106,6 +1124,50 @@ impl Harness {
 
     pub fn all_notes_editor_text(&self) -> Option<String> {
         self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_text())
+    }
+
+    /// The block whose field has the focus in the All Notes editor (-1 none).
+    pub fn all_notes_editor_focused_block(&self) -> Option<i32> {
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_handle().ui().get_text_focused_block())
+    }
+
+    /// Draw the All Notes editor (that is when its text fields are made, and could take the focus).
+    pub fn render_all_notes_editor(&mut self) {
+        let _ = self.render_all_notes();
+        self.settle();
+    }
+
+    /// Press the left button on the Settings window at a window position.
+    pub fn settings_press_at(&mut self, x: f32, y: f32) {
+        let position = slint::LogicalPosition::new(x, y);
+        if let Some(app) = &self.app {
+            let button = slint::platform::PointerEventButton::Left;
+            app.dispatch_settings_event(WindowEvent::PointerMoved { position });
+            app.dispatch_settings_event(WindowEvent::PointerPressed { position, button });
+            app.dispatch_settings_event(WindowEvent::PointerReleased { position, button });
+        }
+        self.settle();
+    }
+
+    /// Choose "To the Side" (true) or "To the Back" (false) in Settings > General.
+    pub fn settings_set_park_beside(&mut self, beside: bool) {
+        self.settings_ui().invoke_set_park_beside(beside);
+        self.settle();
+    }
+
+    /// What Settings > General shows for notes left in All Notes (true: To the Side).
+    pub fn settings_park_beside(&self) -> bool {
+        self.settings_ui().get_park_beside()
+    }
+
+    /// How far the All Notes sidebar has slid in (1 at rest).
+    pub fn all_notes_intro(&self) -> Option<f32> {
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_handle().ui().get_all_notes_intro())
+    }
+
+    /// How far the editor's text has settled after the last note switch (1 at rest).
+    pub fn all_notes_editor_settle(&self) -> Option<f32> {
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_handle().ui().get_switch_settle())
     }
 
     /// Type into the All Notes editor (replace its text without typing it).

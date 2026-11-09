@@ -228,6 +228,8 @@ pub enum WindowCommand {
     Move(NoteId),
     Resize(NoteId, ResizeEdge),
     BringToFront(NoteId),
+    /// Slotted below the All Notes window, without the focus.
+    PlaceBehind(NoteId),
 }
 
 /// Records native drag requests and reports a screen layout the test can change.
@@ -264,6 +266,9 @@ impl WindowControl for FakeWindowControl {
     }
     fn bring_to_front(&self, note: NoteId, _hwnd: Option<isize>) {
         self.log.borrow_mut().push(WindowCommand::BringToFront(note));
+    }
+    fn place_behind(&self, note: NoteId, _hwnd: Option<isize>, _above: Option<isize>) {
+        self.log.borrow_mut().push(WindowCommand::PlaceBehind(note));
     }
     fn work_areas(&self) -> Vec<ScreenRect> {
         self.areas.borrow().clone()

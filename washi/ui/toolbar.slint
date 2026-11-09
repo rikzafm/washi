@@ -14,8 +14,10 @@ import "../../fonts/NotoSerif-Regular.ttf";
 export global ToolbarMetrics {
     /// Height of the band at the bottom of the paper. Always reserved, shown or not.
     out property <length> band-height: 38px;
-    /// Fade in and out.
-    out property <duration> fade: 120ms;
+    /// Fade in (quick, so the toolbar answers the pointer at once) and out (gentler, so it does not
+    /// blink away when the pointer brushes past the edge).
+    out property <duration> fade: 100ms;
+    out property <duration> fade-out: 160ms;
     out property <length> button-size: 32px;
     out property <length> button-radius: 8.6px;
     /// Where the first button's left edge and the top of every button sit, in the paper frame.
@@ -507,12 +509,16 @@ export component MenuButton inherits Rectangle {
     }
 
     // Three horizontal dots:
-    for offset in [-5.0, 0.0, 5.0]: Dot {
+    // (Path-drawn, not Rectangles: a Rectangle's position snaps to whole pixels, which nudged
+    // one dot off the row at some tilts.)
+    for offset in [-5.0, 0.0, 5.0]: TRect {
         f: root.f;
-        du: root.du + offset;
-        dv: root.dv;
-        d: 3px;
-        background: root.highlighted ? root.ink : root.muted;
+        u0: root.du + offset - 1.5;
+        v0: root.dv - 1.5;
+        w: 3.0;
+        h: 3.0;
+        r: 1.5;
+        fill: root.highlighted ? root.ink : root.muted;
     }
 
     hit := TouchArea {

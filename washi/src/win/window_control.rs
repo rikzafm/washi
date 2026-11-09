@@ -116,6 +116,16 @@ impl WindowControl for Win32WindowControl {
         }
     }
 
+    fn place_behind(&self, _note: NoteId, hwnd: Option<isize>, above: Option<isize>) {
+        let (Some(h), Some(above)) = (hwnd, above) else { return };
+        // SAFETY: plain window calls; a stale handle makes them fail harmlessly.
+        unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
+            SetWindowPos(h as HWND, above as HWND, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetForegroundWindow(above as HWND);
+        }
+    }
+
     fn fine_timer(&self, on: bool) {
         use windows_sys::Win32::Media::{timeBeginPeriod, timeEndPeriod};
         // SAFETY: plain calls; paired by the caller (SettingsView).
