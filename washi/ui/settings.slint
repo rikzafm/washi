@@ -155,12 +155,17 @@ export component SettingsWindow inherits Window {
     always-on-top: root.pinned;
 
     in property <int> selected-tab: 0;
+    /// How much of the Sidebar's strip is out (0 to `SettingsMetrics.strip`): the window grows left
+    /// by this much and the Sidebar slides out from behind the Paper's left edge.
+    in property <length> strip: SettingsMetrics.strip;
+    /// The Settings content (not the Paper or Sidebar): faded in while the note turns into the page.
+    in property <float> content-opacity: 1;
 
     callback close-clicked();
     callback start-move();
 
     property <length> margin: PaperTheme.margin;
-    property <length> note-w: root.width - SettingsMetrics.strip;
+    property <length> note-w: root.width - root.strip;
     property <length> paper-w: root.note-w - 2 * root.margin;
     property <length> paper-h: root.height - 2 * root.margin;
     // The Paper's tilted frame in the note area's coordinates.
@@ -185,7 +190,7 @@ export component SettingsWindow inherits Window {
     }
 
     SettingsSidebar {
-        x: 0px;
+        x: root.strip - SettingsMetrics.strip;
         y: 0px;
         width: SettingsMetrics.strip;
         height: root.height;
@@ -196,7 +201,7 @@ export component SettingsWindow inherits Window {
 
     // The note area: shadow, Paper and tapes, right of the strip.
     Rectangle {
-        x: SettingsMetrics.strip;
+        x: root.strip;
         y: 0px;
         width: root.note-w;
         height: root.height;
@@ -215,6 +220,7 @@ export component SettingsWindow inherits Window {
             x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
             y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px) * 1px;
             text: "General";
+            opacity: root.content-opacity;
             font-family: "Shadows Into Light";
             font-size: 48px;
             color: #2B2F36;
@@ -224,6 +230,7 @@ export component SettingsWindow inherits Window {
             x: Tilt.x(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
             y: Tilt.y(root.paper-frame, -root.paper-w / 2px + SettingsMetrics.pad-x / 1px, -root.paper-h / 2px + SettingsMetrics.pad-top / 1px + 76.0 + i * 56.0) * 1px;
             text: label;
+            opacity: root.content-opacity;
             font-family: "Shadows Into Light";
             font-size: 26px;
             color: #2B2F36;

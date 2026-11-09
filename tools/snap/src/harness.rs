@@ -226,6 +226,18 @@ impl Harness {
         platform::advance(by);
     }
 
+    /// Like `advance`, but in steps of at most one frame (16 ms), so a repeating frame timer (the
+    /// Settings transition) ticks as often as it would in real time.
+    pub fn advance_frames(&mut self, by: Duration) {
+        let frame = Duration::from_millis(16);
+        let mut left = by;
+        while left > frame {
+            platform::advance(frame);
+            left -= frame;
+        }
+        platform::advance(left);
+    }
+
     pub fn close_note(&mut self, note: usize) {
         self.last_ids = self.app().note_ids();
         let id = self.last_ids[note];
@@ -985,6 +997,28 @@ impl Harness {
         let w = s.ui().window();
         let (p, sz) = (w.position(), w.size());
         Some((p.x, p.y, sz.width, sz.height))
+    }
+
+    /// Whether the Settings page's frame timer is running (it stops at rest).
+    pub fn settings_ticking(&self) -> bool {
+        self.app.as_ref().and_then(|a| a.settings()).is_some_and(|s| s.is_ticking())
+    }
+
+    /// Whether the Settings window is on screen.
+    pub fn settings_shown(&self) -> bool {
+        self.app.as_ref().and_then(|a| a.settings()).is_some_and(|s| s.is_shown())
+    }
+
+    /// How visible a note's own content is (1 at rest; fades while it turns into Settings).
+    pub fn note_content_opacity(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.ui().get_content_opacity()).unwrap()
+    }
+
+    /// Drag the Settings window to `(x, y)` (as the user moving the page would).
+    pub fn move_settings_window(&mut self, x: i32, y: i32) {
+        if let Some(s) = self.app.as_ref().and_then(|a| a.settings()) {
+            s.ui().window().set_position(slint::LogicalPosition::new(x as f32, y as f32));
+        }
     }
 
     /// Press the Sidebar's X.

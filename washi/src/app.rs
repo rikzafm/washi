@@ -476,8 +476,10 @@ impl App {
     /// (from any note) brings the existing page to the front.
     pub fn open_settings(&self, host: NoteId) {
         if let Some(s) = self.settings() {
-            let _ = s.ui().show();
-            self.0.env.window_control.bring_to_front(0, s.hwnd());
+            // (still fading the host's text out: nothing to bring forward yet)
+            if s.is_shown() {
+                self.0.env.window_control.bring_to_front(0, s.hwnd());
+            }
             return;
         }
         let Some((geometry, pinned)) = self.with_note(host, |n| {
@@ -507,6 +509,22 @@ impl App {
                         a.0.env.window_control.bring_to_front(id, hwnd);
                     }
                 }
+            }),
+            host_content: Rc::new({
+                let app = app.clone();
+                move |id, o| {
+                    if let Some(a) = app() {
+                        a.with_note(id, |n| n.set_content_opacity(o));
+                    }
+                }
+            }),
+            now: Rc::new({
+                let clock = self.0.env.clock.clone();
+                move || clock.monotonic()
+            }),
+            set_bounds: Rc::new({
+                let app = app.clone();
+                move |hwnd, x, y, w, h| app().is_some_and(|a| a.0.env.window_control.set_bounds(hwnd, x, y, w, h))
             }),
             closed: Rc::new({
                 let app = app.clone();
