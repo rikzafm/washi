@@ -1825,7 +1825,9 @@ impl Note {
     /// geometry debounce.
     pub fn geometry_changed(&self) {
         // a move to a monitor with another DPI resets the window's scale to the monitor's
-        self.scale.resync(self.ui.window(), false);
+        if self.scale.resync(self.ui.window(), false) {
+            self.doc.relayout(&self.ui);
+        }
         if !self.saves_geometry.get() {
             return;
         }

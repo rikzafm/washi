@@ -164,6 +164,12 @@ impl Harness {
         self.app().viewer_scale_factors()
     }
 
+    /// The pitch scale used for text layout on note `n`.
+    pub fn note_pitch_scale(&self, n: usize) -> f32 {
+        let id = self.note_id(n);
+        self.app().with_note(id, |n| n.ui().get_pitch_scale()).unwrap()
+    }
+
     fn os_move_to_monitor(window: &slint::Window, scale: f32) {
         let adapter = crate::platform::windows()
             .into_iter()

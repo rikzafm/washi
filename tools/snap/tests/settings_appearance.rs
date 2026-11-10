@@ -442,8 +442,19 @@ fn a_note_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dpi() {
     let (w, hh) = h.note_screen_size(0);
     h.move_note_to_monitor(0, 1.5);
     assert!(close_to(h.note_drawing_scale(0), 1.5 * 0.75, 1e-4), "drawn at {}", h.note_drawing_scale(0));
+    assert!(close_to(h.note_pitch_scale(0), 1.5 * 0.75, 1e-4), "pitch scale at {}", h.note_pitch_scale(0));
     let (mw, mh) = h.note_screen_size(0);
     assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0), "{mw}x{mh}");
+}
+
+#[test]
+fn a_note_at_large_updates_pitch_scale_after_moving_to_a_monitor_with_another_dpi() {
+    let mut h = started();
+    assert_eq!(h.note_drawing_scale(0), 1.0);
+    assert_eq!(h.note_pitch_scale(0), 1.0);
+    h.move_note_to_monitor(0, 1.5);
+    assert!(close_to(h.note_drawing_scale(0), 1.5, 1e-4), "drawn at {}", h.note_drawing_scale(0));
+    assert!(close_to(h.note_pitch_scale(0), 1.5, 1e-4), "pitch scale at {}", h.note_pitch_scale(0));
 }
 
 #[test]
