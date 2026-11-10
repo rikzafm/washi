@@ -251,6 +251,22 @@ impl Db {
         self.set_meta(&format!("sidebar_anchor.{}", sidebar.key()), layout.anchor.key())
     }
 
+    /// How tall the Settings Paper may grow (Settings › Appearance). Tallest tab when never set or
+    /// when the stored value is not one of the choices.
+    pub fn settings_height(&self) -> SettingsHeight {
+        match self.meta("settings_height").as_deref().map(str::trim) {
+            Some("screen") => SettingsHeight::ScreenLimit,
+            _ => SettingsHeight::TallestTab,
+        }
+    }
+
+    pub fn set_settings_height(&self, h: SettingsHeight) -> Result<(), DbError> {
+        self.set_meta("settings_height", match h {
+            SettingsHeight::TallestTab => "tallest",
+            SettingsHeight::ScreenLimit => "screen",
+        })
+    }
+
     /// Apply the new-note defaults to a note just created and return whether it starts Always on
     /// top. The preference write is best effort: a failure is logged and never stops a note opening.
     pub fn apply_new_note_defaults(&self, id: NoteId) -> bool {
@@ -484,6 +500,16 @@ pub struct SidebarLayout {
     pub anchor: SidebarAnchor,
 }
 
+/// The Settings height choices: the cap on the Settings Paper's height. The screen's work area
+/// limits it either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsHeight {
+    /// No taller than the tallest built-in Tab.
+    TallestTab,
+    /// As tall as the screen allows.
+    ScreenLimit,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentNote {
     pub id: NoteId,
@@ -564,6 +590,22 @@ mod tests {
         db.set_meta("sidebar_height.notes", "tall").unwrap();
         db.set_meta("sidebar_anchor.notes", "").unwrap();
         assert_eq!(db.sidebar_layout(Sidebar::Notes), SidebarLayout::default());
+    }
+
+    #[test]
+    fn settings_height_is_tallest_tab_until_set_survives_reopening_and_falls_back_on_nonsense() {
+        let (dir, db) = test_db();
+        assert_eq!(db.settings_height(), SettingsHeight::TallestTab, "never set");
+        db.set_settings_height(SettingsHeight::ScreenLimit).unwrap();
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert_eq!(db.settings_height(), SettingsHeight::ScreenLimit, "kept across a restart");
+        db.set_settings_height(SettingsHeight::TallestTab).unwrap();
+        assert_eq!(db.settings_height(), SettingsHeight::TallestTab);
+        for junk in ["", "tall", "1", "SCREEN"] {
+            db.set_meta("settings_height", junk).unwrap();
+            assert_eq!(db.settings_height(), SettingsHeight::TallestTab, "{junk:?} reads as Tallest tab");
+        }
     }
 
     #[test]

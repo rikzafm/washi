@@ -26,7 +26,7 @@ pub mod tape;
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
 use crate::storage::Geometry;
-use anim::{contains, fit_on_screen, grow_pose, logical_areas, paper_of_note, tab_settle, union, window_bounds, lerp_rect, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK};
+use anim::{contains, fit_on_screen, screen_limit, grow_pose, logical_areas, paper_of_note, tab_settle, union, window_bounds, lerp_rect, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK};
 use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -96,6 +96,8 @@ pub struct SettingsView {
     resizes: Cell<u32>,
     phase: RefCell<Phase>,
     tick: slint::Timer,
+    /// Hides the scrollbar a moment after the last scroll.
+    scroll_hold: slint::Timer,
     /// Whether the fine (1 ms) system timer resolution is held for the frame timer.
     fine_timer: Cell<bool>,
     me: Weak<SettingsView>,
@@ -141,6 +143,7 @@ impl SettingsView {
                 closing: false,
             }),
             tick: slint::Timer::default(),
+            scroll_hold: slint::Timer::default(),
             fine_timer: Cell::new(false),
             me: me.clone(),
             morph_from: Cell::new(paper_of_note(host_window)),
@@ -170,8 +173,9 @@ impl SettingsView {
     /// as keeping the window (with the Sidebar's strip out) on screen needs.
     fn open_paper(&self) -> RectF {
         let note = paper_of_note(self.host_window);
-        let want = RectF { x: note.x, y: note.y, w: PAPER_W, h: self.ui.invoke_paper_height_for(self.tab.get()).max(PAPER_MIN_H) };
-        let areas = logical_areas(&(self.hooks.work_areas)(), self.ui.window().scale_factor());
+        let areas = self.areas();
+        self.limit_to_screen(note, &areas);
+        let want = RectF { x: note.x, y: note.y, w: PAPER_W, h: self.ui.invoke_fitted_height_for(self.tab.get()).max(PAPER_MIN_H) };
         fit_on_screen(want, SIDEBAR_STRIP, &areas)
     }
 
@@ -287,6 +291,18 @@ impl SettingsView {
                 }
             });
         }
+        {
+            let me = me.clone();
+            self.ui.on_scroll_activity(move || {
+                let Some(v) = me.upgrade() else { return };
+                let ui = v.ui.as_weak();
+                v.scroll_hold.start(slint::TimerMode::SingleShot, crate::note_window::SCROLLBAR_HOLD, move || {
+                    if let Some(ui) = ui.upgrade() {
+                        ui.set_content_scrolling(false);
+                    }
+                });
+            });
+        }
         self.ui.on_tab_clicked(move |to| {
             if let Some(v) = me.upgrade() {
                 v.select_tab(to);
@@ -302,17 +318,24 @@ impl SettingsView {
             return;
         }
         let now = self.actual_paper();
-        let h = self.ui.invoke_paper_height_for(self.tab.get()).max(PAPER_MIN_H);
+        let areas = self.areas();
+        self.limit_to_screen(now, &areas);
+        let h = self.ui.invoke_fitted_height_for(self.tab.get()).max(PAPER_MIN_H);
         if (h - now.h).abs() < 0.5 {
             return;
         }
-        let fit = fit_on_screen(RectF { h, ..now }, SIDEBAR_STRIP, &self.areas());
+        let fit = fit_on_screen(RectF { h, ..now }, SIDEBAR_STRIP, &areas);
         self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, content: 1.0 });
         self.fit();
     }
 
     fn areas(&self) -> Vec<RectF> {
         logical_areas(&(self.hooks.work_areas)(), self.ui.window().scale_factor())
+    }
+
+    /// Tell the page how tall the screen under `paper` lets it grow (part of the Settings height cap).
+    fn limit_to_screen(&self, paper: RectF, areas: &[RectF]) {
+        self.ui.set_screen_limit(screen_limit(paper, areas).unwrap_or(100_000.0));
     }
 
     /// A Sidebar tab was pressed: light it up and show its content at once, then tween the Paper's
@@ -325,11 +348,15 @@ impl SettingsView {
         let now = self.now();
         self.ui.set_selected_tab(to);
         self.ui.set_shown_tab(to);
+        // every Tab starts at its top
+        self.ui.set_content_scroll(0.0);
         let resting = matches!(*self.phase.borrow(), Phase::Open);
         // At rest the Paper is where the user left it; mid-tween it is where the last frame put it.
         let from = if resting { self.actual_paper() } else { self.paper.get() };
-        let want = RectF { h: self.ui.invoke_paper_height_for(to).max(PAPER_MIN_H), ..from };
-        let target = fit_on_screen(want, SIDEBAR_STRIP, &self.areas());
+        let areas = self.areas();
+        self.limit_to_screen(from, &areas);
+        let want = RectF { h: self.ui.invoke_fitted_height_for(to).max(PAPER_MIN_H), ..from };
+        let target = fit_on_screen(want, SIDEBAR_STRIP, &areas);
         self.tab_from.set(from);
         self.tab_to.set(target);
         self.tab.set(to);

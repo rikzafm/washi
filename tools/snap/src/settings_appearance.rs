@@ -32,8 +32,16 @@ impl Harness {
     }
 
     /// Click the Appearance control `id` (see `hit-x` in appearance-tab.slint).
+    /// A control scrolled out of the Paper is first wheeled into view, as a user would.
     pub fn settings_appearance_click(&mut self, id: i32) {
         let ui = self.appearance_ui();
+        let y = ui.invoke_appearance_hit_y(id);
+        let (top, bottom) = (ui.get_view_top(), ui.get_view_bottom());
+        if y > bottom - 30.0 {
+            self.settings_wheel(-(y - (bottom - 80.0)));
+        } else if y < top + 30.0 {
+            self.settings_wheel(top + 80.0 - y);
+        }
         let position = slint::LogicalPosition::new(ui.invoke_appearance_hit_x(id), ui.invoke_appearance_hit_y(id));
         let button = slint::platform::PointerEventButton::Left;
         self.app().dispatch_settings_event(WindowEvent::PointerMoved { position });

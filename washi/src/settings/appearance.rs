@@ -5,7 +5,7 @@
 //! never blocks the UI.
 
 use crate::note_window::SettingsWindow;
-use crate::storage::db::{Sidebar, SidebarAnchor, SidebarHeight, SidebarLayout};
+use crate::storage::db::{SettingsHeight, Sidebar, SidebarAnchor, SidebarHeight, SidebarLayout};
 use crate::storage::{Db, DbError};
 use slint::ComponentHandle;
 use std::rc::Rc;
@@ -26,6 +26,9 @@ pub fn height_index(h: SidebarHeight) -> i32 {
 pub fn anchor_index(a: SidebarAnchor) -> i32 {
     SidebarAnchor::ALL.iter().position(|&x| x == a).unwrap_or(1) as i32
 }
+
+/// The Settings height dropdown's order.
+const SETTINGS_HEIGHTS: [SettingsHeight; 2] = [SettingsHeight::TallestTab, SettingsHeight::ScreenLimit];
 
 /// The Sidebar the Appearance Tab means by `i` (0 Settings, 1 Notes).
 fn sidebar(i: i32) -> Option<Sidebar> {
@@ -76,6 +79,12 @@ impl Appearance {
                 a.change_layout(s, |l| l.anchor = anchor);
             }
         });
+        let me = Rc::downgrade(&appearance);
+        ui.on_set_settings_height(move |i| {
+            if let Some(a) = me.upgrade() {
+                a.set_settings_height(i);
+            }
+        });
         appearance.refresh();
         appearance
     }
@@ -116,6 +125,13 @@ impl Appearance {
         (self.layout_changed)();
     }
 
+    /// The Paper's cap changes at once: the window binds it, and a new height refits the page.
+    fn set_settings_height(&self, i: i32) {
+        let Some(&h) = SETTINGS_HEIGHTS.get(i as usize) else { return };
+        logged("Settings height", self.db.set_settings_height(h));
+        self.refresh();
+    }
+
     /// Show what is stored.
     fn refresh(&self) {
         let Some(ui) = self.ui.upgrade() else { return };
@@ -127,5 +143,7 @@ impl Appearance {
         ui.set_settings_sidebar_anchor(anchor_index(settings.anchor));
         ui.set_notes_sidebar_height(height_index(notes.height));
         ui.set_notes_sidebar_anchor(anchor_index(notes.anchor));
+        let h = self.db.settings_height();
+        ui.set_settings_height(SETTINGS_HEIGHTS.iter().position(|&x| x == h).unwrap_or(0) as i32);
     }
 }
