@@ -266,6 +266,16 @@ impl SettingsView {
         }
     }
 
+    /// The window's scale changed. When the platform did it (the window moved to a monitor with
+    /// another DPI, and the platform resized it by the DPIs' ratio), put the UI size back on top:
+    /// the page keeps its logical size and so grows or shrinks on screen with the monitor. Where
+    /// the window now is in logical px follows from its place on screen at the new scale.
+    fn scale_factor_changed(&self) {
+        if self.scale.resync(self.ui.window(), false) {
+            self.sync_canvas();
+        }
+    }
+
     /// How many times the view has moved or resized the native window so far.
     pub fn window_resizes(&self) -> u32 {
         self.resizes.get()
@@ -340,6 +350,14 @@ impl SettingsView {
             self.ui.on_paper_height_changed(move || {
                 if let Some(v) = me.upgrade() {
                     v.refit_height();
+                }
+            });
+        }
+        {
+            let me = me.clone();
+            self.ui.on_scale_factor_changed(move || {
+                if let Some(v) = me.upgrade() {
+                    v.scale_factor_changed();
                 }
             });
         }

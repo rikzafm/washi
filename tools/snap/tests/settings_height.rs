@@ -12,8 +12,6 @@ fn ms(n: u64) -> Duration {
 
 /// The tallest built-in Tab's Paper (Shortcuts, about 767), in whole px as the window has it.
 const TALLEST: u32 = 768;
-/// The fake desk: one 1920 by 1040 work area, so the screen limit is 1040 less the 42px margins.
-const SCREEN_LIMIT: u32 = 1040 - 2 * 42;
 
 // Appearance control ids, as `hit-x` in appearance-tab.slint defines them.
 const SETTINGS_HEIGHT_BUTTON: i32 = 21;
@@ -21,6 +19,10 @@ const TALLEST_TAB: i32 = 22;
 const SCREEN: i32 = 23;
 /// The Settings height list's number in open-list.
 const SETTINGS_HEIGHT_LIST: i32 = 5;
+/// The Notes sidebar's Theme dropdown (while the Theme is split), its list, and its Paper option.
+const NOTES_THEME_BUTTON: i32 = 46;
+const NOTES_THEME_LIST: i32 = 11;
+const NOTES_THEME_PAPER: i32 = 49;
 
 fn started() -> Harness {
     let mut h = Harness::new();
@@ -67,14 +69,15 @@ fn with_tallest_tab_no_tabs_paper_is_taller_than_the_tallest_built_in_tab() {
     open_on(&mut h, tab::SHORTCUTS);
     assert_eq!(h.settings_paper_height(), TALLEST, "Shortcuts at its own height");
     switch_to(&mut h, tab::APPEARANCE);
-    h.settings_force_tall_tab(tab::APPEARANCE, 800.0);
+    // each Sidebar its own rows: Appearance is the one Tab that grows past the others
+    h.settings_split_appearance();
     h.advance_frames(ms(600));
-    assert_eq!(h.settings_paper_height(), TALLEST, "a taller Tab stops at the tallest built-in one");
-    let (offset, range) = h.settings_scroll();
-    assert_eq!(offset, 0.0);
     let natural = h.settings_paper_height_for(tab::APPEARANCE);
-    assert!(natural > 1000.0, "{natural}");
-    assert!((range - (natural - TALLEST as f32)).abs() < 1.5, "the rest scrolls: {range} of {natural}");
+    assert!(natural > TALLEST as f32 + 50.0, "{natural}");
+    assert_eq!(h.settings_paper_height(), TALLEST, "a taller Tab stops at the tallest built-in one");
+    let (_, range) = h.settings_scroll();
+    // (scrolled to the end, an open list must also end inside the Paper, so the range may be more)
+    assert!(range >= natural - TALLEST as f32 - 1.5, "the rest scrolls: {range} of {natural}");
     for t in tab::ALL {
         switch_to(&mut h, t);
         assert!(h.settings_paper_height() <= TALLEST, "tab {t}: {}", h.settings_paper_height());
@@ -94,23 +97,28 @@ fn a_tab_that_fits_does_not_scroll() {
 #[test]
 fn with_screen_limit_a_taller_tab_grows_up_to_the_work_area() {
     let mut h = started();
+    // a tall desk: Appearance with both groups split fits on it
+    let desk = 1200;
+    h.set_work_areas(vec![ScreenRect::new(0, 0, 1920, desk)]);
     open_on(&mut h, tab::APPEARANCE);
     choose_height(&mut h, SCREEN);
     assert_eq!(h.settings_height_mode(), 1);
     assert_eq!(h.settings_height_label().0, "Screen limit");
 
-    // a Paper of 850: past the tallest Tab, inside the screen
-    let rows = h.settings_content_bottoms()[tab::APPEARANCE as usize];
-    h.settings_force_tall_tab(tab::APPEARANCE, 850.0 - 44.0 - rows);
+    // past the tallest Tab, inside the screen
+    h.settings_split_appearance();
     h.advance_frames(ms(600));
     let natural = h.settings_paper_height_for(tab::APPEARANCE).round() as u32;
-    assert_eq!(natural, 850);
+    assert!(natural > TALLEST && natural < desk as u32 - 84, "{natural}");
     assert_eq!(h.settings_paper_height(), natural, "grows past the tallest Tab, nothing to scroll");
     assert_eq!(h.settings_scroll().1, 0.0);
 
-    h.settings_force_tall_tab(tab::APPEARANCE, 1200.0);
-    h.advance_frames(ms(600));
-    assert_eq!(h.settings_paper_height(), SCREEN_LIMIT, "stops at the work area");
+    // a screen too short for it: a limit between the tallest Tab and the Tab's own height
+    let limit = TALLEST + (natural - TALLEST) / 2;
+    h.set_work_areas(vec![ScreenRect::new(0, 0, 1920, (limit + 84) as i32)]);
+    switch_to(&mut h, tab::GENERAL);
+    switch_to(&mut h, tab::APPEARANCE);
+    assert_eq!(h.settings_paper_height(), limit, "stops at the work area");
     assert!(h.settings_scroll().1 > 0.0);
 
     choose_height(&mut h, TALLEST_TAB);
@@ -212,18 +220,20 @@ fn clicking_a_row_while_scrolled_hits_that_rows_control() {
     let mut h = started();
     h.set_work_areas(vec![ScreenRect::new(0, 0, 1920, 720)]);
     open_on(&mut h, tab::APPEARANCE);
-    h.settings_force_tall_tab(tab::APPEARANCE, 700.0);
+    h.settings_split_appearance();
     h.advance_frames(ms(600));
+    // from the top
+    h.settings_wheel(100000.0);
     h.settings_wheel(-80.0);
     assert_eq!(h.settings_scroll().0, 80.0);
 
-    // 80px up: the UI size row is under the title now, the Settings height row moved up by 80, more
-    // than half its button's height, so an unscrolled click would miss it
-    h.settings_appearance_click(SETTINGS_HEIGHT_BUTTON);
-    assert_eq!(h.settings_appearance_open_list(), SETTINGS_HEIGHT_LIST, "the Settings height list opened");
+    // 80px up: the Notes sidebar's Theme row moved up by 80, more than half its button's height,
+    // so an unscrolled click would miss it
+    h.settings_appearance_click(NOTES_THEME_BUTTON);
+    assert_eq!(h.settings_appearance_open_list(), NOTES_THEME_LIST, "the Notes sidebar's Theme list opened");
     assert_eq!(h.settings_scroll().0, 80.0, "the button was in view: the click did not scroll");
-    h.settings_appearance_click(SCREEN);
-    assert_eq!(h.settings_height_mode(), 1);
+    h.settings_appearance_click(NOTES_THEME_PAPER);
+    assert_eq!(h.settings_theme_rows()[1].1, "Paper");
 }
 
 #[test]

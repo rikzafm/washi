@@ -121,4 +121,54 @@ impl Harness {
     pub fn dropdown_screen_size(&self) -> Option<(u32, u32)> {
         self.app().dropdown_screen_size()
     }
+
+    /// How many screen pixels one logical px of the Settings window covers.
+    pub fn settings_drawing_scale(&self) -> Option<f32> {
+        Some(self.app().settings()?.ui().window().scale_factor())
+    }
+
+    /// The delete dialog's window on screen (physical px), and how many screen pixels one of its
+    /// logical px covers.
+    pub fn delete_dialog_screen(&self) -> Option<((u32, u32), f32)> {
+        let d = self.app().delete_dialog()?;
+        let w = d.ui().window();
+        Some(((w.size().width, w.size().height), w.scale_factor()))
+    }
+
+    /// The user drags the Settings window onto a monitor at `scale` (DPI / 96).
+    pub fn move_settings_to_monitor(&mut self, scale: f32) {
+        let ui = self.appearance_ui();
+        Self::os_move_to_monitor(ui.window(), scale);
+        self.settle();
+    }
+
+    /// The user drags the delete dialog onto a monitor at `scale` (DPI / 96).
+    pub fn move_delete_dialog_to_monitor(&mut self, scale: f32) {
+        let d = self.app().delete_dialog().expect("no delete dialog");
+        Self::os_move_to_monitor(d.ui().window(), scale);
+        self.settle();
+    }
+
+    /// The user drags note `n` onto a monitor at `scale` (DPI / 96); the window procedure then
+    /// reports the move, as for any move.
+    pub fn move_note_to_monitor(&mut self, n: usize, scale: f32) {
+        let id = self.note_id(n);
+        let ui = self.app().with_note(id, |n| n.ui().clone_strong()).unwrap();
+        Self::os_move_to_monitor(ui.window(), scale);
+        self.app().geometry_changed(id);
+        self.settle();
+    }
+
+    /// How many screen pixels one logical px of each open picture viewer covers, oldest first.
+    pub fn viewer_drawing_scales(&self) -> Vec<f32> {
+        self.app().viewer_scale_factors()
+    }
+
+    fn os_move_to_monitor(window: &slint::Window, scale: f32) {
+        let adapter = crate::platform::windows()
+            .into_iter()
+            .find(|w| std::ptr::eq(slint::platform::WindowAdapter::window(&**w), window))
+            .expect("not a stand-in window");
+        adapter.os_move_to_monitor(scale);
+    }
 }

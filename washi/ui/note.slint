@@ -4,13 +4,15 @@ import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
 
-import { AllNotesSidebar, AllNotesActionBar, AllNotesMetrics, AllNoteItem } from "all-notes.slint";
+import { AllNotesSidebar, AllNotesActionBar, AllNoteItem } from "all-notes.slint";
+import { SidebarPanel } from "sidebar-panel.slint";
 
 export { BlockData, BlockKind, MarkerData, RuleData, RunData } from "block.slint";
 export { Theme } from "theme.slint";
 export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
 export { AllNoteItem } from "all-notes.slint";
+export { SidebarPanel } from "sidebar-panel.slint";
 export { SettingsWindow } from "settings.slint";
 export { ShortcutRow } from "settings-pages.slint";
 export { DeleteNoteDialog } from "delete-dialog.slint";
@@ -73,7 +75,7 @@ export component NoteWindow inherits Window {
     background: transparent;
     // While All Notes is open the window is wider by the sidebar's strip, on the left; the paper
     // (everything below but the sidebar) is `note-w` wide and starts at `sidebar-w`.
-    out property <length> sidebar-w: root.all-notes-open ? AllNotesMetrics.sidebar-w : 0px;
+    out property <length> sidebar-w: root.all-notes-open ? SidebarPanel.strip : 0px;
     out property <length> note-w: root.width - root.sidebar-w;
     // The UI size (Settings > Appearance) scales the whole window through its scale factor (see
     // ui_scale.rs): these logical sizes land on screen at the UI size.
@@ -285,7 +287,7 @@ export component NoteWindow inherits Window {
         x: (1 - root.intro) * Theme.sidebar-intro-shift;
         opacity: Theme.sidebar-intro-from + (1 - Theme.sidebar-intro-from) * root.intro;
         y: 0px;
-        width: AllNotesMetrics.sidebar-w;
+        width: SidebarPanel.strip;
         height: root.height;
         theme: root.sidebar-theme;
         selected-note-id: root.all-notes-selected-id;

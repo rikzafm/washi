@@ -48,6 +48,11 @@ export component DeleteNoteDialog inherits Window {
     callback keep();
     callback confirm-delete();
     callback start-move();
+    /// The window's scale factor (screen px per logical px). The platform resets it when the window
+    /// moves to a monitor with another DPI: Rust then puts the UI size back on top.
+    out property <float> scale-factor: 1px / 1phx;
+    callback scale-factor-changed();
+    changed scale-factor => { root.scale-factor-changed(); }
 
     // The card sits inside a margin that holds its shadow and the overhanging tape.
     in property <length> card-width: 320px;

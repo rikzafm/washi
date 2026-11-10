@@ -3,6 +3,7 @@
 
 use snap::{tab, Harness};
 use std::time::Duration;
+use washi::sidebar_panel;
 use washi::storage::Geometry;
 
 fn ms(n: u64) -> Duration {
@@ -178,6 +179,9 @@ fn close_to(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
 
+/// How far a panel or Paper edge measured on a render may be from where it should be (px).
+const EDGE: f32 = 2.0;
+
 #[test]
 fn small_and_medium_draw_an_open_note_smaller_inside_the_same_window() {
     let mut h = started();
@@ -280,7 +284,7 @@ fn the_all_notes_strip_scales() {
     h.advance_frames(ms(600));
     let (_, _, w, hh) = h.all_notes_window_geometry().unwrap();
     assert_eq!(hh, note.1);
-    assert!(close_to((w - note.0) as f32, 282.0 * 0.75, 1.0), "strip {} on screen", w - note.0);
+    assert!(close_to((w - note.0) as f32, sidebar_panel::STRIP * 0.75, 1.0), "strip {} on screen", w - note.0);
 }
 
 #[test]
@@ -316,13 +320,95 @@ fn the_saved_ui_size_is_applied_at_startup() {
     assert_eq!(h.window_position(0), at);
 }
 
+#[test]
+fn the_rust_copies_of_the_sidebar_panel_match_the_slint_one() {
+    let h = started();
+    assert_eq!(h.slint_sidebar_panel(), (sidebar_panel::STRIP, sidebar_panel::PANEL_W, sidebar_panel::PANEL_CX));
+}
+
+// ---- UI size on a monitor with another DPI: the monitor's scale times the UI size ----
+
+#[test]
+fn a_note_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dpi() {
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    let (w, hh) = h.note_screen_size(0);
+    h.move_note_to_monitor(0, 1.5);
+    assert!(close_to(h.note_drawing_scale(0), 1.5 * 0.75, 1e-4), "drawn at {}", h.note_drawing_scale(0));
+    let (mw, mh) = h.note_screen_size(0);
+    assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0), "{mw}x{mh}");
+}
+
+#[test]
+fn settings_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dpi() {
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    open_on(&mut h, tab::APPEARANCE);
+    assert_eq!(h.settings_drawing_scale(), Some(0.75));
+    let (w, hh) = h.settings_screen_size().unwrap();
+    h.move_settings_to_monitor(1.5);
+    let scale = h.settings_drawing_scale().unwrap();
+    assert!(close_to(scale, 1.5 * 0.75, 1e-4), "drawn at {scale}, want the monitor's 1.5 times Small");
+    let (mw, mh) = h.settings_screen_size().unwrap();
+    assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0),
+        "the same page at the new DPI: {mw}x{mh}, want 1.5 times {w}x{hh}");
+
+    // the page still answers where it draws its controls, and stays at the new scale
+    h.settings_appearance_click(UI_SIZE_BUTTON);
+    assert_eq!(h.settings_appearance_open_list(), 0);
+    h.settings_press_escape();
+    h.settings_click_tab(tab::GENERAL);
+    h.advance_frames(ms(600));
+    assert_eq!(h.settings_shown_tab(), tab::GENERAL);
+    let after = h.settings_drawing_scale().unwrap();
+    assert!(close_to(after, 1.5 * 0.75, 1e-4), "after a Tab switch: {after}");
+}
+
+#[test]
+fn the_delete_dialog_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dpi() {
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    h.press_ctrl(0, 'd');
+    let ((w, hh), scale) = h.delete_dialog_screen().unwrap();
+    assert_eq!(scale, 0.75);
+    h.move_delete_dialog_to_monitor(1.5);
+    let ((mw, mh), scale) = h.delete_dialog_screen().unwrap();
+    assert!(close_to(scale, 1.5 * 0.75, 1e-4), "drawn at {scale}");
+    assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0), "{mw}x{mh}");
+}
+
+#[test]
+fn the_picture_viewer_opens_at_the_ui_size() {
+    let red = [200u8, 30, 60];
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("red.png");
+    let picture = washi::images::Rgba { width: 300, height: 150, data: (0..300 * 150).flat_map(|_| [red[0], red[1], red[2], 255]).collect() };
+    std::fs::write(&path, washi::images::encode_png(&picture).unwrap()).unwrap();
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    h.choose_picture(&path);
+    h.click_image_button(0);
+    h.wait_for_images();
+
+    // double click the middle of the picture (found on the render, screen px)
+    let (w, _, px) = h.render(0);
+    let spots: Vec<(u32, u32)> = px.iter().enumerate()
+        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
+        .map(|(i, _)| (i as u32 % w, i as u32 / w))
+        .collect();
+    assert!(!spots.is_empty(), "the picture is drawn");
+    let n = spots.len() as f32;
+    let scale = h.note_drawing_scale(0);
+    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
+    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
+    h.click(0, x, y);
+    h.click(0, x, y);
+    assert_eq!(h.viewer_drawing_scales(), [0.75], "the viewer is drawn at Small too");
+}
+
 // ---- Sidebar: Height and Anchor ----
 
 /// Whether two window-px positions agree to within the anti-aliased edge of a tilted panel.
-fn near(a: f32, b: f32) -> bool {
-    (a - b).abs() <= 2.0
-}
-
 #[test]
 fn match_note_makes_the_settings_sidebar_as_tall_as_its_paper() {
     let mut h = started();
@@ -331,7 +417,7 @@ fn match_note_makes_the_settings_sidebar_as_tall_as_its_paper() {
     let (top, bottom) = h.settings_sidebar_span();
     let (paper_top, paper_bottom) = h.settings_paper_span();
     assert!(paper_bottom - paper_top > 700.0, "the Paper is {paper_top}..{paper_bottom}");
-    assert!(near(top, paper_top) && near(bottom, paper_bottom), "panel {top}..{bottom}, Paper {paper_top}..{paper_bottom}");
+    assert!(close_to(top, paper_top, EDGE) && close_to(bottom, paper_bottom, EDGE), "panel {top}..{bottom}, Paper {paper_top}..{paper_bottom}");
 }
 
 // Sidebar group control ids, as `hit-x` in appearance-tab.slint defines them.
@@ -399,7 +485,7 @@ fn notes_place(h: &Harness) -> (f32, f32, f32) {
 fn match_note_is_the_default_and_makes_both_sidebars_as_tall_as_their_paper() {
     let h = both_sidebars();
     for (name, (_, above, below)) in [("Settings", settings_place(&h)), ("Notes", notes_place(&h))] {
-        assert!(near(above, 0.0) && near(below, 0.0), "{name}: {above} above and {below} below the panel");
+        assert!(close_to(above, 0.0, EDGE) && close_to(below, 0.0, EDGE), "{name}: {above} above and {below} below the panel");
     }
 }
 
@@ -408,8 +494,8 @@ fn fit_content_makes_the_settings_sidebar_header_and_tabs_tall_and_centres_it() 
     let mut h = both_sidebars();
     pick(&mut h, HEIGHT[0], FIT_CONTENT);
     let (height, above, below) = settings_place(&h);
-    assert!(near(height, SETTINGS_FIT_H), "panel {height} tall");
-    assert!(near(above, below), "Middle: {above} above, {below} below");
+    assert!(close_to(height, SETTINGS_FIT_H, EDGE), "panel {height} tall");
+    assert!(close_to(above, below, EDGE), "Middle: {above} above, {below} below");
 }
 
 #[test]
@@ -418,15 +504,15 @@ fn fit_content_makes_the_all_notes_sidebar_grow_with_its_rows_up_to_its_paper_th
     pick(&mut h, HEIGHT[0], FIT_CONTENT);
     // Two notes are listed.
     let (height, above, below) = notes_place(&h);
-    assert!(near(height, notes_fit_h(2)), "panel {height} tall, wanted {}", notes_fit_h(2));
-    assert!(near(above, below), "Middle: {above} above, {below} below");
+    assert!(close_to(height, notes_fit_h(2), EDGE), "panel {height} tall, wanted {}", notes_fit_h(2));
+    assert!(close_to(above, below, EDGE), "Middle: {above} above, {below} below");
 
     // More rows than the Paper holds: the panel stops at the Paper and the list scrolls.
     for _ in 0..8 {
         h.invoke_all_notes_new_note();
     }
     let (height, above, below) = notes_place(&h);
-    assert!(near(above, 0.0) && near(below, 0.0), "capped at the Paper: {height} tall, {above} above, {below} below");
+    assert!(close_to(above, 0.0, EDGE) && close_to(below, 0.0, EDGE), "capped at the Paper: {height} tall, {above} above, {below} below");
     let before = h.render_all_notes().unwrap().2;
     h.scroll_all_notes(100.0, 250.0, -60.0);
     assert!(h.render_all_notes().unwrap().2 != before, "the list scrolled");
@@ -440,9 +526,9 @@ fn the_anchor_puts_a_fit_content_panel_at_the_papers_top_middle_or_bottom() {
         pick(&mut h, ANCHOR[0], anchor);
         for (sidebar, (_, above, below)) in [("Settings", settings_place(&h)), ("Notes", notes_place(&h))] {
             let ok = match anchor {
-                TOP => near(above, 0.0) && below > 100.0,
-                BOTTOM => near(below, 0.0) && above > 100.0,
-                _ => near(above, below) && above > 50.0,
+                TOP => close_to(above, 0.0, EDGE) && below > 100.0,
+                BOTTOM => close_to(below, 0.0, EDGE) && above > 100.0,
+                _ => close_to(above, below, EDGE) && above > 50.0,
             };
             assert!(ok, "{name}, {sidebar}: {above} above, {below} below the panel");
         }
@@ -476,24 +562,24 @@ fn turning_same_for_both_off_lets_each_sidebar_follow_its_own_values_from_the_sh
     // Nothing moved: both start from the shared values.
     let (_, s_above, _) = settings_place(&h);
     let (_, n_above, n_below) = notes_place(&h);
-    assert!(near(s_above, 0.0) && near(n_above, 0.0) && n_below > 50.0, "both still Fit content at the Top");
+    assert!(close_to(s_above, 0.0, EDGE) && close_to(n_above, 0.0, EDGE) && n_below > 50.0, "both still Fit content at the Top");
 
     // The Notes sidebar's own controls change only it.
     pick(&mut h, ANCHOR[1], BOTTOM);
     let (_, n_above, n_below) = notes_place(&h);
-    assert!(near(n_below, 0.0) && n_above > 50.0, "Notes at the Bottom: {n_above} above, {n_below} below");
-    assert!(near(settings_place(&h).1, 0.0), "Settings still at the Top");
+    assert!(close_to(n_below, 0.0, EDGE) && n_above > 50.0, "Notes at the Bottom: {n_above} above, {n_below} below");
+    assert!(close_to(settings_place(&h).1, 0.0, EDGE), "Settings still at the Top");
     pick(&mut h, HEIGHT[1], MATCH_NOTE);
     let (_, n_above, n_below) = notes_place(&h);
-    assert!(near(n_above, 0.0) && near(n_below, 0.0), "Notes as tall as its Paper");
+    assert!(close_to(n_above, 0.0, EDGE) && close_to(n_below, 0.0, EDGE), "Notes as tall as its Paper");
     let (s_h, ..) = settings_place(&h);
-    assert!(near(s_h, SETTINGS_FIT_H), "Settings still Fit content: {s_h}");
+    assert!(close_to(s_h, SETTINGS_FIT_H, EDGE), "Settings still Fit content: {s_h}");
 
     // The Settings sidebar's controls change only it.
     pick(&mut h, ANCHOR[0], BOTTOM);
-    assert!(near(settings_place(&h).2, 0.0), "Settings at the Bottom");
+    assert!(close_to(settings_place(&h).2, 0.0, EDGE), "Settings at the Bottom");
     let (_, n_above, n_below) = notes_place(&h);
-    assert!(near(n_above, 0.0) && near(n_below, 0.0), "Notes still Match note");
+    assert!(close_to(n_above, 0.0, EDGE) && close_to(n_below, 0.0, EDGE), "Notes still Match note");
 }
 
 #[test]
@@ -504,15 +590,15 @@ fn turning_same_for_both_back_on_gives_both_sidebars_the_settings_sidebars_value
     pick(&mut h, ANCHOR[0], BOTTOM);
     // The Notes sidebar stays Match note.
     let (_, n_above, _) = notes_place(&h);
-    assert!(near(n_above, 0.0));
+    assert!(close_to(n_above, 0.0, EDGE));
 
     h.settings_appearance_click(SAME_SWITCH);
     let (n_h, n_above, n_below) = notes_place(&h);
-    assert!(near(n_h, notes_fit_h(2)) && near(n_below, 0.0) && n_above > 50.0, "Notes took Fit content, Bottom");
+    assert!(close_to(n_h, notes_fit_h(2), EDGE) && close_to(n_below, 0.0, EDGE) && n_above > 50.0, "Notes took Fit content, Bottom");
 
     // One value drives both again.
     pick(&mut h, ANCHOR[0], TOP);
-    assert!(near(settings_place(&h).1, 0.0) && near(notes_place(&h).1, 0.0), "both at the Top");
+    assert!(close_to(settings_place(&h).1, 0.0, EDGE) && close_to(notes_place(&h).1, 0.0, EDGE), "both at the Top");
 }
 
 #[test]
@@ -534,13 +620,13 @@ fn the_sidebar_layout_survives_a_restart() {
     h.invoke_dropdown_all_notes();
     h.advance_frames(ms(600));
     let (n_h, n_above, n_below) = notes_place(&h);
-    assert!(near(n_above, 0.0) && n_below > 50.0 && n_h < 400.0, "Notes: Fit content at the Top ({n_h}, {n_above}, {n_below})");
+    assert!(close_to(n_above, 0.0, EDGE) && n_below > 50.0 && n_h < 400.0, "Notes: Fit content at the Top ({n_h}, {n_above}, {n_below})");
 
     h.toggle_dropdown(1);
     h.invoke_dropdown_settings();
     h.advance_frames(ms(600));
     let (s_h, s_above, s_below) = settings_place(&h);
-    assert!(near(s_h, SETTINGS_FIT_H) && near(s_below, 0.0) && s_above > 50.0, "Settings: Fit content at the Bottom");
+    assert!(close_to(s_h, SETTINGS_FIT_H, EDGE) && close_to(s_below, 0.0, EDGE) && s_above > 50.0, "Settings: Fit content at the Bottom");
 }
 
 // ---- Sidebar themes ----
@@ -560,6 +646,8 @@ const THEME_NAMES: [&str; 4] = ["Default", "Transparent", "Paper", "Liquid glass
 const SLATE: [u8; 3] = [0xD6, 0xDB, 0xE2];
 const PAPER_FILL: [u8; 3] = [0xFF, 0xFF, 0xFD];
 const DESK: [u8; 3] = snap::DESK;
+/// The panel's centre column in the Sidebar's strip.
+const PANEL_CX: u32 = sidebar_panel::PANEL_CX as u32;
 
 fn near_rgb(p: [u8; 3], want: [u8; 3]) -> bool {
     p.iter().zip(want).all(|(a, b)| (*a as i32 - b as i32).abs() <= 1)
@@ -574,7 +662,7 @@ fn pick_theme(h: &mut Harness, dropdown: i32, theme: i32) {
 /// A blank spot of the Settings Sidebar's panel (under its Tabs), as rendered.
 fn settings_panel_spot(h: &Harness) -> [u8; 3] {
     let shot = h.render_settings();
-    shot.pixel(143, shot.height / 2 + 200)
+    shot.pixel(PANEL_CX, shot.height / 2 + 200)
 }
 
 /// A blank spot of the All notes Sidebar's panel (right of the New-note button, under the rows).
@@ -625,7 +713,7 @@ fn a_themed_sidebar_scales_with_the_ui_size() {
         open_all_notes(&mut h, 0);
         widths.push(paper_panel_width(&h) as f32);
     }
-    assert!(close_to(widths[0], 270.0, 3.0), "Large: the 270 px panel, got {}", widths[0]);
+    assert!(close_to(widths[0], sidebar_panel::PANEL_W, 3.0), "Large: the {} px panel, got {}", sidebar_panel::PANEL_W, widths[0]);
     assert!(close_to(widths[1], widths[0] * 0.75, 3.0), "Small: {} on screen, want 75% of {}", widths[1], widths[0]);
 }
 
@@ -657,7 +745,7 @@ fn liquid_glass_is_lighter_at_the_top_than_at_the_bottom() {
     open_on(&mut h, tab::APPEARANCE);
     pick_theme(&mut h, THEME_A, GLASS);
     let shot = h.render_settings();
-    let (top, bottom) = (shot.pixel(143, shot.height / 2 - 280), shot.pixel(143, shot.height / 2 + 280));
+    let (top, bottom) = (shot.pixel(PANEL_CX, shot.height / 2 - 280), shot.pixel(PANEL_CX, shot.height / 2 + 280));
     let luma = |p: [u8; 3]| p.iter().map(|&c| c as i32).sum::<i32>();
     assert!(luma(top) > luma(bottom) + 6, "a soft vertical gradient: top {top:?}, bottom {bottom:?}");
 }
@@ -782,7 +870,7 @@ fn the_theme_switch_and_the_sidebar_groups_switch_are_independent() {
     assert!(!h.settings_theme_shared());
     pick(&mut h, HEIGHT[0], FIT_CONTENT);
     let ((s_h, ..), (n_h, ..)) = (settings_place(&h), notes_place(&h));
-    assert!(near(s_h, SETTINGS_FIT_H), "Settings Fit content: {s_h}");
+    assert!(close_to(s_h, SETTINGS_FIT_H, EDGE), "Settings Fit content: {s_h}");
     assert!(n_h < notes_place_match(&h) - 50.0, "Notes Fit content too: {n_h}");
 
     // The Sidebar group's switch off: the Theme switch stays off, and back on it does not move it.

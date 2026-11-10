@@ -4,11 +4,11 @@
 use crate::Harness;
 use slint::ComponentHandle;
 
-/// The panel's centre column in the strip (`SidebarPanel.cx`): the tilted panel's top and bottom
-/// edges cross it at their true height.
-const PANEL_CX: usize = 143;
+/// The panel's centre column in the strip: the tilted panel's top and bottom edges cross it at
+/// their true height.
+const PANEL_CX: usize = washi::sidebar_panel::PANEL_CX as usize;
 /// The transparent margin around a Paper (`PaperTheme.margin`).
-const MARGIN: f32 = 42.0;
+const MARGIN: f32 = washi::settings::anim::MARGIN;
 
 /// The first and last rows of the panel's fill (#D6DBE2, the Default theme) down its centre column:
 /// its top and bottom edges, window px.
@@ -28,6 +28,17 @@ pub mod sidebar {
 }
 
 impl Harness {
+    /// The Sidebar panel's strip, width and centre as the .slint files define them
+    /// (`SidebarPanel`), to check the Rust copies in `washi::sidebar_panel` against.
+    pub fn slint_sidebar_panel(&self) -> (f32, f32, f32) {
+        self.app()
+            .with_note(self.id(0), |n| {
+                let p = n.ui().global::<washi::note_window::SidebarPanel>();
+                (p.get_strip(), p.get_width(), p.get_cx())
+            })
+            .unwrap()
+    }
+
     /// The Settings Sidebar's panel as drawn: its top and bottom edge, window px.
     pub fn settings_sidebar_span(&self) -> (f32, f32) {
         let shot = self.render_settings();

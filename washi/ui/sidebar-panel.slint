@@ -14,8 +14,17 @@ export global SidebarPanel {
     out property <float> radius: 22.0;
     out property <angle> tilt: -1.0deg;
     out property <color> fill: #D6DBE2;
+    /// A row or Tab on the panel: inset `pad` from both sides (`item-w` wide, its left edge `item-u`
+    /// from the panel's centre). Its label is inset `label-inset` more (`label-w` wide, from `label-u`).
+    out property <float> pad: 12.0;
+    out property <float> item-w: root.width - 2.0 * root.pad;
+    out property <float> item-u: -root.width / 2.0 + root.pad;
+    out property <float> label-inset: 16.0;
+    out property <float> label-w: root.item-w - 2.0 * root.label-inset;
+    out property <float> label-u: root.item-u + root.label-inset;
 
-    // The Sidebar layout rule (Settings › Appearance › Sidebar), one for both Sidebars.
+    // The Sidebar layout rule (Settings › Appearance › Sidebar). The rule is the same for both
+    // Sidebars; its values are shared or each Sidebar's own ("Same for both sidebars").
     // Height mode: 0 Match note, 1 Fit content. Anchor: 0 Top, 1 Middle, 2 Bottom.
 
     /// The panel's height: the Paper's (Match note), or its content's but never taller than the
@@ -56,6 +65,57 @@ export global SidebarThemes {
     /// The text-shadow copies a label gets in `theme` (none outside Transparent).
     public pure function halo-for(theme: int) -> [HaloOffset] {
         return theme == root.transparent ? root.halo : [];
+    }
+}
+
+/// A label on a Sidebar with its light text shadow: the `halo` copies (`SidebarThemes.halo-for`:
+/// none outside Transparent) in `SidebarThemes.halo-color`, then the label itself. Placed and sized
+/// like a Text, window px (its own text's size unless given one). Each copy sits its offset away
+/// along the axes `cs`/`sn`: the window's by default, or a tilted frame's.
+export component HaloText inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size;
+    in property <int> font-weight;
+    in property <length> letter-spacing;
+    /// The label's color.
+    in property <color> ink: #2B2F36;
+    in property <TextVerticalAlignment> vertical-alignment: top;
+    in property <TextOverflow> overflow: clip;
+    in property <[HaloOffset]> halo: [];
+    in property <float> cs: 1.0;
+    in property <float> sn: 0.0;
+
+    width: label.preferred-width;
+    height: label.preferred-height;
+
+    for o in root.halo : Text {
+        x: (o.dx * root.cs - o.dy * root.sn) * 1px;
+        y: (o.dx * root.sn + o.dy * root.cs) * 1px;
+        width: root.width;
+        height: root.height;
+        text: root.text;
+        font-family: "Shadows Into Light";
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        letter-spacing: root.letter-spacing;
+        color: SidebarThemes.halo-color;
+        vertical-alignment: root.vertical-alignment;
+        overflow: root.overflow;
+    }
+
+    label := Text {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        text: root.text;
+        font-family: "Shadows Into Light";
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        letter-spacing: root.letter-spacing;
+        color: root.ink;
+        vertical-alignment: root.vertical-alignment;
+        overflow: root.overflow;
     }
 }
 

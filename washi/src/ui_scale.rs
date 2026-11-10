@@ -1,6 +1,9 @@
 //! UI size (Settings › Appearance): every window Washi draws (Notes, the All notes Sidebar in its
-//! Note, Settings, the Dropdown menu, the delete dialog) is drawn at the platform's own scale (the
-//! monitor's DPI) times the UI size. The scale goes in as the Slint window's scale factor, so every
+//! Note, Settings, the Dropdown menu, the delete dialog, the picture viewer) is drawn at the
+//! platform's own scale (the monitor's DPI) times the UI size. When a window moves to a monitor with
+//! another DPI the platform puts its own scale back on the window, and the window's owner puts the
+//! UI size back on top ([`WindowScale::resync`]): Notes when the move is reported, the other movable
+//! windows when their `scale-factor` property changes. The scale goes in as the Slint window's scale factor, so every
 //! logical length shrinks evenly (text, chrome, margins, hit-testing) and stacks with the per-Note
 //! text size, while the .slint files and the layout code keep working in logical px.
 //!
@@ -64,15 +67,16 @@ impl WindowScale {
     /// with another DPI): take that as the platform's scale and put the UI size back on top.
     /// `keep_logical` keeps the window's logical size and place (a window that has just shown);
     /// otherwise its size on screen is kept. Nothing happens while the scale is still ours.
-    pub fn resync(&self, w: &slint::Window, keep_logical: bool) {
+    /// Returns whether the platform's scale was new.
+    pub fn resync(&self, w: &slint::Window, keep_logical: bool) -> bool {
         let now = w.scale_factor();
         if (now - self.factor()).abs() <= EPS {
-            return;
+            return false;
         }
         let (size, position) = (w.size().to_logical(now), w.position().to_logical(now));
         self.os.set(now);
         if (now - self.factor()).abs() <= EPS {
-            return; // at Large the platform's scale is already right
+            return true; // at Large the platform's scale is already right
         }
         if keep_logical {
             self.dispatch(w);
@@ -81,6 +85,7 @@ impl WindowScale {
         } else {
             self.set_ui(w, self.ui.get());
         }
+        true
     }
 
     /// Draw the window at UI size `ui` from now on, keeping its size on screen: what it shows reflows

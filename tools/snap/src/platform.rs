@@ -32,6 +32,8 @@ pub struct StandInWindow {
     /// when nobody chose a size.
     preferred: Cell<Option<(f32, f32)>>,
     size_chosen: Cell<bool>,
+    /// The scale of the monitor the window is on (its DPI / 96).
+    monitor: Cell<f32>,
 }
 
 impl StandInWindow {
@@ -45,6 +47,7 @@ impl StandInWindow {
             min: Cell::new(None),
             preferred: Cell::new(None),
             size_chosen: Cell::new(false),
+            monitor: Cell::new(1.0),
         })
     }
 
@@ -70,6 +73,24 @@ impl StandInWindow {
     pub fn os_place(&self, position: PhysicalPosition, size: PhysicalSize) {
         self.position.set(position);
         self.set_size(WindowSize::Physical(size));
+    }
+}
+
+impl StandInWindow {
+    /// The user dragged the window onto a monitor at `scale` (its DPI / 96), as Windows and winit
+    /// report it: Slint is told the monitor's scale, then Windows resizes the window by the ratio
+    /// of the two DPIs (its suggested rect) at the same place, and Slint gets the new size. The
+    /// minimum Windows holds it to is the one it was last given (screen px, from before the move).
+    pub fn os_move_to_monitor(&self, scale: f32) {
+        let k = scale / self.monitor.replace(scale);
+        let (s, min) = (self.size.get(), self.min_size());
+        self.window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+        let size = PhysicalSize::new(
+            ((s.width as f32 * k).round() as u32).max(min.width),
+            ((s.height as f32 * k).round() as u32).max(min.height),
+        );
+        self.size.set(size);
+        self.window.dispatch_event(slint::platform::WindowEvent::Resized { size: size.to_logical(scale) });
     }
 }
 

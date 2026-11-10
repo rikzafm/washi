@@ -241,22 +241,27 @@ impl Db {
         self.set_meta("ui_scale", &format!("{scale:.2}"))
     }
 
-    /// Whether one Height and Anchor drive both Sidebars (Settings › Appearance › Sidebar's "Same
-    /// for both sidebars"). On when never set.
-    pub fn sidebar_layout_shared(&self) -> bool {
-        self.meta("sidebar_layout_shared").map_or(true, |v| v.trim() != "0")
+    /// Whether one value drives both Sidebars (a "Same for both sidebars" switch on Settings ›
+    /// Appearance). On when never set or not "0"/"1".
+    pub fn sidebars_shared(&self, switch: SharedSwitch) -> bool {
+        self.meta(switch.key()).map_or(true, |v| v.trim() != "0")
     }
 
-    pub fn set_sidebar_layout_shared(&self, shared: bool) -> Result<(), DbError> {
-        self.set_meta("sidebar_layout_shared", if shared { "1" } else { "0" })
+    pub fn set_sidebars_shared(&self, switch: SharedSwitch, shared: bool) -> Result<(), DbError> {
+        self.set_meta(switch.key(), if shared { "1" } else { "0" })
+    }
+
+    /// A stored choice, or `None` when never set or not one of the choices.
+    fn choice<C: Choice>(&self, key: &str) -> Option<C> {
+        self.meta(key).and_then(|v| C::parse(&v))
     }
 
     /// A Sidebar's Height and Anchor. Both Sidebars' values are stored even while they are shared.
     /// Each falls back to its default (Match note, Middle) when never set or not one of the choices.
     pub fn sidebar_layout(&self, sidebar: Sidebar) -> SidebarLayout {
         let d = SidebarLayout::default();
-        let height = self.meta(&format!("sidebar_height.{}", sidebar.key())).and_then(|v| SidebarHeight::parse(&v));
-        let anchor = self.meta(&format!("sidebar_anchor.{}", sidebar.key())).and_then(|v| SidebarAnchor::parse(&v));
+        let height = self.choice::<SidebarHeight>(&format!("sidebar_height.{}", sidebar.key()));
+        let anchor = self.choice::<SidebarAnchor>(&format!("sidebar_anchor.{}", sidebar.key()));
         SidebarLayout { height: height.unwrap_or(d.height), anchor: anchor.unwrap_or(d.anchor) }
     }
 
@@ -268,35 +273,17 @@ impl Db {
     /// How tall the Settings Paper may grow (Settings › Appearance). Tallest tab when never set or
     /// when the stored value is not one of the choices.
     pub fn settings_height(&self) -> SettingsHeight {
-        match self.meta("settings_height").as_deref().map(str::trim) {
-            Some("screen") => SettingsHeight::ScreenLimit,
-            _ => SettingsHeight::TallestTab,
-        }
+        self.choice("settings_height").unwrap_or(SettingsHeight::TallestTab)
     }
 
     pub fn set_settings_height(&self, h: SettingsHeight) -> Result<(), DbError> {
-        self.set_meta("settings_height", match h {
-            SettingsHeight::TallestTab => "tallest",
-            SettingsHeight::ScreenLimit => "screen",
-        })
-    }
-
-    /// Whether both Sidebars take one Theme (Settings › Appearance, the Theme row's "Same for both
-    /// sidebars"). On when never set or not "0"/"1".
-    pub fn sidebar_theme_shared(&self) -> bool {
-        self.meta("sidebar_theme_shared").map_or(true, |v| v.trim() != "0")
-    }
-
-    pub fn set_sidebar_theme_shared(&self, shared: bool) -> Result<(), DbError> {
-        self.set_meta("sidebar_theme_shared", if shared { "1" } else { "0" })
+        self.set_meta("settings_height", h.key())
     }
 
     /// The Theme a Sidebar is drawn with (each Sidebar's is stored, even while they are shared).
     /// Default when never set or not one of the themes.
     pub fn sidebar_theme(&self, sidebar: Sidebar) -> SidebarTheme {
-        self.meta(&format!("sidebar_theme.{}", sidebar.key()))
-            .and_then(|v| SidebarTheme::from_key(v.trim()))
-            .unwrap_or(SidebarTheme::Default)
+        self.choice(&format!("sidebar_theme.{}", sidebar.key())).unwrap_or(SidebarTheme::Default)
     }
 
     pub fn set_sidebar_theme(&self, sidebar: Sidebar, theme: SidebarTheme) -> Result<(), DbError> {
@@ -472,6 +459,45 @@ pub struct AllNoteRow {
 /// The UI size choices (Settings › Appearance: Small, Medium, Large), as the scale each one saves.
 pub const UI_SCALES: [f32; 3] = [0.75, 0.80, 1.00];
 
+/// A choice kept as a word in the `meta` table. `ALL` is the order the Appearance Tab lists the
+/// options in, and a choice's place in it is the number the Slint side takes for it.
+pub trait Choice: Copy + PartialEq + 'static {
+    const ALL: &'static [Self];
+    /// The word stored for it.
+    fn key(self) -> &'static str;
+
+    fn parse(v: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|c| c.key() == v.trim())
+    }
+
+    /// Its number on the Slint side.
+    fn index(self) -> i32 {
+        Self::ALL.iter().position(|c| *c == self).unwrap_or(0) as i32
+    }
+
+    fn from_index(i: i32) -> Option<Self> {
+        usize::try_from(i).ok().and_then(|i| Self::ALL.get(i).copied())
+    }
+}
+
+/// The two "Same for both sidebars" switches on Settings › Appearance (independent of each other).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharedSwitch {
+    /// The Theme row's.
+    Theme,
+    /// The Sidebar group's (Height and Anchor).
+    Layout,
+}
+
+impl SharedSwitch {
+    fn key(self) -> &'static str {
+        match self {
+            SharedSwitch::Theme => "sidebar_theme_shared",
+            SharedSwitch::Layout => "sidebar_layout_shared",
+        }
+    }
+}
+
 /// The two Sidebars whose Theme, Height and Anchor Settings › Appearance sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sidebar {
@@ -481,7 +507,9 @@ pub enum Sidebar {
     Notes,
 }
 
-impl Sidebar {
+impl Choice for Sidebar {
+    /// 0 is the Settings sidebar (both, while shared), 1 the Notes sidebar.
+    const ALL: &'static [Sidebar] = &[Sidebar::Settings, Sidebar::Notes];
     fn key(self) -> &'static str {
         match self {
             Sidebar::Settings => "settings",
@@ -508,30 +536,24 @@ pub enum SidebarAnchor {
     Bottom,
 }
 
-impl SidebarHeight {
-    pub const ALL: [SidebarHeight; 2] = [SidebarHeight::MatchNote, SidebarHeight::FitContent];
+impl Choice for SidebarHeight {
+    const ALL: &'static [SidebarHeight] = &[SidebarHeight::MatchNote, SidebarHeight::FitContent];
     fn key(self) -> &'static str {
         match self {
             SidebarHeight::MatchNote => "match",
             SidebarHeight::FitContent => "fit",
         }
     }
-    fn parse(v: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|h| h.key() == v.trim())
-    }
 }
 
-impl SidebarAnchor {
-    pub const ALL: [SidebarAnchor; 3] = [SidebarAnchor::Top, SidebarAnchor::Middle, SidebarAnchor::Bottom];
+impl Choice for SidebarAnchor {
+    const ALL: &'static [SidebarAnchor] = &[SidebarAnchor::Top, SidebarAnchor::Middle, SidebarAnchor::Bottom];
     fn key(self) -> &'static str {
         match self {
             SidebarAnchor::Top => "top",
             SidebarAnchor::Middle => "middle",
             SidebarAnchor::Bottom => "bottom",
         }
-    }
-    fn parse(v: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|a| a.key() == v.trim())
     }
 }
 
@@ -543,13 +565,23 @@ pub struct SidebarLayout {
 }
 
 /// The Settings height choices: the cap on the Settings Paper's height. The screen's work area
-/// limits it either way.
+/// limits it either way. In the order the Appearance Tab lists them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsHeight {
     /// No taller than the tallest built-in Tab.
     TallestTab,
     /// As tall as the screen allows.
     ScreenLimit,
+}
+
+impl Choice for SettingsHeight {
+    const ALL: &'static [SettingsHeight] = &[SettingsHeight::TallestTab, SettingsHeight::ScreenLimit];
+    fn key(self) -> &'static str {
+        match self {
+            SettingsHeight::TallestTab => "tallest",
+            SettingsHeight::ScreenLimit => "screen",
+        }
+    }
 }
 
 /// How a Sidebar's panel is drawn (Settings › Appearance › Theme), in dropdown order.
@@ -565,17 +597,8 @@ pub enum SidebarTheme {
     Glass,
 }
 
-impl SidebarTheme {
-    pub const ALL: [SidebarTheme; 4] = [SidebarTheme::Default, SidebarTheme::Transparent, SidebarTheme::Paper, SidebarTheme::Glass];
-
-    /// The dropdown index (also what the Slint panels take).
-    pub fn index(self) -> i32 {
-        Self::ALL.iter().position(|t| *t == self).unwrap_or(0) as i32
-    }
-
-    pub fn from_index(i: i32) -> Option<SidebarTheme> {
-        usize::try_from(i).ok().and_then(|i| Self::ALL.get(i).copied())
-    }
+impl Choice for SidebarTheme {
+    const ALL: &'static [SidebarTheme] = &[SidebarTheme::Default, SidebarTheme::Transparent, SidebarTheme::Paper, SidebarTheme::Glass];
 
     fn key(self) -> &'static str {
         match self {
@@ -584,10 +607,6 @@ impl SidebarTheme {
             SidebarTheme::Paper => "paper",
             SidebarTheme::Glass => "glass",
         }
-    }
-
-    fn from_key(key: &str) -> Option<SidebarTheme> {
-        Self::ALL.into_iter().find(|t| t.key() == key)
     }
 }
 
@@ -658,14 +677,14 @@ mod tests {
     #[test]
     fn sidebar_layout_is_shared_match_note_middle_until_set_and_falls_back_on_nonsense() {
         let (dir, db) = test_db();
-        assert!(db.sidebar_layout_shared());
+        assert!(db.sidebars_shared(SharedSwitch::Layout));
         assert_eq!(db.sidebar_layout(Sidebar::Notes), SidebarLayout::default());
         let fit_top = SidebarLayout { height: SidebarHeight::FitContent, anchor: SidebarAnchor::Top };
         db.set_sidebar_layout(Sidebar::Notes, fit_top).unwrap();
-        db.set_sidebar_layout_shared(false).unwrap();
+        db.set_sidebars_shared(SharedSwitch::Layout, false).unwrap();
         drop(db);
         let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
-        assert!(!db.sidebar_layout_shared(), "kept across a restart");
+        assert!(!db.sidebars_shared(SharedSwitch::Layout), "kept across a restart");
         assert_eq!(db.sidebar_layout(Sidebar::Notes), fit_top);
         assert_eq!(db.sidebar_layout(Sidebar::Settings), SidebarLayout::default(), "the other Sidebar's own values");
         db.set_meta("sidebar_height.notes", "tall").unwrap();
@@ -692,19 +711,19 @@ mod tests {
     #[test]
     fn sidebar_themes_are_default_and_shared_until_set_and_fall_back_on_nonsense() {
         let (_dir, db) = test_db();
-        assert!(db.sidebar_theme_shared());
+        assert!(db.sidebars_shared(SharedSwitch::Theme));
         assert_eq!(db.sidebar_theme(Sidebar::Settings), SidebarTheme::Default);
         db.set_sidebar_theme(Sidebar::Notes, SidebarTheme::Glass).unwrap();
-        db.set_sidebar_theme_shared(false).unwrap();
+        db.set_sidebars_shared(SharedSwitch::Theme, false).unwrap();
         assert_eq!(db.sidebar_theme(Sidebar::Notes), SidebarTheme::Glass);
         assert_eq!(db.sidebar_theme(Sidebar::Settings), SidebarTheme::Default, "each Sidebar its own");
-        assert!(!db.sidebar_theme_shared());
+        assert!(!db.sidebars_shared(SharedSwitch::Theme));
         for junk in ["", "slate", "3", "GLASS"] {
             db.set_meta("sidebar_theme.notes", junk).unwrap();
             assert_eq!(db.sidebar_theme(Sidebar::Notes), SidebarTheme::Default, "{junk:?}");
         }
         db.set_meta("sidebar_theme_shared", "maybe").unwrap();
-        assert!(db.sidebar_theme_shared());
+        assert!(db.sidebars_shared(SharedSwitch::Theme));
     }
 
     #[test]
