@@ -143,6 +143,18 @@ const MENU_OPEN_BASE: u32 = 1000;
 /// A new note opens this far (logical px, right and down) from the note it was made from.
 pub const NEW_NOTE_OFFSET: i32 = 30;
 
+fn note_menu_trigger_rect(note: &Note) -> ScreenRect {
+    let scale = note.ui().window().scale_factor();
+    let phys_pos = note.ui().window().position();
+    let (btn_x, btn_y, btn_w, btn_h) = note.menu_button_rect();
+    ScreenRect::new(
+        phys_pos.x + (btn_x * scale).round() as i32,
+        phys_pos.y + (btn_y * scale).round() as i32,
+        (btn_w * scale).round() as i32,
+        (btn_h * scale).round() as i32,
+    )
+}
+
 impl App {
     /// The real entry point: make sure this is the only Washi, then start. `Ok(None)` means
     /// Washi was already running, has been asked to open a new note, and this process should exit.
@@ -1113,15 +1125,7 @@ impl App {
     fn open_editor_dropdown(&self, v: &Rc<AllNotesView>) {
         let id = v.editor_note_id();
         let editor = v.editor_handle();
-        let scale = editor.ui().window().scale_factor();
-        let phys_pos = editor.ui().window().position();
-        let (btn_x, btn_y, btn_w, btn_h) = editor.menu_button_rect();
-        let trigger = ScreenRect::new(
-            phys_pos.x + (btn_x * scale).round() as i32,
-            phys_pos.y + (btn_y * scale).round() as i32,
-            (btn_w * scale).round() as i32,
-            (btn_h * scale).round() as i32,
-        );
+        let trigger = note_menu_trigger_rect(&editor);
         let work_areas = self.0.env.window_control.work_areas();
 
         let weak = Rc::downgrade(&self.0);
@@ -1195,15 +1199,7 @@ impl App {
         let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
         let Some(note) = note else { return };
 
-        let scale = note.ui().window().scale_factor();
-        let phys_pos = note.ui().window().position();
-        let (btn_x, btn_y, btn_w, btn_h) = note.menu_button_rect();
-        let trigger = ScreenRect::new(
-            phys_pos.x + (btn_x * scale).round() as i32,
-            phys_pos.y + (btn_y * scale).round() as i32,
-            (btn_w * scale).round() as i32,
-            (btn_h * scale).round() as i32,
-        );
+        let trigger = note_menu_trigger_rect(&note);
         let work_areas = self.0.env.window_control.work_areas();
 
         let weak = Rc::downgrade(&self.0);

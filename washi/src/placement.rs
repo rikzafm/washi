@@ -31,14 +31,20 @@ pub fn recover(window: ScreenRect, margin: i32, work_areas: &[ScreenRect]) -> Op
 const DEFAULT_CARD_WIDTH: f32 = 268.0;
 const TRIGGER_OFFSET_X: f32 = 14.0;
 
+fn rect_center(r: &ScreenRect) -> (i32, i32) {
+    (r.x + r.w / 2, r.y + r.h / 2)
+}
+
+fn rect_contains_point(r: &ScreenRect, p: (i32, i32)) -> bool {
+    p.0 >= r.x && p.0 < r.right() && p.1 >= r.y && p.1 < r.bottom()
+}
+
 /// Find the work area containing `point` (half-open: `[x, right)` and `[y, bottom)`),
 /// falling back to the first work area if no work area contains it.
 fn find_work_area<'a>(point: (i32, i32), work_areas: &'a [ScreenRect]) -> Option<&'a ScreenRect> {
     work_areas
         .iter()
-        .find(|wa| {
-            point.0 >= wa.x && point.0 < wa.right() && point.1 >= wa.y && point.1 < wa.bottom()
-        })
+        .find(|wa| rect_contains_point(wa, point))
         .or_else(|| work_areas.first())
 }
 
@@ -70,7 +76,7 @@ pub fn anchor_below(
     let mut card_x = trigger.x - offset_x;
     let mut card_y = trigger.bottom() + gap;
 
-    let center = (trigger.x + trigger.w / 2, trigger.y + trigger.h / 2);
+    let center = rect_center(&trigger);
     if let Some(wa) = find_work_area(center, work_areas) {
         // If placing below overflows the bottom of work area, flip above:
         if card_y + card_h > wa.bottom() {
@@ -109,7 +115,7 @@ pub fn center_over(
     let mut x = target.x + (target.w - size.0) / 2;
     let mut y = target.y + (target.h - size.1) / 2;
 
-    let center = (target.x + target.w / 2, target.y + target.h / 2);
+    let center = rect_center(&target);
     if let Some(wa) = find_work_area(center, work_areas) {
         if x + size.0 > wa.right() {
             x = wa.right() - size.0;

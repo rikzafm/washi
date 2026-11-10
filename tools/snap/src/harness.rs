@@ -1419,13 +1419,13 @@ impl Harness {
 
     pub fn dispatch_dropdown_event(&self, event: slint::platform::WindowEvent) {
         if let Some(d) = self.app().dropdown() {
-            d.ui().window().dispatch_event(event);
+            d.dispatch_event(event);
         }
     }
 
     pub fn dispatch_delete_dialog_event(&self, ev: slint::platform::WindowEvent) {
         if let Some(d) = self.app().delete_dialog() {
-            d.ui().window().dispatch_event(ev);
+            d.dispatch_event(ev);
         }
     }
 
