@@ -4,52 +4,13 @@
 //! featuring washi tape, handwriting font, and tactile text actions.
 
 use crate::note_window::DeleteNoteDialog;
-use crate::platform::NoteId;
+use crate::platform::{NoteId, ScreenRect};
 use slint::ComponentHandle;
 use std::rc::Rc;
 
 /// Sizing metrics of the delete dialog window (logical px).
 pub const DIALOG_WIDTH: f32 = 392.0;
 pub const DIALOG_HEIGHT: f32 = 252.0;
-
-/// Calculate the top-left position of the delete dialog so it is centered directly
-/// over the note being deleted, clamped within the work area if known.
-pub fn calculate_dialog_position(
-    note_geom: (i32, i32, u32, u32),
-    work_area: Option<(f32, f32, f32, f32)>,
-) -> (f32, f32) {
-    calculate_dialog_position_scaled(note_geom, (DIALOG_WIDTH, DIALOG_HEIGHT), work_area)
-}
-
-/// Calculate the top-left position of the delete dialog given an explicit dialog size
-/// (e.g. scaled to physical pixels), centered over `note_geom` and clamped to `work_area`.
-pub fn calculate_dialog_position_scaled(
-    note_geom: (i32, i32, u32, u32),
-    dialog_size: (f32, f32),
-    work_area: Option<(f32, f32, f32, f32)>,
-) -> (f32, f32) {
-    let (nx, ny, nw, nh) = note_geom;
-    let (dw, dh) = dialog_size;
-    let mut x = nx as f32 + (nw as f32 - dw) / 2.0;
-    let mut y = ny as f32 + (nh as f32 - dh) / 2.0;
-
-    if let Some((wax, way, waw, wah)) = work_area {
-        if x + dw > wax + waw {
-            x = wax + waw - dw;
-        }
-        if x < wax {
-            x = wax;
-        }
-        if y + dh > way + wah {
-            y = way + wah - dh;
-        }
-        if y < way {
-            y = way;
-        }
-    }
-
-    (x, y)
-}
 
 fn hwnd_of(ui: &DeleteNoteDialog) -> Option<isize> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -72,7 +33,8 @@ pub struct DeleteDialog {
 impl DeleteDialog {
     pub fn open(
         note_id: NoteId,
-        position: (f32, f32),
+        target: ScreenRect,
+        work_areas: &[ScreenRect],
         owner_hwnd: Option<isize>,
         on_keep: Rc<dyn Fn(NoteId)>,
         on_confirm: Rc<dyn Fn(NoteId)>,
@@ -89,7 +51,11 @@ impl DeleteDialog {
                 }
             });
         }
-        ui.window().set_position(slint::PhysicalPosition::new(position.0.round() as i32, position.1.round() as i32));
+        let scale_factor = scale.factor();
+        let dw = (DIALOG_WIDTH * scale_factor).round() as i32;
+        let dh = (DIALOG_HEIGHT * scale_factor).round() as i32;
+        let rect = crate::placement::center_over(target, (dw, dh), work_areas);
+        ui.window().set_position(slint::PhysicalPosition::new(rect.x, rect.y));
 
         {
             let on_keep = on_keep.clone();
@@ -143,12 +109,20 @@ impl DeleteDialog {
         &self.ui
     }
 
-    pub fn invoke_keep(&self) {
-        self.ui.invoke_keep();
+    pub fn confirm(&self) {
+        self.ui.invoke_confirm_delete();
     }
 
     pub fn invoke_confirm_delete(&self) {
-        self.ui.invoke_confirm_delete();
+        self.confirm();
+    }
+
+    pub fn cancel(&self) {
+        self.ui.invoke_keep();
+    }
+
+    pub fn invoke_keep(&self) {
+        self.cancel();
     }
 
     pub fn hwnd(&self) -> Option<isize> {
@@ -207,26 +181,7 @@ mod tests {
     use std::cell::Cell;
 
     #[test]
-    fn dialog_position_centers_over_note() {
-        let note_geom = (100, 100, 500, 400);
-        let pos = calculate_dialog_position(note_geom, None);
-        // Note center: (100 + 250, 100 + 200) = (350, 300)
-        // Dialog top-left: (350 - 196, 300 - 126) = (154, 174)
-        assert_eq!(pos, (154.0, 174.0));
-    }
-
-    #[test]
-    fn dialog_position_clamps_to_work_area() {
-        let note_geom = (0, 0, 300, 300);
-        let work_area = Some((50.0, 50.0, 1920.0, 1080.0));
-        let pos = calculate_dialog_position(note_geom, work_area);
-        // Center would put top-left at (150 - 240, 150 - 170) = (-90, -20)
-        // Clamped to work area (50, 50)
-        assert_eq!(pos, (50.0, 50.0));
-    }
-
-    #[test]
-    fn delete_dialog_callbacks_and_properties() {
+    fn delete_dialog_controller_lifecycle_placement_and_semantic_actions() {
         let kept = Rc::new(Cell::new(false));
         let confirmed = Rc::new(Cell::new(false));
 
@@ -242,16 +197,37 @@ mod tests {
 
         let on_start_move = Rc::new(|_| {});
 
-        let dialog = DeleteDialog::open(42, (100.0, 100.0), None, on_keep, on_confirm, on_start_move)
+        let target = ScreenRect::new(100, 100, 500, 400);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
+
+        let dialog = DeleteDialog::open(42, target, &work_areas, None, on_keep, on_confirm, on_start_move)
             .expect("DeleteDialog::open");
 
         assert_eq!(dialog.note_id(), 42);
         assert_eq!(dialog.ui().get_title_text(), "Delete this note?");
         assert_eq!(dialog.ui().get_message_text(), "You can't get it back.");
 
+        // Target center: (100 + 250, 100 + 200) = (350, 300)
+        // Dialog size: 392 x 252 (at 100% scale)
+        // Expected top-left: (350 - 196, 300 - 126) = (154, 174)
+        let (x, y) = dialog.position();
+        assert_eq!((x.round() as i32, y.round() as i32), (154, 174));
+
+        // Semantic cancel()
+        dialog.cancel();
+        assert!(kept.get());
+
+        // Semantic confirm()
+        dialog.confirm();
+        assert!(confirmed.get());
+
+        // Backward-compatible alias invoke_keep()
+        kept.set(false);
         dialog.invoke_keep();
         assert!(kept.get());
 
+        // Backward-compatible alias invoke_confirm_delete()
+        confirmed.set(false);
         dialog.invoke_confirm_delete();
         assert!(confirmed.get());
     }

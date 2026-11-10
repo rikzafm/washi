@@ -2,7 +2,7 @@
 
 use crate::all_notes::AllNotesView;
 use crate::settings::SettingsView;
-use crate::delete_dialog::{calculate_dialog_position_scaled, DeleteDialog, DIALOG_HEIGHT, DIALOG_WIDTH};
+use crate::delete_dialog::DeleteDialog;
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
 use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
 use crate::images::{self, ImageError, Source, Stored};
@@ -1634,14 +1634,14 @@ impl App {
     /// Invoke "Keep it" callback on the active delete dialog (for testing).
     pub fn invoke_keep_note(&self) {
         if let Some(d) = self.delete_dialog() {
-            d.invoke_keep();
+            d.cancel();
         }
     }
 
     /// Invoke "Delete" callback on the active delete dialog (for testing).
     pub fn invoke_confirm_delete(&self) {
         if let Some(d) = self.delete_dialog() {
-            d.invoke_confirm_delete();
+            d.confirm();
         }
     }
 
@@ -1669,26 +1669,10 @@ impl App {
         let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
         let Some(note) = note else { return };
 
-        let scale = note.ui().window().scale_factor();
         let phys_pos = note.ui().window().position();
         let phys_size = note.ui().window().size();
-        let dialog_phys_w = DIALOG_WIDTH * scale;
-        let dialog_phys_h = DIALOG_HEIGHT * scale;
-
-        let cx = phys_pos.x as f32 + phys_size.width as f32 / 2.0;
-        let cy = phys_pos.y as f32 + phys_size.height as f32 / 2.0;
-        let work_area = self.physical_work_area_for(cx, cy).map(|wa| (
-            wa.x,
-            wa.y,
-            wa.w,
-            wa.h,
-        ));
-
-        let pos = calculate_dialog_position_scaled(
-            (phys_pos.x, phys_pos.y, phys_size.width, phys_size.height),
-            (dialog_phys_w, dialog_phys_h),
-            work_area,
-        );
+        let target = ScreenRect::new(phys_pos.x, phys_pos.y, phys_size.width as i32, phys_size.height as i32);
+        let work_areas = self.0.env.window_control.work_areas();
 
         let weak = Rc::downgrade(&self.0);
         let on_keep = Rc::new(move |_note_id| {
@@ -1713,7 +1697,7 @@ impl App {
             }
         });
 
-        match DeleteDialog::open(id, pos, note.hwnd(), on_keep, on_confirm, on_start_move) {
+        match DeleteDialog::open(id, target, &work_areas, note.hwnd(), on_keep, on_confirm, on_start_move) {
             Ok(dialog) => {
                 *self.0.delete_dialog.borrow_mut() = Some(Rc::new(dialog));
             }
