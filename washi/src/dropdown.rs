@@ -108,6 +108,8 @@ pub struct DropdownMetrics {
 
 /// Height of the compact card (header 50 + action bar 72), logical px.
 pub const COMPACT_CARD_HEIGHT: f32 = 128.0;
+/// Width of the default card, logical px.
+pub const DEFAULT_CARD_WIDTH: f32 = 268.0;
 
 impl DropdownMetrics {
     pub fn compact() -> Self {
@@ -127,7 +129,7 @@ impl DropdownMetrics {
 impl Default for DropdownMetrics {
     fn default() -> Self {
         Self {
-            card_width: 268.0,
+            card_width: DEFAULT_CARD_WIDTH,
             card_height: 320.0,
             shadow_margin: 16.0,
             gap: 4.0,
@@ -147,7 +149,7 @@ pub fn calculate_dropdown_position(
     metrics: &DropdownMetrics,
     work_area: Option<Rect>,
 ) -> (f32, f32) {
-    let offset_x = 14.0 * (metrics.card_width / 268.0);
+    let offset_x = 14.0 * (metrics.card_width / DEFAULT_CARD_WIDTH);
     let mut card_x = button_rect.x - offset_x;
     let mut card_y = button_rect.bottom() + metrics.gap;
 
