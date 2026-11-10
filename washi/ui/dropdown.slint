@@ -59,6 +59,10 @@ export component DropdownMenuWindow inherits Window {
     background: transparent;
     always-on-top: true;
 
+    out property <float> scale-factor: 1px / 1phx;
+    callback scale-factor-changed();
+    changed scale-factor => { root.scale-factor-changed(); }
+
     in property <length> card-width: 268px;
     in property <length> card-height: 320px;
     /// The trimmed card of the All Notes editor: header and New only.

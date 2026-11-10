@@ -5,7 +5,8 @@
 
 use crate::document::Document;
 use crate::note_window::DropdownMenuWindow;
-use crate::platform::NoteId;
+use crate::platform::{NoteId, ScreenRect};
+use crate::ui_scale::WindowScale;
 use slint::ComponentHandle;
 use std::rc::Rc;
 
@@ -74,29 +75,6 @@ pub fn extract_title_and_preview(content: &str) -> (String, String) {
     (title, preview)
 }
 
-/// A rectangle in logical coordinates.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-}
-
-impl Rect {
-    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h }
-    }
-
-    pub fn right(&self) -> f32 {
-        self.x + self.w
-    }
-
-    pub fn bottom(&self) -> f32 {
-        self.y + self.h
-    }
-}
-
 /// Sizing and layout metrics for the dropdown popup.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DropdownMetrics {
@@ -137,85 +115,69 @@ impl Default for DropdownMetrics {
     }
 }
 
-/// Calculate the top-left (x, y) coordinates of the dropdown window in logical screen coordinates.
-///
-/// Anchors the card's top-left near the button (offset slightly left by ~14px so the button
-/// sits neatly above the "JUMP TO" header), and places it immediately below the button (`button.bottom() + gap`).
-/// If it overflows the bottom of the work area, flips above the button.
-/// Clamps horizontally and vertically within the work area if provided.
-/// The resulting position is offset by `shadow_margin` so the card aligns with the trigger.
-pub fn calculate_dropdown_position(
-    button_rect: Rect,
-    metrics: &DropdownMetrics,
-    work_area: Option<Rect>,
-) -> (f32, f32) {
-    let offset_x = 14.0 * (metrics.card_width / DEFAULT_CARD_WIDTH);
-    let mut card_x = button_rect.x - offset_x;
-    let mut card_y = button_rect.bottom() + metrics.gap;
-
-    if let Some(wa) = work_area {
-        // If placing below overflows the bottom of work area:
-        if card_y + metrics.card_height > wa.bottom() {
-            let candidate_y = button_rect.y - metrics.card_height - metrics.gap;
-            if candidate_y >= wa.y {
-                card_y = candidate_y;
-            } else {
-                card_y = (wa.bottom() - metrics.card_height).max(wa.y);
-            }
-        }
-
-        // Clamp card horizontally:
-        if card_x + metrics.card_width > wa.right() {
-            card_x = wa.right() - metrics.card_width;
-        }
-        if card_x < wa.x {
-            card_x = wa.x;
-        }
-    }
-
-    (card_x - metrics.shadow_margin, card_y - metrics.shadow_margin)
-}
-
 /// Controller managing a live `DropdownMenuWindow`.
 pub struct DropdownMenu {
     note_id: NoteId,
     ui: DropdownMenuWindow,
+    scale: Rc<WindowScale>,
 }
 
 impl DropdownMenu {
     pub fn open(
         note_id: NoteId,
-        position: (f32, f32),
+        trigger: ScreenRect,
+        work_areas: &[ScreenRect],
         owner_hwnd: Option<isize>,
         on_dismiss: Rc<dyn Fn(NoteId)>,
     ) -> Result<Self, slint::PlatformError> {
-        Self::open_with(note_id, position, owner_hwnd, on_dismiss, false)
+        Self::open_with(note_id, trigger, work_areas, owner_hwnd, on_dismiss, false)
     }
 
     /// The card of the All Notes editor: no jump list and no "All notes" button, so it is shorter.
     pub fn open_compact(
         note_id: NoteId,
-        position: (f32, f32),
+        trigger: ScreenRect,
+        work_areas: &[ScreenRect],
         owner_hwnd: Option<isize>,
         on_dismiss: Rc<dyn Fn(NoteId)>,
     ) -> Result<Self, slint::PlatformError> {
-        Self::open_with(note_id, position, owner_hwnd, on_dismiss, true)
+        Self::open_with(note_id, trigger, work_areas, owner_hwnd, on_dismiss, true)
     }
 
     fn open_with(
         note_id: NoteId,
-        position: (f32, f32),
+        trigger: ScreenRect,
+        work_areas: &[ScreenRect],
         owner_hwnd: Option<isize>,
         on_dismiss: Rc<dyn Fn(NoteId)>,
         compact: bool,
     ) -> Result<Self, slint::PlatformError> {
         let ui = DropdownMenuWindow::new()?;
-        let scale = crate::ui_scale::WindowScale::attach(ui.window());
-        if compact {
+        let scale = Rc::new(WindowScale::attach(ui.window()));
+        {
+            let (weak, scale) = (ui.as_weak(), scale.clone());
+            ui.on_scale_factor_changed(move || {
+                if let Some(ui) = weak.upgrade() {
+                    scale.resync(ui.window(), false);
+                }
+            });
+        }
+        let metrics = if compact {
             ui.set_compact(true);
             ui.set_card_height(COMPACT_CARD_HEIGHT);
-        }
-        ui.window().set_position(slint::PhysicalPosition::new(position.0.round() as i32, position.1.round() as i32));
+            DropdownMetrics::compact()
+        } else {
+            DropdownMetrics::default()
+        };
+
+        let sf = scale.factor();
+        let win_w = ((metrics.card_width + 2.0 * metrics.shadow_margin) * sf).round() as i32;
+        let win_h = ((metrics.card_height + 2.0 * metrics.shadow_margin) * sf).round() as i32;
+        let gap = (metrics.gap * sf).round() as i32;
+        let margin = (metrics.shadow_margin * sf).round() as i32;
+
+        let rect = crate::placement::anchor_below(trigger, (win_w, win_h), gap, margin, work_areas);
+        ui.window().set_position(slint::PhysicalPosition::new(rect.x, rect.y));
 
         {
             let on_dismiss = on_dismiss.clone();
@@ -233,7 +195,7 @@ impl DropdownMenu {
 
         ui.show()?;
         scale.resync(ui.window(), true);
-        let menu = Self { note_id, ui };
+        let menu = Self { note_id, ui, scale };
 
         #[cfg(target_os = "windows")]
         if let Some(owner) = owner_hwnd {
@@ -291,7 +253,15 @@ impl DropdownMenu {
         &self.ui
     }
 
+    pub fn scale(&self) -> &Rc<WindowScale> {
+        &self.scale
+    }
+
     pub fn pinned(&self) -> bool {
+        self.is_pinned()
+    }
+
+    pub fn is_pinned(&self) -> bool {
         self.ui.get_pinned()
     }
 
@@ -313,28 +283,52 @@ impl DropdownMenu {
         let _ = self.ui.hide();
     }
 
-    pub fn invoke_toggle_pin(&self) {
+    pub fn toggle_pin(&self) {
         self.ui.invoke_toggle_pin();
     }
 
-    pub fn invoke_delete_note(&self) {
+    pub fn invoke_toggle_pin(&self) {
+        self.toggle_pin();
+    }
+
+    pub fn delete_note(&self) {
         self.ui.invoke_delete_note();
     }
 
-    pub fn invoke_close_note(&self) {
+    pub fn invoke_delete_note(&self) {
+        self.delete_note();
+    }
+
+    pub fn close_note(&self) {
         self.ui.invoke_close_note();
     }
 
-    pub fn invoke_new_note(&self) {
+    pub fn invoke_close_note(&self) {
+        self.close_note();
+    }
+
+    pub fn new_note(&self) {
         self.ui.invoke_new_note();
     }
 
-    pub fn invoke_all_notes(&self) {
+    pub fn invoke_new_note(&self) {
+        self.new_note();
+    }
+
+    pub fn all_notes(&self) {
         self.ui.invoke_all_notes();
     }
 
-    pub fn invoke_settings(&self) {
+    pub fn invoke_all_notes(&self) {
+        self.all_notes();
+    }
+
+    pub fn settings(&self) {
         self.ui.invoke_settings();
+    }
+
+    pub fn invoke_settings(&self) {
+        self.settings();
     }
 
     /// Whether the card offers Settings (not the compact one).
@@ -342,12 +336,20 @@ impl DropdownMenu {
         self.ui.get_settings_visible()
     }
 
-    pub fn invoke_select_note(&self, id: NoteId) {
+    pub fn select_note(&self, id: NoteId) {
         self.ui.invoke_select_note(id as i32);
     }
 
-    pub fn invoke_dismiss(&self) {
+    pub fn invoke_select_note(&self, id: NoteId) {
+        self.select_note(id);
+    }
+
+    pub fn dismiss(&self) {
         self.ui.invoke_dismiss();
+    }
+
+    pub fn invoke_dismiss(&self) {
+        self.dismiss();
     }
 
     pub fn notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
@@ -380,12 +382,76 @@ impl Drop for DropdownMenu {
 
 #[cfg(test)]
 pub(crate) fn init_test_platform() {
+    use std::cell::Cell;
+    use std::rc::Weak;
+    use slint::platform::{Platform, WindowAdapter, WindowProperties, Renderer};
+    use slint::platform::software_renderer::{RepaintBufferType, SoftwareRenderer};
+    use slint::{WindowPosition, WindowSize};
+
+    struct TestWindow {
+        window: slint::Window,
+        renderer: SoftwareRenderer,
+        pos: Cell<slint::PhysicalPosition>,
+        size: Cell<slint::PhysicalSize>,
+    }
+
+    impl TestWindow {
+        fn new() -> Rc<Self> {
+            Rc::new_cyclic(|w: &Weak<Self>| TestWindow {
+                window: slint::Window::new(w.clone()),
+                renderer: SoftwareRenderer::new_with_repaint_buffer_type(RepaintBufferType::NewBuffer),
+                pos: Cell::new(slint::PhysicalPosition::new(0, 0)),
+                size: Cell::new(slint::PhysicalSize::new(0, 0)),
+            })
+        }
+    }
+
+    impl WindowAdapter for TestWindow {
+        fn window(&self) -> &slint::Window {
+            &self.window
+        }
+        fn renderer(&self) -> &dyn Renderer {
+            &self.renderer
+        }
+        fn position(&self) -> Option<slint::PhysicalPosition> {
+            Some(self.pos.get())
+        }
+        fn set_position(&self, position: WindowPosition) {
+            let sf = self.window.scale_factor();
+            self.pos.set(match position {
+                WindowPosition::Logical(l) => slint::PhysicalPosition::new((l.x * sf).round() as i32, (l.y * sf).round() as i32),
+                WindowPosition::Physical(p) => p,
+            });
+        }
+        fn size(&self) -> slint::PhysicalSize {
+            self.size.get()
+        }
+        fn set_size(&self, size: WindowSize) {
+            let sf = self.window.scale_factor();
+            let p = match size {
+                WindowSize::Logical(l) => slint::PhysicalSize::new((l.width * sf).round() as u32, (l.height * sf).round() as u32),
+                WindowSize::Physical(p) => p,
+            };
+            self.size.set(p);
+            self.window.dispatch_event(slint::platform::WindowEvent::Resized { size: p.to_logical(sf) });
+        }
+        fn set_visible(&self, _visible: bool) -> Result<(), slint::PlatformError> {
+            Ok(())
+        }
+        fn request_redraw(&self) {}
+        fn update_window_properties(&self, properties: WindowProperties<'_>) {
+            let c = properties.layout_constraints();
+            let sf = self.window.scale_factor();
+            let p = slint::PhysicalSize::new((c.preferred.width * sf).round() as u32, (c.preferred.height * sf).round() as u32);
+            self.size.set(p);
+            self.window.dispatch_event(slint::platform::WindowEvent::Resized { size: p.to_logical(sf) });
+        }
+    }
+
     struct TestPlatform;
-    impl slint::platform::Platform for TestPlatform {
-        fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
-            Ok(slint::platform::software_renderer::MinimalSoftwareWindow::new(
-                slint::platform::software_renderer::RepaintBufferType::NewBuffer,
-            ))
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(TestWindow::new())
         }
     }
     let _ = slint::platform::set_platform(Box::new(TestPlatform));
@@ -398,78 +464,73 @@ mod tests {
 
     #[test]
     fn normal_positioning_anchors_below_and_near_button_left() {
-        let metrics = DropdownMetrics::default();
-        let button = Rect::new(500.0, 100.0, 36.0, 26.0);
-        let work_area = Some(Rect::new(0.0, 0.0, 1920.0, 1080.0));
-
-        let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
-        // button.x = 500.0
-        // card_x = 500.0 - 14.0 = 486.0
-        // card_y = 100.0 + 26.0 + 4.0 = 130.0
-        // win_x = 486.0 - 16.0 = 470.0
-        // win_y = 130.0 - 16.0 = 114.0
-        assert_eq!((win_x, win_y), (470.0, 114.0));
+        init_test_platform();
+        let trigger = ScreenRect::new(500, 100, 36, 26);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
+        let menu = DropdownMenu::open(1, trigger, &work_areas, None, Rc::new(|_| ())).unwrap();
+        // button.x = 500
+        // card_x = 500 - 14 = 486
+        // card_y = 100 + 26 + 4 = 130
+        // win_x = 486 - 16 = 470
+        // win_y = 130 - 16 = 114
+        assert_eq!(menu.position(), (470.0, 114.0));
     }
 
     #[test]
     fn flips_above_when_overflowing_bottom() {
-        let metrics = DropdownMetrics::default();
-        let button = Rect::new(500.0, 900.0, 36.0, 26.0);
-        let work_area = Some(Rect::new(0.0, 0.0, 1920.0, 1080.0));
-
-        let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
+        init_test_platform();
+        let trigger = ScreenRect::new(500, 900, 36, 26);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
+        let menu = DropdownMenu::open(1, trigger, &work_areas, None, Rc::new(|_| ())).unwrap();
         // Candidate below: 900 + 26 + 4 + 320 = 1250 > 1080.
-        // Candidate above: 900 - 320 - 4 = 576.0 (>= 0).
+        // Candidate above: 900 - 320 - 4 = 576 (>= 0).
         // win_x = 470.0
         // win_y = 576.0 - 16.0 = 560.0
-        assert_eq!((win_x, win_y), (470.0, 560.0));
+        assert_eq!(menu.position(), (470.0, 560.0));
     }
 
     #[test]
     fn clamps_to_work_area_left_edge() {
-        let metrics = DropdownMetrics::default();
-        let button = Rect::new(5.0, 100.0, 36.0, 26.0);
-        let work_area = Some(Rect::new(0.0, 0.0, 1920.0, 1080.0));
-
-        let (win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
+        init_test_platform();
+        let trigger = ScreenRect::new(5, 100, 36, 26);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
+        let menu = DropdownMenu::open(1, trigger, &work_areas, None, Rc::new(|_| ())).unwrap();
         // card_x = 5 - 14 = -9 < 0. Clamped to 0.
         // win_x = 0 - 16.0 = -16.0
         // win_y = 100 + 26 + 4 - 16 = 114.0
-        assert_eq!((win_x, win_y), (-16.0, 114.0));
+        assert_eq!(menu.position(), (-16.0, 114.0));
     }
 
     #[test]
     fn clamps_to_work_area_right_edge() {
-        let metrics = DropdownMetrics::default();
-        let button = Rect::new(700.0, 100.0, 36.0, 26.0);
-        let work_area = Some(Rect::new(0.0, 0.0, 800.0, 600.0));
-
-        let (win_x, _win_y) = calculate_dropdown_position(button, &metrics, work_area);
+        init_test_platform();
+        let trigger = ScreenRect::new(700, 100, 36, 26);
+        let work_areas = [ScreenRect::new(0, 0, 800, 600)];
+        let menu = DropdownMenu::open(1, trigger, &work_areas, None, Rc::new(|_| ())).unwrap();
         // card_x would be 700 - 14 = 686. 686 + 268 = 954 > 800.
         // card_x clamped to 800 - 268 = 532.
         // win_x = 532 - 16 = 516.0
-        assert_eq!(win_x, 516.0);
+        assert_eq!(menu.position().0, 516.0);
     }
 
     #[test]
     fn no_work_area_calculates_without_clamping() {
-        let metrics = DropdownMetrics::default();
-        let button = Rect::new(10.0, 900.0, 36.0, 26.0);
-
-        let (win_x, win_y) = calculate_dropdown_position(button, &metrics, None);
+        init_test_platform();
+        let trigger = ScreenRect::new(10, 900, 36, 26);
+        let menu = DropdownMenu::open(1, trigger, &[], None, Rc::new(|_| ())).unwrap();
         // card_x = 10 - 14 = -4.0
         // win_x = -4.0 - 16.0 = -20.0
         // win_y = 900 + 26 + 4 - 16 = 914.0
-        assert_eq!((win_x, win_y), (-20.0, 914.0));
+        assert_eq!(menu.position(), (-20.0, 914.0));
     }
 
     #[test]
     fn flips_and_clamps_when_work_area_is_small() {
-        let metrics = DropdownMetrics::default();
-        let button = Rect::new(100.0, 100.0, 28.0, 24.0);
-        let work_area = Some(Rect::new(0.0, 0.0, 800.0, 200.0));
-        let (_win_x, win_y) = calculate_dropdown_position(button, &metrics, work_area);
-        assert_eq!(win_y, -16.0);
+        init_test_platform();
+        let trigger = ScreenRect::new(100, 100, 28, 24);
+        let work_areas = [ScreenRect::new(0, 0, 800, 200)];
+        let menu = DropdownMenu::open(1, trigger, &work_areas, None, Rc::new(|_| ())).unwrap();
+        assert_eq!(menu.position().1, -16.0);
     }
 
     #[test]
@@ -534,18 +595,24 @@ mod tests {
     #[test]
     fn dropdown_menu_pinned_state_helpers() {
         init_test_platform();
+        let trigger = ScreenRect::new(100, 200, 24, 24);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
         let menu = DropdownMenu::open(
             99,
-            (100.0, 200.0),
+            trigger,
+            &work_areas,
             None,
             Rc::new(|_| ()),
         )
         .expect("DropdownMenu::open");
 
+        assert!(!menu.is_pinned());
         assert!(!menu.pinned());
         menu.set_pinned(true);
+        assert!(menu.is_pinned());
         assert!(menu.pinned());
         menu.set_pinned(false);
+        assert!(!menu.is_pinned());
         assert!(!menu.pinned());
         menu.set_owner(0);
         menu.ensure_on_top();
@@ -556,9 +623,12 @@ mod tests {
         init_test_platform();
         let dismissed = Rc::new(Cell::new(false));
         let dismissed_clone = dismissed.clone();
+        let trigger = ScreenRect::new(100, 200, 24, 24);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
         let menu = DropdownMenu::open(
             42,
-            (100.0, 200.0),
+            trigger,
+            &work_areas,
             None,
             Rc::new(move |id| {
                 if id == 42 {
@@ -578,6 +648,103 @@ mod tests {
         assert!(all_notes_called.get());
         menu.ui().invoke_dismiss();
         assert!(dismissed.get());
+    }
+
+    #[test]
+    fn dropdown_menu_semantic_actions() {
+        init_test_platform();
+        let trigger = ScreenRect::new(100, 200, 24, 24);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
+        let dismissed = Rc::new(Cell::new(false));
+        let dismissed_clone = dismissed.clone();
+        let menu = DropdownMenu::open(
+            1,
+            trigger,
+            &work_areas,
+            None,
+            Rc::new(move |_| dismissed_clone.set(true)),
+        )
+        .unwrap();
+
+        let pin_toggled = Rc::new(Cell::new(false));
+        {
+            let pt = pin_toggled.clone();
+            menu.ui().on_toggle_pin(move || pt.set(true));
+        }
+        menu.toggle_pin();
+        assert!(pin_toggled.get());
+
+        let note_deleted = Rc::new(Cell::new(false));
+        {
+            let nd = note_deleted.clone();
+            menu.ui().on_delete_note(move || nd.set(true));
+        }
+        menu.delete_note();
+        assert!(note_deleted.get());
+
+        let close_called = Rc::new(Cell::new(false));
+        {
+            let cc = close_called.clone();
+            menu.ui().on_close_note(move || cc.set(true));
+        }
+        menu.close_note();
+        assert!(close_called.get());
+
+        let new_called = Rc::new(Cell::new(false));
+        {
+            let nc = new_called.clone();
+            menu.ui().on_new_note(move || nc.set(true));
+        }
+        menu.new_note();
+        assert!(new_called.get());
+
+        let all_called = Rc::new(Cell::new(false));
+        {
+            let ac = all_called.clone();
+            menu.ui().on_all_notes(move || ac.set(true));
+        }
+        menu.all_notes();
+        assert!(all_called.get());
+
+        let settings_called = Rc::new(Cell::new(false));
+        {
+            let sc = settings_called.clone();
+            menu.ui().on_settings(move || sc.set(true));
+        }
+        menu.settings();
+        assert!(settings_called.get());
+
+        let selected = Rc::new(Cell::new(None));
+        {
+            let sel = selected.clone();
+            menu.ui().on_select_note(move |id| sel.set(Some(id as NoteId)));
+        }
+        menu.select_note(42);
+        assert_eq!(selected.get(), Some(42));
+
+        assert!(menu.settings_visible());
+        assert_eq!(menu.notes().len(), 0);
+        let (w, h) = menu.size();
+        assert!(w > 0.0 && h > 0.0);
+
+        menu.dismiss();
+        assert!(dismissed.get());
+    }
+
+    #[test]
+    fn dropdown_menu_compact_mode() {
+        init_test_platform();
+        let trigger = ScreenRect::new(100, 200, 24, 24);
+        let work_areas = [ScreenRect::new(0, 0, 1920, 1080)];
+        let menu = DropdownMenu::open_compact(
+            2,
+            trigger,
+            &work_areas,
+            None,
+            Rc::new(|_| ()),
+        )
+        .unwrap();
+        assert!(!menu.settings_visible());
     }
 
     #[test]
