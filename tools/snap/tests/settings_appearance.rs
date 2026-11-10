@@ -386,3 +386,231 @@ fn the_sidebar_layout_survives_a_restart() {
     let (s_h, s_above, s_below) = settings_place(&h);
     assert!(near(s_h, SETTINGS_FIT_H) && near(s_below, 0.0) && s_above > 50.0, "Settings: Fit content at the Bottom");
 }
+
+// ---- Sidebar themes ----
+
+// Theme control ids, as `hit-x` in appearance-tab.slint defines them.
+const THEME_SWITCH: i32 = 40;
+/// The first Theme dropdown (both Sidebars while shared, the Settings sidebar's while split) and the
+/// Notes sidebar's; each one's options follow its id (Default first).
+const THEME_A: i32 = 41;
+const THEME_B: i32 = 46;
+const DEFAULT: i32 = 0;
+const TRANSPARENT: i32 = 1;
+const PAPER: i32 = 2;
+const GLASS: i32 = 3;
+const THEME_NAMES: [&str; 4] = ["Default", "Transparent", "Paper", "Liquid glass"];
+
+const SLATE: [u8; 3] = [0xD6, 0xDB, 0xE2];
+const PAPER_FILL: [u8; 3] = [0xFF, 0xFF, 0xFD];
+const DESK: [u8; 3] = snap::DESK;
+
+fn near_rgb(p: [u8; 3], want: [u8; 3]) -> bool {
+    p.iter().zip(want).all(|(a, b)| (*a as i32 - b as i32).abs() <= 1)
+}
+
+/// Pick `theme` from the Theme dropdown `dropdown` (THEME_A or THEME_B) on the open Appearance Tab.
+fn pick_theme(h: &mut Harness, dropdown: i32, theme: i32) {
+    h.settings_appearance_click(dropdown);
+    h.settings_appearance_click(dropdown + 1 + theme);
+}
+
+/// A blank spot of the Settings Sidebar's panel (under its Tabs), as rendered.
+fn settings_panel_spot(h: &Harness) -> [u8; 3] {
+    let shot = h.render_settings();
+    shot.pixel(143, shot.height / 2 + 200)
+}
+
+/// A blank spot of the All notes Sidebar's panel (right of the New-note button, under the rows).
+fn all_notes_panel_spot(h: &Harness) -> [u8; 3] {
+    let shot = h.render_all_notes_on_desk().expect("All notes is open");
+    shot.pixel(220, shot.height / 2 + 150)
+}
+
+fn open_all_notes(h: &mut Harness, note: usize) {
+    h.toggle_dropdown(note);
+    h.invoke_dropdown_all_notes();
+    h.advance_frames(ms(600));
+    assert!(h.is_all_notes_open());
+}
+
+/// What a theme looks like at a blank panel spot.
+fn looks_like(p: [u8; 3], theme: i32) -> bool {
+    match theme {
+        DEFAULT => near_rgb(p, SLATE),
+        TRANSPARENT => near_rgb(p, DESK),
+        PAPER => near_rgb(p, PAPER_FILL),
+        // A translucent white over the desk: clearly lighter than it, not paper-white.
+        _ => p.iter().zip(DESK).all(|(a, d)| *a as i32 >= d as i32 + 6) && !near_rgb(p, PAPER_FILL),
+    }
+}
+
+#[test]
+fn the_theme_is_default_and_shared_until_chosen() {
+    let mut h = started();
+    open_on(&mut h, tab::APPEARANCE);
+    assert!(h.settings_theme_shared());
+    assert_eq!(h.settings_theme_rows(), [("Both sidebars".to_string(), "Default".to_string())]);
+    assert!(near_rgb(settings_panel_spot(&h), SLATE), "{:?}", settings_panel_spot(&h));
+}
+
+#[test]
+fn each_theme_draws_the_settings_sidebar_at_once() {
+    let mut h = started();
+    open_on(&mut h, tab::APPEARANCE);
+    for theme in [TRANSPARENT, PAPER, GLASS, DEFAULT] {
+        pick_theme(&mut h, THEME_A, theme);
+        assert_eq!(h.settings_appearance_open_list(), -1, "choosing closes the list");
+        assert_eq!(h.settings_theme_rows()[0].1, THEME_NAMES[theme as usize]);
+        let p = settings_panel_spot(&h);
+        assert!(looks_like(p, theme), "{}: panel spot {p:?}", THEME_NAMES[theme as usize]);
+    }
+}
+
+#[test]
+fn liquid_glass_is_lighter_at_the_top_than_at_the_bottom() {
+    let mut h = started();
+    open_on(&mut h, tab::APPEARANCE);
+    pick_theme(&mut h, THEME_A, GLASS);
+    let shot = h.render_settings();
+    let (top, bottom) = (shot.pixel(143, shot.height / 2 - 280), shot.pixel(143, shot.height / 2 + 280));
+    let luma = |p: [u8; 3]| p.iter().map(|&c| c as i32).sum::<i32>();
+    assert!(luma(top) > luma(bottom) + 6, "a soft vertical gradient: top {top:?}, bottom {bottom:?}");
+}
+
+#[test]
+fn a_shared_theme_draws_the_all_notes_sidebar_too() {
+    let mut h = started();
+    open_on(&mut h, tab::APPEARANCE);
+    pick_theme(&mut h, THEME_A, PAPER);
+    close_settings(&mut h);
+    open_all_notes(&mut h, 0);
+    let p = all_notes_panel_spot(&h);
+    assert!(near_rgb(p, PAPER_FILL), "{p:?}");
+}
+
+#[test]
+fn an_open_all_notes_sidebar_follows_the_theme_live() {
+    let mut h = started();
+    new_note(&mut h);
+    open_all_notes(&mut h, 1);
+    assert!(near_rgb(all_notes_panel_spot(&h), SLATE));
+    open_on(&mut h, tab::APPEARANCE);
+    pick_theme(&mut h, THEME_A, TRANSPARENT);
+    let p = all_notes_panel_spot(&h);
+    assert!(near_rgb(p, DESK), "{p:?}");
+}
+
+#[test]
+fn split_themes_start_from_the_shared_value_and_rejoin_on_the_settings_one() {
+    let mut h = started();
+    open_on(&mut h, tab::APPEARANCE);
+    pick_theme(&mut h, THEME_A, PAPER);
+
+    h.settings_appearance_click(THEME_SWITCH);
+    assert!(!h.settings_theme_shared());
+    assert_eq!(
+        h.settings_theme_rows(),
+        [("Settings sidebar".to_string(), "Paper".to_string()), ("Notes sidebar".to_string(), "Paper".to_string())]
+    );
+
+    pick_theme(&mut h, THEME_B, TRANSPARENT);
+    assert_eq!(h.settings_theme_rows()[1].1, "Transparent");
+    assert!(near_rgb(settings_panel_spot(&h), PAPER_FILL), "the Settings sidebar keeps its own");
+    close_settings(&mut h);
+    open_all_notes(&mut h, 0);
+    assert!(near_rgb(all_notes_panel_spot(&h), DESK), "the Notes sidebar follows its own");
+    h.press_all_notes_escape();
+    h.advance_frames(ms(600));
+    assert!(!h.is_all_notes_open());
+
+    open_on(&mut h, tab::APPEARANCE);
+    pick_theme(&mut h, THEME_A, GLASS);
+    h.settings_appearance_click(THEME_SWITCH);
+    assert!(h.settings_theme_shared());
+    assert_eq!(h.settings_theme_rows(), [("Both sidebars".to_string(), "Liquid glass".to_string())]);
+    close_settings(&mut h);
+    open_all_notes(&mut h, 0);
+    let p = all_notes_panel_spot(&h);
+    assert!(looks_like(p, GLASS), "both take the Settings sidebar's theme: {p:?}");
+}
+
+#[test]
+fn the_themes_survive_a_restart() {
+    let mut h = started();
+    open_on(&mut h, tab::APPEARANCE);
+    h.settings_appearance_click(THEME_SWITCH);
+    pick_theme(&mut h, THEME_A, GLASS);
+    pick_theme(&mut h, THEME_B, PAPER);
+    close_settings(&mut h);
+
+    h.restart().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    open_on(&mut h, tab::APPEARANCE);
+    assert!(!h.settings_theme_shared());
+    assert_eq!(
+        h.settings_theme_rows(),
+        [("Settings sidebar".to_string(), "Liquid glass".to_string()), ("Notes sidebar".to_string(), "Paper".to_string())]
+    );
+    assert!(looks_like(settings_panel_spot(&h), GLASS));
+    close_settings(&mut h);
+    open_all_notes(&mut h, 0);
+    assert!(near_rgb(all_notes_panel_spot(&h), PAPER_FILL));
+}
+
+/// How many near-white pixels sit in the box (x0..x1, y0..y1) of a shot: a light text shadow (the
+/// slate panel, the desk and the dark ink have none).
+fn bright_pixels(shot: &snap::shot::Snapshot, x0: u32, x1: u32, y0: u32, y1: u32) -> usize {
+    (y0..y1)
+        .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+        .filter(|&(x, y)| shot.pixel(x, y).iter().all(|&c| c >= 0xEC))
+        .count()
+}
+
+#[test]
+fn transparent_sidebar_labels_carry_a_light_text_shadow() {
+    let mut h = started();
+    new_note(&mut h);
+    open_all_notes(&mut h, 1);
+    open_on(&mut h, tab::APPEARANCE);
+
+    // The "Settings" title and the "Notes" header, clear of the lit Tab and of the rows.
+    let title = |h: &Harness| {
+        let s = h.render_settings();
+        bright_pixels(&s, 20, 220, s.height / 2 - 286, s.height / 2 - 220)
+    };
+    let header = |h: &Harness| {
+        let s = h.render_all_notes_on_desk().unwrap();
+        let top = s.height / 2 - (s.height - 84) / 2;
+        bright_pixels(&s, 20, 140, top + 10, top + 60)
+    };
+    assert_eq!((title(&h), header(&h)), (0, 0), "Default: no shadow");
+    pick_theme(&mut h, THEME_A, TRANSPARENT);
+    assert!(title(&h) > 50, "the Settings title has a shadow: {}", title(&h));
+    assert!(header(&h) > 50, "the Notes header has a shadow: {}", header(&h));
+}
+
+#[test]
+fn the_theme_switch_and_the_sidebar_groups_switch_are_independent() {
+    let mut h = both_sidebars();
+    // The Theme switch off: Height still drives both Sidebars.
+    h.settings_appearance_click(THEME_SWITCH);
+    assert!(!h.settings_theme_shared());
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    let ((s_h, ..), (n_h, ..)) = (settings_place(&h), notes_place(&h));
+    assert!(near(s_h, SETTINGS_FIT_H), "Settings Fit content: {s_h}");
+    assert!(n_h < notes_place_match(&h) - 50.0, "Notes Fit content too: {n_h}");
+
+    // The Sidebar group's switch off: the Theme switch stays off, and back on it does not move it.
+    h.settings_appearance_click(THEME_SWITCH);
+    assert!(h.settings_theme_shared());
+    h.settings_appearance_click(SAME_SWITCH);
+    assert!(h.settings_theme_shared(), "the Sidebar group's switch leaves the Theme's alone");
+    assert_eq!(h.settings_theme_rows().len(), 1);
+}
+
+/// The All notes Sidebar's Paper height (what Match note makes its panel).
+fn notes_place_match(h: &Harness) -> f32 {
+    let (top, bottom) = h.all_notes_paper_span();
+    bottom - top
+}

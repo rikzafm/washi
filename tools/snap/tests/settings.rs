@@ -222,10 +222,10 @@ const FULL_W: u32 = STRIP as u32 + PAPER_W + 2 * MARGIN as u32;
 
 /// Each tab's Paper height: the laid-out content plus the Paper's padding, at least 600 (the mockup's
 /// 658, 603, 767 and 600; see settings_fidelity.rs), in whole logical px as the window has them.
-/// Appearance (not in the mockup) and Font & Style (since Fade text edge and UI size left it) are
-/// shorter than the minimum.
+/// Font & Style (since Fade text edge and UI size left it) is shorter than the minimum. Appearance is
+/// not in the mockup: see `APPEARANCE_PAPER_H` in settings_fidelity.rs.
 const GENERAL_H: u32 = 740;
-const APPEARANCE_H: u32 = 600;
+const APPEARANCE_H: u32 = 699;
 const STYLE_H: u32 = 600;
 const SHORTCUTS_H: u32 = 768;
 const PRIVACY_H: u32 = 600;

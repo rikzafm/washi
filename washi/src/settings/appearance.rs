@@ -6,7 +6,7 @@
 
 use crate::note_window::SettingsWindow;
 use crate::storage::db::{SettingsHeight, Sidebar, SidebarAnchor, SidebarHeight, SidebarLayout};
-use crate::storage::{Db, DbError};
+use crate::storage::{Db, DbError, SidebarTheme};
 use slint::ComponentHandle;
 use std::rc::Rc;
 
@@ -50,15 +50,29 @@ pub struct Appearance {
     db: Rc<Db>,
     /// Tell the open All notes that the Sidebar layout changed.
     layout_changed: Rc<dyn Fn()>,
+    /// A Sidebar Theme changed: the app redraws any open All notes Sidebar.
+    themes_changed: Rc<dyn Fn()>,
 }
 
 impl Appearance {
-    pub fn new(ui: &SettingsWindow, db: Rc<Db>, layout_changed: Rc<dyn Fn()>) -> Rc<Appearance> {
-        let appearance = Rc::new(Appearance { ui: ui.as_weak(), db, layout_changed });
+    pub fn new(ui: &SettingsWindow, db: Rc<Db>, layout_changed: Rc<dyn Fn()>, themes_changed: Rc<dyn Fn()>) -> Rc<Appearance> {
+        let appearance = Rc::new(Appearance { ui: ui.as_weak(), db, layout_changed, themes_changed });
         let me = Rc::downgrade(&appearance);
         ui.on_set_ui_size(move |i| {
             if let Some(a) = me.upgrade() {
                 a.set_ui_size(i);
+            }
+        });
+        let me = Rc::downgrade(&appearance);
+        ui.on_set_theme_shared(move |shared| {
+            if let Some(a) = me.upgrade() {
+                a.set_theme_shared(shared);
+            }
+        });
+        let me = Rc::downgrade(&appearance);
+        ui.on_set_theme(move |sidebar, theme| {
+            if let Some(a) = me.upgrade() {
+                a.set_theme(sidebar, theme);
             }
         });
         let me = Rc::downgrade(&appearance);
@@ -93,6 +107,37 @@ impl Appearance {
         let Some(&scale) = UI_SCALES.get(i as usize) else { return };
         logged("UI size", self.db.set_ui_scale(scale));
         self.refresh();
+    }
+
+    /// The Theme's "Same for both sidebars" (independent of the Sidebar group's): turning it on gives
+    /// both Sidebars the Settings sidebar's Theme; turning it off leaves each with the value it had
+    /// (the shared one), so nothing changes on screen.
+    fn set_theme_shared(&self, shared: bool) {
+        if shared {
+            let theme = self.db.sidebar_theme(Sidebar::Settings);
+            logged("Notes sidebar theme", self.db.set_sidebar_theme(Sidebar::Notes, theme));
+        }
+        logged("theme switch", self.db.set_sidebar_theme_shared(shared));
+        self.themes_refreshed();
+    }
+
+    /// `s` 0 is the Settings sidebar (both, while shared), 1 the Notes sidebar.
+    fn set_theme(&self, s: i32, theme: i32) {
+        let (Some(s), Some(theme)) = (sidebar(s), SidebarTheme::from_index(theme)) else { return };
+        let targets: &[Sidebar] = match (s, self.db.sidebar_theme_shared()) {
+            (Sidebar::Settings, true) => &[Sidebar::Settings, Sidebar::Notes],
+            (_, false) => std::slice::from_ref(&s),
+            (Sidebar::Notes, true) => return,
+        };
+        for &t in targets {
+            logged("sidebar theme", self.db.set_sidebar_theme(t, theme));
+        }
+        self.themes_refreshed();
+    }
+
+    fn themes_refreshed(&self) {
+        self.refresh();
+        (self.themes_changed)();
     }
 
     /// "Same for both sidebars": turning it off leaves both Sidebars on the values they share;
@@ -136,6 +181,9 @@ impl Appearance {
     fn refresh(&self) {
         let Some(ui) = self.ui.upgrade() else { return };
         ui.set_ui_size(ui_size_index(self.db.ui_scale()));
+        ui.set_theme_shared(self.db.sidebar_theme_shared());
+        ui.set_theme_settings(self.db.sidebar_theme(Sidebar::Settings).index());
+        ui.set_theme_notes(self.db.sidebar_theme(Sidebar::Notes).index());
         ui.set_sidebar_layout_shared(self.db.sidebar_layout_shared());
         let settings = self.db.sidebar_layout(Sidebar::Settings);
         let notes = self.db.sidebar_layout(Sidebar::Notes);

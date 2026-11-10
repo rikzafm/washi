@@ -1,6 +1,9 @@
 // The Sidebar's panel shape, shared by the All notes Sidebar and the Settings page's Sidebar so the
 // two cannot drift apart: only what is drawn on the panel differs. Window px, in the strip the
-// Sidebar adds left of the Paper.
+// Sidebar adds left of the Paper. The panel's backdrop (its Theme) is drawn by `SidebarBackdrop`.
+
+import { Frame, TRect } from "toolbar.slint";
+import { PaperTheme } from "paper-theme.slint";
 
 export global SidebarPanel {
     /// The strip the Sidebar adds to the left of the Paper.
@@ -26,5 +29,142 @@ export global SidebarPanel {
         return anchor == 0 ? paper-top
             : anchor == 2 ? paper-top + paper-h - panel-h
             : paper-top + (paper-h - panel-h) / 2.0;
+    }
+}
+
+/// One copy of a label's light text shadow, offset from the label (px).
+export struct HaloOffset {
+    dx: float,
+    dy: float,
+}
+
+/// The Sidebar Themes (Settings › Appearance), as the panels take them: the dropdown order.
+export global SidebarThemes {
+    out property <[string]> names: ["Default", "Transparent", "Paper", "Liquid glass"];
+    out property <int> default: 0;
+    out property <int> transparent: 1;
+    out property <int> paper: 2;
+    out property <int> glass: 3;
+    /// The Transparent theme's soft light text shadow: copies of each label drawn under it, a pixel
+    /// out all round, so the dark ink reads on any wallpaper.
+    out property <[HaloOffset]> halo: [
+        { dx: 1, dy: 0 }, { dx: -1, dy: 0 }, { dx: 0, dy: 1 }, { dx: 0, dy: -1 },
+        { dx: 1, dy: 1 }, { dx: -1, dy: 1 }, { dx: 1, dy: -1 }, { dx: -1, dy: -1 },
+    ];
+    out property <color> halo-color: rgba(255, 255, 253, 0.55);
+
+    /// The text-shadow copies a label gets in `theme` (none outside Transparent).
+    public pure function halo-for(theme: int) -> [HaloOffset] {
+        return theme == root.transparent ? root.halo : [];
+    }
+}
+
+/// The panel's backdrop in `theme`: a `SidebarPanel.width` by `ph` rounded rectangle centred on the
+/// tilted frame `f` (the panel's centre). Default is the slate fill; Transparent draws nothing; Paper
+/// is the Note's paper with its shadow (no tape); Liquid glass is faked (no real blur): a translucent
+/// white with a soft vertical gradient, a bright 1px rim and a faint shadow.
+export component SidebarBackdrop inherits Rectangle {
+    in property <Frame> f;
+    in property <float> ph;
+    in property <int> theme: SidebarThemes.default;
+
+    property <float> pw: SidebarPanel.width;
+    property <float> u0: -root.pw / 2.0;
+    property <float> v0: -root.ph / 2.0;
+    // The frame the drop shadows hang from: the panel's, dropped straight down.
+    property <Frame> drop: {
+        w: root.f.w,
+        h: root.f.h,
+        cx: root.f.cx,
+        cy: root.f.cy + PaperTheme.shadow-offset-y / 1px,
+        cs: root.f.cs,
+        sn: root.f.sn,
+    };
+
+    x: 0px;
+    y: 0px;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
+
+    // Paper: the Note's own stacked shadow.
+    // (Each layer is a `for` straight under the backdrop: TRects wrapped in a conditional Rectangle
+    // were not drawn.)
+    for i in (root.theme == SidebarThemes.paper ? PaperTheme.shadow-growths.length : 0) : TRect {
+        property <float> growth: PaperTheme.shadow-growths[i] / 1px;
+        f: root.drop;
+        u0: root.u0 - self.growth;
+        v0: root.v0 - self.growth;
+        w: root.pw + 2.0 * self.growth;
+        h: root.ph + 2.0 * self.growth;
+        r: max(0.0, SidebarPanel.radius + self.growth);
+        fill: PaperTheme.shadow-colors[i];
+    }
+
+    // Liquid glass: a faint shadow, as rings just outside the edge (a filled shadow would show
+    // through the translucent glass and grey it), dropped 2px.
+    for k in (root.theme == SidebarThemes.glass ? 3 : 0) : TRect {
+        property <float> growth: [1.0, 2.5, 4.0][k];
+        f: {
+            w: root.f.w,
+            h: root.f.h,
+            cx: root.f.cx,
+            cy: root.f.cy + 2.0,
+            cs: root.f.cs,
+            sn: root.f.sn,
+        };
+        u0: root.u0 - self.growth;
+        v0: root.v0 - self.growth;
+        w: root.pw + 2.0 * self.growth;
+        h: root.ph + 2.0 * self.growth;
+        r: SidebarPanel.radius + self.growth;
+        fill: transparent;
+        stroke: [#0000001A, #00000010, #00000008][k];
+        stroke-width: 1.5px;
+    }
+
+    if root.theme == SidebarThemes.default || root.theme == SidebarThemes.paper : TRect {
+        f: root.f;
+        u0: root.u0;
+        v0: root.v0;
+        w: root.pw;
+        h: root.ph;
+        r: SidebarPanel.radius;
+        fill: root.theme == SidebarThemes.paper ? PaperTheme.paper-color : SidebarPanel.fill;
+    }
+
+    // The glass: a translucent white, lighter towards the top. The software renderer fills a Path
+    // with a gradient's flat average, so the gradient is stacked bands from the top, each a little
+    // shorter and adding a little white (1.5 levels a band on the desk: no visible step).
+    if root.theme == SidebarThemes.glass : TRect {
+        f: root.f;
+        u0: root.u0;
+        v0: root.v0;
+        w: root.pw;
+        h: root.ph;
+        r: SidebarPanel.radius;
+        fill: rgba(255, 255, 255, 0.38);
+    }
+
+    for k in (root.theme == SidebarThemes.glass ? 8 : 0) : TRect {
+        f: root.f;
+        u0: root.u0;
+        v0: root.v0;
+        w: root.pw;
+        h: root.ph * (8 - k) / 9.0;
+        r: SidebarPanel.radius;
+        fill: rgba(255, 255, 255, 0.06);
+    }
+
+    // The rim: a bright 1px highlight just inside the edge.
+    if root.theme == SidebarThemes.glass : TRect {
+        f: root.f;
+        u0: root.u0 + 0.5;
+        v0: root.v0 + 0.5;
+        w: root.pw - 1.0;
+        h: root.ph - 1.0;
+        r: SidebarPanel.radius - 0.5;
+        fill: transparent;
+        stroke: rgba(255, 255, 255, 0.9);
+        stroke-width: 1px;
     }
 }

@@ -8,7 +8,7 @@
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { Frame, Tilt, TRect } from "toolbar.slint";
-import { SidebarPanel } from "sidebar-panel.slint";
+import { SidebarPanel, SidebarBackdrop, SidebarThemes, HaloOffset } from "sidebar-panel.slint";
 
 export global AllNotesMetrics {
     /// Width of the strip the sidebar adds to the left of the note window.
@@ -28,6 +28,8 @@ component SidebarRow inherits Rectangle {
     in property <bool> selected: false;
     in property <Frame> f;
     in property <float> v0;
+    /// The title's text-shadow copies (the Transparent theme's).
+    in property <[HaloOffset]> halo: [];
     callback clicked();
     callback double-clicked();
     callback scrolled(length) -> EventResult;
@@ -58,6 +60,20 @@ component SidebarRow inherits Rectangle {
         fill: #FFFFFD;
     }
 
+    for o in root.halo : Text {
+        x: (Tilt.x(root.f, -107.0, root.v0) + o.dx) * 1px;
+        y: (Tilt.y(root.f, -107.0, root.v0) + o.dy) * 1px;
+        width: 214px;
+        height: 52px;
+        text: root.item.title;
+        font-family: "Shadows Into Light";
+        font-size: 22px;
+        font-weight: root.selected ? 700 : 400;
+        color: SidebarThemes.halo-color;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
     Text {
         x: Tilt.x(root.f, -107.0, root.v0) * 1px;
         y: Tilt.y(root.f, -107.0, root.v0) * 1px;
@@ -85,6 +101,9 @@ component SidebarRow inherits Rectangle {
 }
 
 export component AllNotesSidebar inherits Rectangle {
+    /// How the panel is drawn (`SidebarThemes`).
+    in property <int> theme: SidebarThemes.default;
+    property <[HaloOffset]> halo: SidebarThemes.halo-for(root.theme);
     in property <int> selected-note-id: -1;
     in property <int> open-count: 0;
     in property <int> closed-count: 0;
@@ -175,15 +194,20 @@ export component AllNotesSidebar inherits Rectangle {
         scroll-event(e) => { return root.scroll-by(e.delta-y); }
     }
 
-    // Backing: the mockup's slate desk color behind the list.
-    TRect {
+    // Backing: the panel in its Theme (Default: the mockup's slate desk color behind the list).
+    SidebarBackdrop {
         f: root.pf;
-        u0: -root.pw / 2.0;
-        v0: root.top-v;
-        w: root.pw;
-        h: root.ph;
-        r: SidebarPanel.radius;
-        fill: SidebarPanel.fill;
+        ph: root.ph;
+        theme: root.theme;
+    }
+
+    for o in root.halo : Text {
+        x: (Tilt.x(root.pf, -113.0, root.top-v + 8.0) + o.dx) * 1px;
+        y: (Tilt.y(root.pf, -113.0, root.top-v + 8.0) + o.dy) * 1px;
+        text: "Notes";
+        font-family: "Shadows Into Light";
+        font-size: 44px;
+        color: SidebarThemes.halo-color;
     }
 
     Text {
@@ -225,6 +249,15 @@ export component AllNotesSidebar inherits Rectangle {
         }
     }
 
+    for o in root.halo : Text {
+        x: (Tilt.x(root.pf, -113.0, root.top-v + 68.0) + o.dx) * 1px;
+        y: (Tilt.y(root.pf, -113.0, root.top-v + 68.0) + o.dy) * 1px;
+        text: root.open-count + " open · " + root.closed-count + " closed";
+        font-family: "Shadows Into Light";
+        font-size: 18px;
+        color: SidebarThemes.halo-color;
+    }
+
     Text {
         x: Tilt.x(root.pf, -113.0, root.top-v + 68.0) * 1px;
         y: Tilt.y(root.pf, -113.0, root.top-v + 68.0) * 1px;
@@ -250,6 +283,16 @@ export component AllNotesSidebar inherits Rectangle {
             scroll-event(e) => { return root.scroll-by(e.delta-y); }
         }
 
+        for o in root.halo : Text {
+            x: (Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) + o.dx) * 1px;
+            y: (Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) + o.dy) * 1px;
+            text: "OPEN";
+            font-family: "Shadows Into Light";
+            font-size: 18px;
+            letter-spacing: 0.72px;
+            color: SidebarThemes.halo-color;
+        }
+
         Text {
             x: Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
             y: Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
@@ -264,10 +307,21 @@ export component AllNotesSidebar inherits Rectangle {
             item: item;
             selected: item.id == root.selected-note-id;
             f: root.lf;
+            halo: root.halo;
             v0: root.top-v + root.header-h + 30.0 + i * root.row-pitch - root.scroll-y;
             clicked => { root.select-note(item.id); }
             double-clicked => { root.open-note(item.id); }
             scrolled(dy) => { return root.scroll-by(dy); }
+        }
+
+        for o in root.halo : Text {
+            x: (Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) + o.dx) * 1px;
+            y: (Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) + o.dy) * 1px;
+            text: "CLOSED";
+            font-family: "Shadows Into Light";
+            font-size: 18px;
+            letter-spacing: 0.72px;
+            color: SidebarThemes.halo-color;
         }
 
         Text {
@@ -284,6 +338,7 @@ export component AllNotesSidebar inherits Rectangle {
             item: item;
             selected: item.id == root.selected-note-id;
             f: root.lf;
+            halo: root.halo;
             v0: root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 14.0 + 30.0 + j * root.row-pitch - root.scroll-y;
             clicked => { root.select-note(item.id); }
             double-clicked => { root.open-note(item.id); }

@@ -43,6 +43,8 @@ export component NoteWindow inherits Window {
 
     // All Notes view properties and callbacks
     in-out property <bool> all-notes-open: false;
+    /// How the All notes Sidebar's panel is drawn (`SidebarThemes`, Settings › Appearance).
+    in property <int> sidebar-theme: 0;
     in-out property <int> all-notes-selected-id: -1;
     in-out property <bool> all-notes-selected-is-open: false;
     in-out property <string> all-notes-status-text: "";
@@ -287,6 +289,7 @@ export component NoteWindow inherits Window {
         y: 0px;
         width: AllNotesMetrics.sidebar-w;
         height: root.height;
+        theme: root.sidebar-theme;
         selected-note-id: root.all-notes-selected-id;
         open-count: root.all-notes-open-count;
         closed-count: root.all-notes-closed-count;

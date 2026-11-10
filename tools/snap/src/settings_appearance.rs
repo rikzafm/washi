@@ -60,8 +60,41 @@ impl Harness {
         self.appearance_ui().get_ui_size_label().to_string()
     }
 
-    /// Which Appearance dropdown is open (-1 none, 0 UI size).
+    /// Which Appearance dropdown is open (-1 none, 0 UI size, 10 the first Theme list, 11 the Notes
+    /// sidebar's).
     pub fn settings_appearance_open_list(&self) -> i32 {
         self.appearance_ui().get_appearance_open_list()
+    }
+
+    /// The Theme row's "Same for both sidebars" switch as drawn.
+    pub fn settings_theme_shared(&self) -> bool {
+        self.appearance_ui().get_theme_shared()
+    }
+
+    /// The Theme dropdowns shown, top to bottom, as (row label, chosen option): one while the switch
+    /// is on, the Settings sidebar's and the Notes sidebar's while it is off.
+    pub fn settings_theme_rows(&self) -> Vec<(String, String)> {
+        let ui = self.appearance_ui();
+        let rows = ui.get_theme_rows();
+        let labels = ui.get_theme_labels();
+        rows.iter().zip(labels.iter()).map(|(r, l)| (r.to_string(), l.to_string())).collect()
+    }
+
+    /// The All notes window drawn at its own size onto the Settings desk color (its margins and a
+    /// Transparent Sidebar show the desk).
+    pub fn render_all_notes_on_desk(&self) -> Option<crate::shot::Snapshot> {
+        use slint::platform::software_renderer::PremultipliedRgbaColor;
+        use slint::platform::WindowAdapter;
+        let (_, _, pw, ph) = self.all_notes_window_geometry()?;
+        let adapter = crate::platform::windows().into_iter().rev().find(|w| {
+            let s = w.window().size();
+            s.width == pw && s.height == ph
+        })?;
+        let mut buf = vec![PremultipliedRgbaColor::default(); (pw * ph) as usize];
+        adapter.window().request_redraw();
+        adapter.draw_if_needed(|r| {
+            r.render(&mut buf, pw as usize);
+        });
+        Some(crate::settings_shots::on_desk(pw, ph, buf))
     }
 }

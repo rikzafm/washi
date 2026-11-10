@@ -55,6 +55,8 @@ pub struct Hooks {
     pub general: general::GeneralDeps,
     /// The Sidebars' Height or Anchor changed (Settings › Appearance): an open All notes takes it.
     pub sidebar_layout_changed: Rc<dyn Fn()>,
+    /// A Sidebar Theme was changed on the Appearance Tab: redraw the open All notes Sidebar.
+    pub sidebar_themes_changed: Rc<dyn Fn()>,
 }
 
 #[derive(Clone, Debug)]
@@ -128,8 +130,12 @@ impl SettingsView {
         tape::set_preview_tapes(&ui);
         let now = (hooks.now)();
         let general = general::General::new(&ui, hooks.general.clone(), hooks.now.clone());
-        let appearance =
-            appearance::Appearance::new(&ui, hooks.general.db.clone(), hooks.sidebar_layout_changed.clone());
+        let appearance = appearance::Appearance::new(
+            &ui,
+            hooks.general.db.clone(),
+            hooks.sidebar_layout_changed.clone(),
+            hooks.sidebar_themes_changed.clone(),
+        );
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,
             hooks,

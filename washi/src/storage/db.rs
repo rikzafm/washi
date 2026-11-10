@@ -267,6 +267,28 @@ impl Db {
         })
     }
 
+    /// Whether both Sidebars take one Theme (Settings › Appearance, the Theme row's "Same for both
+    /// sidebars"). On when never set or not "0"/"1".
+    pub fn sidebar_theme_shared(&self) -> bool {
+        self.meta("sidebar_theme_shared").map_or(true, |v| v.trim() != "0")
+    }
+
+    pub fn set_sidebar_theme_shared(&self, shared: bool) -> Result<(), DbError> {
+        self.set_meta("sidebar_theme_shared", if shared { "1" } else { "0" })
+    }
+
+    /// The Theme a Sidebar is drawn with (each Sidebar's is stored, even while they are shared).
+    /// Default when never set or not one of the themes.
+    pub fn sidebar_theme(&self, sidebar: Sidebar) -> SidebarTheme {
+        self.meta(&format!("sidebar_theme.{}", sidebar.key()))
+            .and_then(|v| SidebarTheme::from_key(v.trim()))
+            .unwrap_or(SidebarTheme::Default)
+    }
+
+    pub fn set_sidebar_theme(&self, sidebar: Sidebar, theme: SidebarTheme) -> Result<(), DbError> {
+        self.set_meta(&format!("sidebar_theme.{}", sidebar.key()), theme.key())
+    }
+
     /// Apply the new-note defaults to a note just created and return whether it starts Always on
     /// top. The preference write is best effort: a failure is logged and never stops a note opening.
     pub fn apply_new_note_defaults(&self, id: NoteId) -> bool {
@@ -430,7 +452,7 @@ pub struct AllNoteRow {
 /// The UI size choices (Settings › Appearance: Small, Medium, Large), as the scale each one saves.
 pub const UI_SCALES: [f32; 3] = [0.75, 0.80, 1.00];
 
-/// The two Sidebars whose Height and Anchor Settings › Appearance sets.
+/// The two Sidebars whose Theme, Height and Anchor Settings › Appearance sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sidebar {
     /// The Settings page's Sidebar.
@@ -508,6 +530,45 @@ pub enum SettingsHeight {
     TallestTab,
     /// As tall as the screen allows.
     ScreenLimit,
+}
+
+/// How a Sidebar's panel is drawn (Settings › Appearance › Theme), in dropdown order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidebarTheme {
+    /// The slate panel.
+    Default,
+    /// No backdrop; the labels get a light text shadow.
+    Transparent,
+    /// The host Note's paper, with a shadow and no tape.
+    Paper,
+    /// Faked frosted glass: a translucent white gradient, a bright rim and a faint shadow.
+    Glass,
+}
+
+impl SidebarTheme {
+    pub const ALL: [SidebarTheme; 4] = [SidebarTheme::Default, SidebarTheme::Transparent, SidebarTheme::Paper, SidebarTheme::Glass];
+
+    /// The dropdown index (also what the Slint panels take).
+    pub fn index(self) -> i32 {
+        Self::ALL.iter().position(|t| *t == self).unwrap_or(0) as i32
+    }
+
+    pub fn from_index(i: i32) -> Option<SidebarTheme> {
+        usize::try_from(i).ok().and_then(|i| Self::ALL.get(i).copied())
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            SidebarTheme::Default => "default",
+            SidebarTheme::Transparent => "transparent",
+            SidebarTheme::Paper => "paper",
+            SidebarTheme::Glass => "glass",
+        }
+    }
+
+    fn from_key(key: &str) -> Option<SidebarTheme> {
+        Self::ALL.into_iter().find(|t| t.key() == key)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -606,6 +667,24 @@ mod tests {
             db.set_meta("settings_height", junk).unwrap();
             assert_eq!(db.settings_height(), SettingsHeight::TallestTab, "{junk:?} reads as Tallest tab");
         }
+    }
+
+    #[test]
+    fn sidebar_themes_are_default_and_shared_until_set_and_fall_back_on_nonsense() {
+        let (_dir, db) = test_db();
+        assert!(db.sidebar_theme_shared());
+        assert_eq!(db.sidebar_theme(Sidebar::Settings), SidebarTheme::Default);
+        db.set_sidebar_theme(Sidebar::Notes, SidebarTheme::Glass).unwrap();
+        db.set_sidebar_theme_shared(false).unwrap();
+        assert_eq!(db.sidebar_theme(Sidebar::Notes), SidebarTheme::Glass);
+        assert_eq!(db.sidebar_theme(Sidebar::Settings), SidebarTheme::Default, "each Sidebar its own");
+        assert!(!db.sidebar_theme_shared());
+        for junk in ["", "slate", "3", "GLASS"] {
+            db.set_meta("sidebar_theme.notes", junk).unwrap();
+            assert_eq!(db.sidebar_theme(Sidebar::Notes), SidebarTheme::Default, "{junk:?}");
+        }
+        db.set_meta("sidebar_theme_shared", "maybe").unwrap();
+        assert!(db.sidebar_theme_shared());
     }
 
     #[test]

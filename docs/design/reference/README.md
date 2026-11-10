@@ -25,3 +25,12 @@ mockup's own: General 658, Font & Style 603, Shortcuts 767, Privacy 600.
 `tools/snap/tests/settings_fidelity.rs` renders each tab with the real app and compares it to its image
 on 8 px blocks of luminance (a browser and Slint place glyphs a pixel apart, so single pixels are not
 compared). These images come from the mockup, not from the app; replace them only when the mockup changes.
+
+## Sidebar themes (renders of the app)
+
+`sidebar-theme-default.png`, `sidebar-theme-transparent.png`, `sidebar-theme-paper.png` and
+`sidebar-theme-glass.png` are the app's own render of the Settings page's Sidebar strip (282 px wide, the
+window's height, on the desk color `#D9DDE1`) with each Theme of Settings › Appearance chosen, at the
+default UI size and Sidebar height. There is no mockup for them. `settings_fidelity.rs` compares each
+theme with its image; to make a missing one, run that test with `WASHI_BLESS=1` and look at the result
+before committing it. Re-make them (delete and bless) only on purpose, when a theme's look changes.

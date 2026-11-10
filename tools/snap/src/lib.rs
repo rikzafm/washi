@@ -17,4 +17,5 @@ pub mod shot;
 pub use fakes::WindowCommand;
 pub use harness::Harness;
 pub use settings_appearance::tab;
+pub use settings_shots::DESK;
 pub use sidebar_layout::sidebar;

@@ -9,6 +9,17 @@ use slint::ComponentHandle;
 /// The desk the reference images of the Settings page were made on.
 pub const DESK: [u8; 3] = [0xD9, 0xDD, 0xE1];
 
+/// A rendered window composited onto `DESK`.
+pub(crate) fn on_desk(pw: u32, ph: u32, buf: Vec<PremultipliedRgbaColor>) -> Snapshot {
+    let mut rgb = Vec::with_capacity((pw * ph * 3) as usize);
+    for p in buf {
+        let inv = 255 - p.alpha as u32;
+        let over = |src: u8, desk: u8| (src as u32 + (desk as u32 * inv + 127) / 255).min(255) as u8;
+        rgb.extend_from_slice(&[over(p.red, DESK[0]), over(p.green, DESK[1]), over(p.blue, DESK[2])]);
+    }
+    Snapshot::from_rgb(pw, ph, rgb)
+}
+
 impl Harness {
     /// The Settings window drawn at its own size onto the desk color (its margins are transparent).
     pub fn render_settings(&self) -> Snapshot {
@@ -25,13 +36,7 @@ impl Harness {
         adapter.draw_if_needed(|r| {
             r.render(&mut buf, pw as usize);
         });
-        let mut rgb = Vec::with_capacity((pw * ph * 3) as usize);
-        for p in buf {
-            let inv = 255 - p.alpha as u32;
-            let over = |src: u8, desk: u8| (src as u32 + (desk as u32 * inv + 127) / 255).min(255) as u8;
-            rgb.extend_from_slice(&[over(p.red, DESK[0]), over(p.green, DESK[1]), over(p.blue, DESK[2])]);
-        }
-        Snapshot::from_rgb(pw, ph, rgb)
+        on_desk(pw, ph, buf)
     }
 
     /// Put the values the mockup shows on the General tab (switches, folders, Resource use, an
