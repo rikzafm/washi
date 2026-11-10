@@ -24,6 +24,11 @@ const MOCKUP_TABS: [i32; 4] = [tab::GENERAL, tab::STYLE, tab::SHORTCUTS, tab::PR
 /// The mockup's Paper heights (its DOM, 1x): the content's height plus 38 above and 44 below, at least
 /// 600. Appearance is not in the mockup; its one row is far under the minimum.
 const MOCKUP_PAPER_H: [f32; 5] = [658.4, 600.0, 603.2, 766.8, 600.0];
+/// The Appearance Paper (not in the mockup), as laid out with both "Same for both sidebars" switches
+/// on: UI size, the Sidebar group and Settings height (the 583 they needed before the Theme rows, under
+/// the 600 minimum) plus the Theme rows' 116 (UI size's rule 2, the switch row 58, the dropdown row
+/// 56). Under the Tallest tab cap (Shortcuts), so it does not scroll.
+const APPEARANCE_PAPER_H: f32 = 583.0 + 116.0;
 /// The General row added after the mockup ("Notes left in All Notes"): its height with the rule.
 const PARK_ROW_H: f32 = 82.0;
 /// The Font & Style rows taken out since the mockup: Fade text edge (80, its hint on two lines, and its
@@ -44,6 +49,9 @@ const SIDEBAR_COMPARED_H: u32 = 256;
 /// The Paper height a tab should have: the mockup's, plus the row added to General since, less the
 /// rows taken out of Font & Style, at least the 600 minimum.
 fn want_paper_h(i: usize) -> f32 {
+    if i as i32 == tab::APPEARANCE {
+        return APPEARANCE_PAPER_H;
+    }
     let changed = match i as i32 {
         tab::GENERAL => PARK_ROW_H,
         tab::STYLE => -STYLE_REMOVED_H,
@@ -243,14 +251,20 @@ fn every_tab_looks_like_the_mockup() {
     }
 }
 
-/// The leftmost and rightmost Sidebar-panel pixels (the slate fill, #D6DBE2: the desk the shot is
-/// drawn on, #D9DDE1, is 3 levels off in red) in the strip on row `y`.
-fn panel_edges(w: u32, rgb: &[u8], y: usize) -> Option<(usize, usize)> {
-    let slate = |x: usize| {
+/// The Default theme's slate fill, #D6DBE2 (the desk the shot is drawn on, #D9DDE1, is 3 levels off
+/// in red).
+const SLATE: [u8; 3] = [0xD6, 0xDB, 0xE2];
+/// The Paper theme's fill: the Note's paper.
+const PAPER_FILL: [u8; 3] = [0xFF, 0xFF, 0xFD];
+
+/// The leftmost and rightmost Sidebar-panel pixels (exactly `fill`, within a level) in the strip on
+/// row `y`.
+fn panel_edges(w: u32, rgb: &[u8], y: usize, fill: [u8; 3]) -> Option<(usize, usize)> {
+    let is_fill = |x: usize| {
         let i = (y * w as usize + x) * 3;
-        (rgb[i] as i32 - 0xD6).abs() <= 1 && (rgb[i + 1] as i32 - 0xDB).abs() <= 1 && (rgb[i + 2] as i32 - 0xE2).abs() <= 1
+        (0..3).all(|c| (rgb[i + c] as i32 - fill[c] as i32).abs() <= 1)
     };
-    let xs: Vec<usize> = (0..STRIP as usize).filter(|&x| slate(x)).collect();
+    let xs: Vec<usize> = (0..STRIP as usize).filter(|&x| is_fill(x)).collect();
     Some((*xs.first()?, *xs.last()?))
 }
 
@@ -273,16 +287,91 @@ fn the_settings_sidebar_has_the_all_notes_sidebars_panel_outline() {
     // Both panels are centred on their window's height: compare rows at the same offsets from it.
     let (s_mid, n_mid) = (settings.1 as i32 / 2, nh as i32 / 2);
     for dy in [-120, -60, 0, 60, 120] {
-        let s = panel_edges(settings.0, &settings.2, (s_mid + dy) as usize).expect("settings panel drawn");
-        let n = panel_edges(nw, &notes_rgb, (n_mid + dy) as usize).expect("all notes panel drawn");
+        let s = panel_edges(settings.0, &settings.2, (s_mid + dy) as usize, SLATE).expect("settings panel drawn");
+        let n = panel_edges(nw, &notes_rgb, (n_mid + dy) as usize, SLATE).expect("all notes panel drawn");
         assert!(
             (s.0 as i32 - n.0 as i32).abs() <= 1 && (s.1 as i32 - n.1 as i32).abs() <= 1,
             "row {dy:+} from the middle: Settings panel spans {s:?}, All notes {n:?}"
         );
     }
     // Centred at 143, 270 wide: x = 8 to 278, clear of the Paper.
-    let (l, r) = panel_edges(settings.0, &settings.2, s_mid as usize).unwrap();
+    let (l, r) = panel_edges(settings.0, &settings.2, s_mid as usize, SLATE).unwrap();
     assert!((l as i32 - 8).abs() <= 1 && (r as i32 - 277).abs() <= 1, "Settings panel spans {l}..={r}");
+}
+
+/// The Sidebar Themes in dropdown order, by their reference shot's name.
+const THEMES: [&str; 4] = ["default", "transparent", "paper", "glass"];
+/// The Appearance Tab's first Theme dropdown and, after it, its options (see appearance-tab.slint).
+const THEME_DROPDOWN: i32 = 41;
+
+/// Settings open on Appearance with `theme` chosen for both Sidebars, the pointer off every control.
+fn open_with_theme(theme: usize) -> Harness {
+    let mut h = open_on(tab::APPEARANCE);
+    h.settings_appearance_click(THEME_DROPDOWN);
+    h.settings_appearance_click(THEME_DROPDOWN + 1 + theme as i32);
+    h.settings_pointer_away();
+    h
+}
+
+#[test]
+fn the_paper_theme_keeps_the_panel_outline_and_its_tilt() {
+    let h = open_with_theme(2);
+    let shot = rendered(&h);
+    let mid = shot.1 as i32 / 2;
+    let (l, r) = panel_edges(shot.0, &shot.2, mid as usize, PAPER_FILL).expect("a paper panel");
+    assert!((l as i32 - 8).abs() <= 1 && (r as i32 - 277).abs() <= 1, "Paper panel spans {l}..={r}");
+    // -1deg: going down, the left edge moves right (tan 1deg over 400px is 7px).
+    let (top, bottom) = (
+        panel_edges(shot.0, &shot.2, (mid - 200) as usize, PAPER_FILL).unwrap(),
+        panel_edges(shot.0, &shot.2, (mid + 200) as usize, PAPER_FILL).unwrap(),
+    );
+    // The Note's shadow hangs under the panel's bottom edge.
+    let paper_at = |y: usize| {
+        let i = (y * shot.0 as usize + 143) * 3;
+        (0..3).all(|c| (shot.2[i + c] as i32 - PAPER_FILL[c] as i32).abs() <= 1)
+    };
+    let bottom_edge = (0..shot.1 as usize).filter(|&y| paper_at(y)).last().expect("a paper panel");
+    let under = (bottom_edge + 6) * shot.0 as usize + 143;
+    let p = &shot.2[under * 3..under * 3 + 3];
+    let desk = snap::DESK;
+    assert!((0..3).all(|c| p[c] + 3 <= desk[c]), "a shadow under the panel: {p:?}");
+    let lean = bottom.0 as i32 - top.0 as i32;
+    assert!((5..=9).contains(&lean), "left edge {} at the top, {} at the bottom", top.0, bottom.0);
+}
+
+/// Each Sidebar Theme's Settings Sidebar against its reference shot: `docs/design/reference/
+/// sidebar-theme-<theme>.png`, the app's own render of the Sidebar strip (not a mockup). A missing
+/// shot is written when `WASHI_BLESS` is set (look at it before committing it).
+#[test]
+fn each_sidebar_theme_matches_its_reference_shot() {
+    for (i, theme) in THEMES.iter().enumerate() {
+        let h = open_with_theme(i);
+        let shot = rendered(&h);
+        let strip = strip_top_rows(&shot, shot.1);
+        let name = format!("sidebar-theme-{theme}.png");
+        dump(&name, &strip);
+        let path = reference_dir().join(&name);
+        if !path.exists() && std::env::var_os("WASHI_BLESS").is_some() {
+            write_png_rgb(&path, strip.0, strip.1, &strip.2);
+        }
+        let want = load_png_rgb(&path);
+        assert_eq!((strip.0, strip.1), (want.0, want.1), "{theme}: shot size");
+        let (mean, far) = block_difference(&strip, &want);
+        assert!(mean < 1.0, "{theme}: blocks differ by {mean:.2} levels on average");
+        assert!(far < 0.005, "{theme}: {:.1}% of the blocks are far from the reference", far * 100.0);
+    }
+}
+
+#[test]
+fn the_theme_shots_differ_from_each_other() {
+    // The reference comparison can fail: no two themes render alike.
+    let shots: Vec<_> = (0..THEMES.len()).map(|i| strip_top_rows(&rendered(&open_with_theme(i)), 600)).collect();
+    for a in 0..shots.len() {
+        for b in a + 1..shots.len() {
+            let (mean, _) = block_difference(&shots[a], &shots[b]);
+            assert!(mean > 1.0, "{} and {} look alike ({mean:.2})", THEMES[a], THEMES[b]);
+        }
+    }
 }
 
 #[test]

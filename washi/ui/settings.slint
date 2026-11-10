@@ -6,7 +6,7 @@ import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PaperTheme } from "paper-theme.slint";
 import { Paper } from "paper.slint";
-import { SidebarPanel } from "sidebar-panel.slint";
+import { SidebarPanel, SidebarBackdrop, SidebarThemes, HaloOffset } from "sidebar-panel.slint";
 import { ShortcutRow, ShortcutsPage, PrivacyPage } from "settings-pages.slint";
 import { GeneralTab } from "settings-general.slint";
 import { StyleTab } from "style-tab.slint";
@@ -36,6 +36,8 @@ component SidebarTab inherits Rectangle {
     in property <bool> selected: false;
     in property <PaperFrame> pf;
     in property <float> b;
+    /// The label's text-shadow copies (the Transparent theme's).
+    in property <[HaloOffset]> halo: [];
     callback clicked();
 
     x: 0px;
@@ -76,6 +78,20 @@ component SidebarTab inherits Rectangle {
         fill: rgba(255, 255, 253, 0.55);
     }
 
+    for o in root.halo : PText {
+        pf: root.pf;
+        a: 29.0 + o.dx;
+        b: root.b + o.dy;
+        nudge: -1.0;
+        width: 214px;
+        height: 48px;
+        text: root.text;
+        font-size: 24px;
+        font-weight: root.selected ? 700 : 400;
+        vertical-alignment: center;
+        color: SidebarThemes.halo-color;
+    }
+
     PText {
         pf: root.pf;
         a: 29.0;
@@ -103,6 +119,8 @@ component SidebarTab inherits Rectangle {
 
 component SettingsSidebar inherits Rectangle {
     in property <int> selected-tab: 0;
+    /// How the panel is drawn (`SidebarThemes`).
+    in property <int> theme: SidebarThemes.default;
     callback tab-clicked(int);
     callback close-clicked();
     /// The user pressed the Sidebar itself: the platform drags the window.
@@ -148,17 +166,27 @@ component SettingsSidebar inherits Rectangle {
         }
     }
 
-    PRect {
-        pf: root.pf;
-        a: 0.0;
-        b: 0.0;
-        w: SidebarPanel.width;
-        h: root.ph;
-        r: SidebarPanel.radius;
-        fill: SidebarPanel.fill;
+    SidebarBackdrop {
+        f: root.pf.f;
+        ph: root.pf.ph;
+        theme: root.theme;
     }
 
-    // "Settings": 44px on its natural line, 6px in from the 12px padding, 14px down.
+    // "Settings": 44px on its natural line, 6px in from the 12px padding, 14px down (its text
+    // shadow first, in the Transparent theme).
+    for o in SidebarThemes.halo-for(root.theme) : PText {
+        pf: root.pf;
+        a: 19.0 + o.dx;
+        b: 14.0 + o.dy;
+        nudge: -1.0;
+        width: 240px;
+        height: 71px;
+        text: "Settings";
+        font-size: 44px;
+        vertical-alignment: center;
+        color: SidebarThemes.halo-color;
+    }
+
     PText {
         pf: root.pf;
         a: 19.0;
@@ -215,6 +243,7 @@ component SettingsSidebar inherits Rectangle {
         b: 89.0 + i * 50.0;
         text: label;
         selected: i == root.selected-tab;
+        halo: SidebarThemes.halo-for(root.theme);
         clicked => { root.tab-clicked(i); }
     }
 }
@@ -299,6 +328,15 @@ export component SettingsWindow inherits Window {
     callback set-sidebar-anchor(int, int);
     in-out property <int> appearance-open-list <=> appearance.open-list;
     out property <length> appearance-lists-bottom: appearance.lists-bottom * 1px;
+    /// The Sidebar Themes (`SidebarThemes` indices): whether both Sidebars share one, and each one's.
+    in property <bool> theme-shared: true;
+    in property <int> theme-settings: 0;
+    in property <int> theme-notes: 0;
+    callback set-theme-shared(bool);
+    /// Choose `theme` for the Sidebar `sidebar` (0 Settings, 1 Notes; while shared, 0 sets both).
+    callback set-theme(int, int);
+    out property <[string]> theme-rows: appearance.theme-rows;
+    out property <[string]> theme-labels: appearance.theme-labels;
     public pure function appearance-hit-x(id: int) -> length {
         return root.page-x + root.strip + viewport.x + appearance.hit-x(id);
     }
@@ -464,6 +502,7 @@ export component SettingsWindow inherits Window {
         selected-tab: root.selected-tab;
         height-mode: root.settings-sidebar-height;
         anchor: root.settings-sidebar-anchor;
+        theme: root.theme-settings;
         tab-clicked(i) => { root.tab-clicked(i); }
         close-clicked => { root.close-clicked(); }
         start-move => { root.start-move(); }
@@ -588,6 +627,11 @@ export component SettingsWindow inherits Window {
                     toggle-layout-shared => { root.toggle-sidebar-layout-shared(); }
                     set-height(s, v) => { root.set-sidebar-height(s, v); }
                     set-anchor(s, v) => { root.set-sidebar-anchor(s, v); }
+                    theme-shared: root.theme-shared;
+                    theme-settings: root.theme-settings;
+                    theme-notes: root.theme-notes;
+                    set-theme-shared(b) => { root.set-theme-shared(b); }
+                    set-theme(s, t) => { root.set-theme(s, t); }
                 }
 
                 // Font & Style (UI only). Kept alive on every tab so the choices last until Settings closes;

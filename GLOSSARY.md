@@ -24,6 +24,10 @@ _Avoid_: Note list, manager
 The strip that comes out of the left of a Note's Paper. All notes and the Settings page each use one.
 _Avoid_: Side panel, left panel, drawer
 
+**Theme**:
+How a Sidebar's panel is drawn, chosen on the Appearance Tab: Default (slate), Transparent, Paper or Liquid glass. Both Sidebars share one unless "Same for both sidebars" is off.
+_Avoid_: Skin, style (Font & Style is a different Tab)
+
 **Settings page**:
 The view that replaces a Note with app-wide preferences, organised into tabs and navigated through its Sidebar. Opened from the Dropdown menu's Settings button.
 _Avoid_: Setting page, preferences, options window

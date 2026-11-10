@@ -567,6 +567,15 @@ impl App {
                     }
                 }
             }),
+            sidebar_themes_changed: Rc::new({
+                let app = app.clone();
+                move || {
+                    let Some(a) = app() else { return };
+                    if let Some(v) = a.all_notes() {
+                        v.ui().set_sidebar_theme(a.0.db.sidebar_theme(crate::storage::db::Sidebar::Notes).index());
+                    }
+                }
+            }),
             work_areas: Rc::new({
                 let app = app.clone();
                 move || app().map(|a| a.0.env.window_control.work_areas()).unwrap_or_default()
@@ -856,7 +865,9 @@ impl App {
         };
         let wire: Rc<dyn Fn(&crate::note_window::NoteWindow)> = {
             let weak = weak.clone();
+            let db = self.0.db.clone();
             Rc::new(move |ui| {
+                ui.set_sidebar_theme(db.sidebar_theme(crate::storage::db::Sidebar::Notes).index());
                 macro_rules! on {
                     ($setter:ident, $method:ident) => {{
                         let weak = weak.clone();

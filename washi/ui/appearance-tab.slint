@@ -1,12 +1,13 @@
-// Settings > Appearance: how big Washi draws (UI size), and the Sidebar group (how tall each Sidebar
-// is and where it sits beside the Paper), and how tall the Settings page may grow (Settings height,
-// always the last row). Laid out like the other tabs in the Paper's tilted frame
-// `pf`, rows stacked from `top`; `bottom` (paper coordinates) is where the last row ends.
+// Settings > Appearance: how big Washi draws (UI size), how the Sidebars are drawn (Theme), the
+// Sidebar group (how tall each Sidebar is and where it sits beside the Paper), and how tall the
+// Settings page may grow (Settings height, always the last row). Laid out like the other tabs in the
+// Paper's tilted frame `pf`, rows stacked from `top`; `bottom` (paper coordinates) is where the last row ends.
 //
 // Rust owns every value here (they are app-wide preferences in the database): the tab shows what it
 // is given and reports a choice through a callback. Only which dropdown is open lives in the tab.
 
 import { PX, PaperFrame, TapeShape, PBox, PText, SettingRow, Switch, PickerButton, ListItem, ListPanel, SectionHeading } from "settings-widgets.slint";
+import { SidebarThemes } from "sidebar-panel.slint";
 
 /// An open dropdown list hanging under its button, whose top is at paper coordinate `b`.
 component AppearanceList inherits PBox {
@@ -50,6 +51,15 @@ export component AppearanceTab inherits Rectangle {
     in property <int> ui-size: 2;
     callback set-ui-size(int);
 
+    /// The Sidebar Themes (`SidebarThemes` indices): one for both while `theme-shared` (its own
+    /// switch, independent of the Sidebar group's), else each Sidebar its own. Choosing reports
+    /// (sidebar, theme): sidebar 0 is the Settings sidebar (both, while shared), 1 the Notes sidebar.
+    in property <bool> theme-shared: true;
+    in property <int> theme-settings: 0;
+    in property <int> theme-notes: 0;
+    callback set-theme-shared(bool);
+    callback set-theme(int, int);
+
     /// The Sidebar group. `layout-shared`: one Height and Anchor drive both Sidebars (then the
     /// controls show the Settings sidebar's values). Height 0 Match note, 1 Fit content; Anchor 0 Top,
     /// 1 Middle, 2 Bottom. Sidebar 0 is the Settings sidebar, 1 the Notes sidebar.
@@ -67,7 +77,8 @@ export component AppearanceTab inherits Rectangle {
     callback set-page-height(int);
 
     /// -1 none, 0 the UI size list, 1 the (Settings) Height list, 2 the (Settings) Anchor list,
-    /// 3 the Notes Height list, 4 the Notes Anchor list, 5 the Settings height list.
+    /// 3 the Notes Height list, 4 the Notes Anchor list, 5 the Settings height list, 10 the first
+    /// Theme list, 11 the Notes sidebar's Theme list.
     in-out property <int> open-list: -1;
 
     out property <[string]> ui-sizes: ["Small 75%", "Medium 80%", "Large 100%"];
@@ -79,12 +90,23 @@ export component AppearanceTab inherits Rectangle {
     out property <[string]> page-heights: ["Tallest tab", "Screen limit"];
     out property <string> page-height-label: root.page-heights[root.page-height];
     out property <string> page-height-hint: "The screen always limits it";
+    /// The Theme dropdowns shown, top to bottom: their row labels and chosen options.
+    out property <[string]> theme-rows: root.theme-shared ? ["Both sidebars"] : ["Settings sidebar", "Notes sidebar"];
+    out property <[string]> theme-labels: root.theme-shared
+        ? [SidebarThemes.names[root.theme-settings]]
+        : [SidebarThemes.names[root.theme-settings], SidebarThemes.names[root.theme-notes]];
 
     out property <float> ui-row-y: root.top;
-    // The Sidebar group, 18px under the UI size row: its heading, the switch, then Height and Anchor
+    // Theme, under UI size: its switch, then one dropdown (shared) or one per Sidebar (split).
+    property <float> theme-row-y: root.ui-row-y + ui-row.total;
+    property <float> theme-a-y: root.theme-row-y + theme-row.total;
+    property <float> theme-b-y: root.theme-a-y + theme-a.total;
+    /// Where the Theme rows end.
+    out property <float> theme-bottom: root.theme-shared ? root.theme-b-y : root.theme-b-y + theme-b.total;
+    // The Sidebar group, 18px under the Theme rows: its heading, the switch, then Height and Anchor
     // once (shared) or under a heading per Sidebar (split).
     property <bool> split: !root.layout-shared;
-    property <float> sidebar-y: root.ui-row-y + ui-row.total + 18.0;
+    property <float> sidebar-y: root.theme-bottom + 18.0;
     property <float> same-y: root.sidebar-y + 38.0;
     property <float> settings-head-y: root.same-y + same-row.total + 10.0;
     property <float> h0-y: root.split ? root.settings-head-y + 32.0 : root.same-y + same-row.total;
@@ -100,6 +122,7 @@ export component AppearanceTab inherits Rectangle {
     /// centre, 6px of padding around its 42px entries. The Settings height list is the lowest.
     out property <float> lists-bottom: max(
         root.list-top(root.ui-row-y, ui-row.content-h) + 12.0 + 3 * 42.0,
+        root.list-top(root.theme-shared ? root.theme-a-y : root.theme-b-y, 56.0) + 12.0 + 4 * 42.0,
         root.list-top(root.split ? root.a1-y : root.a0-y, root.split ? a1.content-h : a0.content-h) + 12.0 + 3 * 42.0,
         root.list-top(root.page-y, page-row.content-h) + 12.0 + 2 * 42.0);
 
@@ -117,12 +140,26 @@ export component AppearanceTab inherits Rectangle {
     /// button and 6, 7 its options, 8 the (Settings) Anchor button and 9 to 11 its options, 12 the
     /// Notes Height button and 13, 14 its options, 15 the Notes Anchor button and 16 to 18 its
     /// options, 20 a blank part of the paper, 21 the Settings height button and 22, 23 its options
-    /// (Tallest tab, Screen limit).
+    /// (Tallest tab, Screen limit); 40 the Theme switch, 41 the first Theme dropdown and 42
+    /// to 45 its options, 46 the Notes sidebar's Theme dropdown and 47 to 50 its options (Default,
+    /// Transparent, Paper, Liquid glass).
     public pure function hit-x(id: int) -> length {
-        return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
+        return id >= 40 ? PX.x(root.pf, root.theme-hit-a(id), root.theme-hit-b(id)) : PX.x(root.pf, root.hit-a(id), root.hit-b(id));
     }
     public pure function hit-y(id: int) -> length {
-        return PX.y(root.pf, root.hit-a(id), root.hit-b(id));
+        return id >= 40 ? PX.y(root.pf, root.theme-hit-a(id), root.theme-hit-b(id)) : PX.y(root.pf, root.hit-a(id), root.hit-b(id));
+    }
+    pure function theme-hit-a(id: int) -> float {
+        return id == 40 ? 484.0 - 26.0 : (id == 41 || id == 46) ? 484.0 - 118.0 : 484.0 - 130.0;
+    }
+    pure function theme-hit-b(id: int) -> float {
+        if (id == 40) {
+            return root.theme-row-y + theme-row.content-h / 2.0;
+        }
+        if (id == 41 || id == 46) {
+            return (id == 41 ? root.theme-a-y : root.theme-b-y) + 28.0;
+        }
+        return root.list-top(id < 46 ? root.theme-a-y : root.theme-b-y, 56.0) + 6.0 + (id < 46 ? id - 42 : id - 47) * 42.0 + 21.0;
     }
     pure function hit-a(id: int) -> float {
         if (id == 20) {
@@ -170,13 +207,56 @@ export component AppearanceTab inherits Rectangle {
         pf: root.pf;
         dots: root.dots;
         row-y: root.ui-row-y;
-        rule: false;
         label: "UI size";
         hint: "New notes open at " + root.new-note-sizes[root.ui-size];
         PickerButton {
             text: root.ui-size-label;
             open: root.open-list == 0;
             clicked => { root.open-list = root.open-list == 0 ? -1 : 0; }
+        }
+    }
+
+    // ---- Theme ----
+    theme-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.theme-row-y;
+        label: "Theme";
+        hint: "Same for both sidebars";
+        Switch {
+            checked: root.theme-shared;
+            accessible-name: "Same theme for both sidebars";
+            toggled => {
+                root.open-list = -1;
+                root.set-theme-shared(!root.theme-shared);
+            }
+        }
+    }
+
+    theme-a := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.theme-a-y;
+        rule: !root.theme-shared;
+        label: root.theme-rows[0];
+        PickerButton {
+            text: root.theme-labels[0];
+            open: root.open-list == 10;
+            clicked => { root.open-list = root.open-list == 10 ? -1 : 10; }
+        }
+    }
+
+    theme-b := SettingRow {
+        visible: !root.theme-shared;
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.theme-b-y;
+        rule: false;
+        label: "Notes sidebar";
+        PickerButton {
+            text: SidebarThemes.names[root.theme-notes];
+            open: root.open-list == 11;
+            clicked => { root.open-list = root.open-list == 11 ? -1 : 11; }
         }
     }
 
@@ -295,6 +375,28 @@ export component AppearanceTab inherits Rectangle {
         chosen: root.ui-size;
         picked(i) => {
             root.set-ui-size(i);
+            root.open-list = -1;
+        }
+    }
+
+    if root.open-list == 10 : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.theme-a-y, 56.0);
+        names: SidebarThemes.names;
+        chosen: root.theme-settings;
+        picked(i) => {
+            root.set-theme(0, i);
+            root.open-list = -1;
+        }
+    }
+
+    if root.open-list == 11 && !root.theme-shared : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.theme-b-y, 56.0);
+        names: SidebarThemes.names;
+        chosen: root.theme-notes;
+        picked(i) => {
+            root.set-theme(1, i);
             root.open-list = -1;
         }
     }
