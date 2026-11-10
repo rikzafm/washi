@@ -68,7 +68,7 @@ export component AppearanceTab inherits Rectangle {
     in property <int> settings-anchor: 1;
     in property <int> notes-height: 0;
     in property <int> notes-anchor: 1;
-    callback toggle-layout-shared();
+    callback set-layout-shared(bool);
     callback set-height(int, int);
     callback set-anchor(int, int);
 
@@ -277,7 +277,7 @@ export component AppearanceTab inherits Rectangle {
         Switch {
             checked: root.layout-shared;
             accessible-name: "Same Height and Anchor for both sidebars";
-            toggled => { root.toggle-layout-shared(); }
+            toggled => { root.set-layout-shared(!root.layout-shared); }
         }
     }
 

@@ -328,7 +328,7 @@ export component SettingsWindow inherits Window {
     in property <int> settings-sidebar-anchor: 1;
     in property <int> notes-sidebar-height: 0;
     in property <int> notes-sidebar-anchor: 1;
-    callback toggle-sidebar-layout-shared();
+    callback set-sidebar-layout-shared(bool);
     callback set-sidebar-height(int, int);
     callback set-sidebar-anchor(int, int);
     in-out property <int> appearance-open-list <=> appearance.open-list;
@@ -338,7 +338,7 @@ export component SettingsWindow inherits Window {
     in property <int> theme-settings: 0;
     in property <int> theme-notes: 0;
     callback set-theme-shared(bool);
-    /// Choose `theme` for the Sidebar `sidebar` (0 Settings, 1 Notes; while shared, 0 sets both).
+    /// Choose `theme` for the Sidebar `sidebar` (0 Settings, 1 Notes; while shared, both).
     callback set-theme(int, int);
     out property <[string]> theme-rows: appearance.theme-rows;
     out property <[string]> theme-labels: appearance.theme-labels;
@@ -618,7 +618,7 @@ export component SettingsWindow inherits Window {
                     settings-anchor: root.settings-sidebar-anchor;
                     notes-height: root.notes-sidebar-height;
                     notes-anchor: root.notes-sidebar-anchor;
-                    toggle-layout-shared => { root.toggle-sidebar-layout-shared(); }
+                    set-layout-shared(b) => { root.set-sidebar-layout-shared(b); }
                     set-height(s, v) => { root.set-sidebar-height(s, v); }
                     set-anchor(s, v) => { root.set-sidebar-anchor(s, v); }
                     theme-shared: root.theme-shared;

@@ -11,6 +11,7 @@ use crate::note_window::{app_icon, note_title, Note, NoteEvent};
 use crate::platform::*;
 use crate::suspend::{SuspendController, SuspendHost};
 use crate::storage::{keystore, AllNoteRow, Db, DbError, Geometry, KeyStoreError, NoteRow};
+use crate::storage::db::Choice;
 use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -990,8 +991,8 @@ impl App {
         let Some(v) = self.all_notes() else { return };
         let layout = self.0.db.sidebar_layout(crate::storage::db::Sidebar::Notes);
         let ui = v.ui();
-        ui.set_all_notes_height_mode(crate::settings::appearance::height_index(layout.height));
-        ui.set_all_notes_anchor(crate::settings::appearance::anchor_index(layout.anchor));
+        ui.set_all_notes_height_mode(layout.height.index());
+        ui.set_all_notes_anchor(layout.anchor.index());
     }
 
     /// All Notes stopped standing in for note `id`: show its desktop window again, without the focus
