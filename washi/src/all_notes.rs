@@ -305,7 +305,15 @@ impl AllNotesView {
     /// Draw the editor (and its Sidebar) at UI size `ui`; the parked notes' places are carried into the
     /// new logical px by `k` (old UI size / new).
     pub fn set_ui_scale(&self, ui: f32, k: f32) {
+        let paper = self.paper_geometry().scaled(k);
         self.editor.set_ui_scale(ui, k);
+        let new_window = Geometry {
+            x: paper.x - SIDEBAR_WIDTH,
+            y: paper.y,
+            w: paper.w + SIDEBAR_WIDTH as u32,
+            h: paper.h,
+        };
+        self.editor.place(new_window);
         for p in self.parked.borrow_mut().values_mut() {
             p.home = p.home.scaled(k);
             p.at = p.at.scaled(k);

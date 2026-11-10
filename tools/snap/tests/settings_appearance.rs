@@ -364,6 +364,37 @@ fn the_all_notes_strip_scales() {
 }
 
 #[test]
+fn closing_all_notes_after_ui_scale_change_keeps_host_note_position_and_size() {
+    let mut h = started();
+    let initial_pos = h.window_position(0);
+    let initial_size = h.note_screen_size(0);
+
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    h.advance_frames(ms(600));
+    assert!(h.is_all_notes_open());
+
+    choose_ui_size(&mut h, SMALL);
+
+    h.press_all_notes_escape();
+    h.advance_frames(ms(600));
+    assert!(!h.is_all_notes_open());
+
+    let final_pos = h.window_position(0);
+    let final_size = h.note_screen_size(0);
+
+    assert!(
+        (final_pos.0 - initial_pos.0).abs() <= 1 && (final_pos.1 - initial_pos.1).abs() <= 1,
+        "host note must return to same screen position after scale change and all-notes close (got {final_pos:?}, want {initial_pos:?})"
+    );
+    assert!(
+        (final_size.0 as i32 - initial_size.0 as i32).abs() <= 1 && (final_size.1 as i32 - initial_size.1 as i32).abs() <= 1,
+        "host note must retain its on-screen size after scale change and all-notes close (got {final_size:?}, want {initial_size:?})"
+    );
+}
+
+
+#[test]
 fn the_screen_still_caps_the_settings_page_at_small_and_more_of_a_tab_fits() {
     let mut h = started();
     h.set_work_areas(vec![washi::platform::ScreenRect::new(0, 0, 1920, 700)]);
