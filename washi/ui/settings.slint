@@ -105,20 +105,31 @@ component SettingsSidebar inherits Rectangle {
     /// The user pressed the Sidebar itself: the platform drags the window.
     callback start-move();
 
+    /// Settings › Appearance › Sidebar: 0 Match note, 1 Fit content; anchor 0 Top, 1 Middle, 2 Bottom.
+    in property <int> height-mode: 0;
+    in property <int> anchor: 1;
+
     property <[string]> labels: SettingsMetrics.tabs;
-    // The panel (the mockup's `nav`): the All notes Sidebar's shape (`SidebarPanel`), 600 tall and
-    // centred vertically. Coordinates in it are `a` from its left and `b` from its top.
+    // The panel (the mockup's `nav`): the All notes Sidebar's shape (`SidebarPanel`), placed beside
+    // the Paper by the Sidebar layout rule. Its content is the header and the Tabs (the last Tab's
+    // bottom) and the Paper's bottom padding. Coordinates in it are `a` from its left and `b` from
+    // its top.
+    property <float> paper-top: PaperTheme.margin / 1px;
+    property <float> paper-h: root.height / 1px - 2.0 * root.paper-top;
+    out property <float> content-h: 89.0 + (root.labels.length - 1) * 50.0 + 48.0 + SettingsMetrics.pad-bottom / 1px;
+    property <float> ph: SidebarPanel.panel-h(root.paper-h, root.content-h, root.height-mode);
+    property <float> top: SidebarPanel.panel-top(root.paper-top, root.paper-h, root.ph, root.anchor);
     property <PaperFrame> pf: {
         f: {
             w: SettingsMetrics.strip / 1px,
             h: root.height / 1px,
             cx: SidebarPanel.cx,
-            cy: root.height / 1px / 2.0,
+            cy: root.top + root.ph / 2.0,
             cs: Math.cos(SidebarPanel.tilt),
             sn: Math.sin(SidebarPanel.tilt),
         },
         pw: SidebarPanel.width,
-        ph: 600.0,
+        ph: root.ph,
     };
 
     // Dragging the Sidebar's empty parts moves the whole window.
@@ -139,7 +150,7 @@ component SettingsSidebar inherits Rectangle {
         a: 0.0;
         b: 0.0;
         w: SidebarPanel.width;
-        h: 600.0;
+        h: root.ph;
         r: SidebarPanel.radius;
         fill: SidebarPanel.fill;
     }
@@ -274,6 +285,15 @@ export component SettingsWindow inherits Window {
     in property <int> ui-size: 2;
     callback set-ui-size(int);
     out property <string> ui-size-label: appearance.ui-size-label;
+    /// The Sidebar group: see appearance-tab.slint. Sidebar 0 is the Settings sidebar, 1 Notes.
+    in property <bool> sidebar-layout-shared: true;
+    in property <int> settings-sidebar-height: 0;
+    in property <int> settings-sidebar-anchor: 1;
+    in property <int> notes-sidebar-height: 0;
+    in property <int> notes-sidebar-anchor: 1;
+    callback toggle-sidebar-layout-shared();
+    callback set-sidebar-height(int, int);
+    callback set-sidebar-anchor(int, int);
     in-out property <int> appearance-open-list <=> appearance.open-list;
     out property <length> appearance-lists-bottom: appearance.lists-bottom * 1px;
     public pure function appearance-hit-x(id: int) -> length {
@@ -360,6 +380,8 @@ export component SettingsWindow inherits Window {
         width: SettingsMetrics.strip;
         height: root.body-h;
         selected-tab: root.selected-tab;
+        height-mode: root.settings-sidebar-height;
+        anchor: root.settings-sidebar-anchor;
         tab-clicked(i) => { root.tab-clicked(i); }
         close-clicked => { root.close-clicked(); }
         start-move => { root.start-move(); }
@@ -455,6 +477,14 @@ export component SettingsWindow inherits Window {
             top: SettingsMetrics.content-top + root.content-dy;
             ui-size: root.ui-size;
             set-ui-size(i) => { root.set-ui-size(i); }
+            layout-shared: root.sidebar-layout-shared;
+            settings-height: root.settings-sidebar-height;
+            settings-anchor: root.settings-sidebar-anchor;
+            notes-height: root.notes-sidebar-height;
+            notes-anchor: root.notes-sidebar-anchor;
+            toggle-layout-shared => { root.toggle-sidebar-layout-shared(); }
+            set-height(s, v) => { root.set-sidebar-height(s, v); }
+            set-anchor(s, v) => { root.set-sidebar-anchor(s, v); }
         }
 
         // Font & Style (UI only). Kept alive on every tab so the choices last until Settings closes;

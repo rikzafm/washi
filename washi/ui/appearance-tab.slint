@@ -1,11 +1,43 @@
-// Settings > Appearance: how big Washi draws (UI size). Later rows (the Sidebar Theme, Height and
-// Anchor, Settings height) go under it. Laid out like the other tabs in the Paper's tilted frame `pf`,
-// rows stacked from `top`; `bottom` (paper coordinates) is where the last row ends.
+// Settings > Appearance: how big Washi draws (UI size), and the Sidebar group (how tall each Sidebar
+// is and where it sits beside the Paper). Laid out like the other tabs in the Paper's tilted frame
+// `pf`, rows stacked from `top`; `bottom` (paper coordinates) is where the last row ends.
 //
 // Rust owns every value here (they are app-wide preferences in the database): the tab shows what it
 // is given and reports a choice through a callback. Only which dropdown is open lives in the tab.
 
-import { PX, PaperFrame, TapeShape, PBox, SettingRow, PickerButton, ListItem, ListPanel } from "settings-widgets.slint";
+import { PX, PaperFrame, TapeShape, PBox, PText, SettingRow, Switch, PickerButton, ListItem, ListPanel, SectionHeading } from "settings-widgets.slint";
+
+/// An open dropdown list hanging under its button, whose top is at paper coordinate `b`.
+component AppearanceList inherits PBox {
+    in property <[string]> names;
+    in property <int> chosen;
+    callback picked(int);
+    a: 484.0 - 260.0;
+    width: 260px;
+    height: 12px + root.names.length * 42px;
+
+    ListPanel {
+        height: parent.height;
+        for name[i] in root.names : ListItem {
+            x: 6px;
+            y: 6px + i * 42px;
+            width: parent.width - 12px;
+            text: name;
+            chosen: i == root.chosen;
+            clicked => { root.picked(i); }
+        }
+    }
+}
+
+/// A sub-heading of the split Sidebar group ("Settings sidebar", "Notes sidebar"): 20px bold on a
+/// 32px line.
+component SubHeading inherits PText {
+    width: 448px;
+    height: 32px;
+    font-size: 20px;
+    font-weight: 700;
+    vertical-alignment: center;
+}
 
 export component AppearanceTab inherits Rectangle {
     in property <PaperFrame> pf;
@@ -17,27 +49,62 @@ export component AppearanceTab inherits Rectangle {
     in property <int> ui-size: 2;
     callback set-ui-size(int);
 
-    /// -1 none, 0 the UI size list.
+    /// The Sidebar group. `layout-shared`: one Height and Anchor drive both Sidebars (then the
+    /// controls show the Settings sidebar's values). Height 0 Match note, 1 Fit content; Anchor 0 Top,
+    /// 1 Middle, 2 Bottom. Sidebar 0 is the Settings sidebar, 1 the Notes sidebar.
+    in property <bool> layout-shared: true;
+    in property <int> settings-height: 0;
+    in property <int> settings-anchor: 1;
+    in property <int> notes-height: 0;
+    in property <int> notes-anchor: 1;
+    callback toggle-layout-shared();
+    callback set-height(int, int);
+    callback set-anchor(int, int);
+
+    /// -1 none, 0 the UI size list, 1 the (Settings) Height list, 2 the (Settings) Anchor list,
+    /// 3 the Notes Height list, 4 the Notes Anchor list.
     in-out property <int> open-list: -1;
 
     out property <[string]> ui-sizes: ["Small 75%", "Medium 80%", "Large 100%"];
     /// The Paper a new Note opens with at each size (363 by 384 times the scale).
     property <[string]> new-note-sizes: ["272 × 288", "290 × 307", "363 × 384"];
     out property <string> ui-size-label: root.ui-sizes[root.ui-size];
+    out property <[string]> heights: ["Match note", "Fit content"];
+    out property <[string]> anchors: ["Top", "Middle", "Bottom"];
 
     out property <float> ui-row-y: root.top;
-    out property <float> bottom: root.ui-row-y + ui-row.total;
-    /// The lowest point the open list reaches (paper coordinates): it hangs 48px under its button,
-    /// 6px of padding around three 42px entries.
-    out property <float> lists-bottom: root.ui-row-y + 6.0 + 48.0 + 12.0 + 3 * 42.0;
+    // The Sidebar group, 18px under the UI size row: its heading, the switch, then Height and Anchor
+    // once (shared) or under a heading per Sidebar (split).
+    property <bool> split: !root.layout-shared;
+    property <float> sidebar-y: root.ui-row-y + ui-row.total + 18.0;
+    property <float> same-y: root.sidebar-y + 38.0;
+    property <float> settings-head-y: root.same-y + same-row.total + 10.0;
+    property <float> h0-y: root.split ? root.settings-head-y + 32.0 : root.same-y + same-row.total;
+    property <float> a0-y: root.h0-y + h0.total;
+    property <float> notes-head-y: root.a0-y + a0.total + 10.0;
+    property <float> h1-y: root.notes-head-y + 32.0;
+    property <float> a1-y: root.h1-y + h1.total;
+    out property <float> bottom: root.split ? root.a1-y + a1.total : root.a0-y + a0.total;
+    /// The lowest point an open list reaches (paper coordinates): each hangs 26px under its button's
+    /// centre, 6px of padding around its 42px entries. The last Anchor list is the lowest.
+    out property <float> lists-bottom: max(
+        root.list-top(root.ui-row-y, ui-row.content-h) + 12.0 + 3 * 42.0,
+        root.list-top(root.split ? root.a1-y : root.a0-y, root.split ? a1.content-h : a0.content-h) + 12.0 + 3 * 42.0);
 
     x: 0px;
     y: 0px;
     width: root.pf.f.w * 1px;
     height: root.pf.f.h * 1px;
 
+    pure function list-top(row-y: float, content-h: float) -> float {
+        return row-y + content-h / 2.0 + 26.0;
+    }
+
     /// Where the control `id` is, in the Paper frame's px, for tests: 0 the UI size button, 1 to 3 its
-    /// options (Small, Medium, Large), 20 a blank part of the paper.
+    /// options (Small, Medium, Large), 4 the "Same for both sidebars" switch, 5 the (Settings) Height
+    /// button and 6, 7 its options, 8 the (Settings) Anchor button and 9 to 11 its options, 12 the
+    /// Notes Height button and 13, 14 its options, 15 the Notes Anchor button and 16 to 18 its
+    /// options, 20 a blank part of the paper.
     public pure function hit-x(id: int) -> length {
         return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
     }
@@ -45,22 +112,36 @@ export component AppearanceTab inherits Rectangle {
         return PX.y(root.pf, root.hit-a(id), root.hit-b(id));
     }
     pure function hit-a(id: int) -> float {
-        if (id >= 1 && id <= 3) {
-            return 484.0 - 130.0;
-        }
         if (id == 20) {
             return 140.0;
         }
-        return 484.0 - 118.0;
+        if (id == 4) {
+            return 484.0 - 26.0;
+        }
+        if (id == 0 || id == 5 || id == 8 || id == 12 || id == 15) {
+            return 484.0 - 118.0;
+        }
+        return 484.0 - 130.0;
+    }
+    /// The row a control sits on: its top and content height.
+    pure function hit-row-y(id: int) -> float {
+        return id <= 3 ? root.ui-row-y : id == 4 ? root.same-y : id <= 7 ? root.h0-y : id <= 11 ? root.a0-y : id <= 14 ? root.h1-y : root.a1-y;
+    }
+    pure function hit-row-h(id: int) -> float {
+        return id <= 3 ? ui-row.content-h : id == 4 ? same-row.content-h : id <= 7 ? h0.content-h : id <= 11 ? a0.content-h : id <= 14 ? h1.content-h : a1.content-h;
+    }
+    /// The first option's id of the list a control belongs to (-1 for a button or the switch).
+    pure function first-option(id: int) -> int {
+        return (id >= 1 && id <= 3) ? 1 : (id == 6 || id == 7) ? 6 : (id >= 9 && id <= 11) ? 9 : (id == 13 || id == 14) ? 13 : id >= 16 ? 16 : -1;
     }
     pure function hit-b(id: int) -> float {
-        if (id >= 1 && id <= 3) {
-            return root.ui-row-y + 6.0 + 48.0 + 6.0 + (id - 1) * 42.0 + 21.0;
-        }
         if (id == 20) {
             return root.ui-row-y + 260.0;
         }
-        return root.ui-row-y + 28.0;
+        if (root.first-option(id) < 0) {
+            return root.hit-row-y(id) + root.hit-row-h(id) / 2.0;
+        }
+        return root.list-top(root.hit-row-y(id), root.hit-row-h(id)) + 6.0 + (id - root.first-option(id)) * 42.0 + 21.0;
     }
 
     // An outside click closes the open list.
@@ -86,27 +167,152 @@ export component AppearanceTab inherits Rectangle {
         }
     }
 
-    // ---- the lists, last so they sit above the rows under them ----
-    if root.open-list == 0 : PBox {
+    // ---- Sidebar ----
+    SectionHeading {
         pf: root.pf;
-        a: 484.0 - 260.0;
-        b: root.ui-row-y + 6.0 + 48.0;
-        width: 260px;
-        height: 12px + 3 * 42px;
+        a: 36.0;
+        b: root.sidebar-y;
+        text: "Sidebar";
+    }
 
-        ListPanel {
-            height: parent.height;
-            for name[i] in root.ui-sizes : ListItem {
-                x: 6px;
-                y: 6px + i * 42px;
-                width: parent.width - 12px;
-                text: name;
-                chosen: i == root.ui-size;
-                clicked => {
-                    root.set-ui-size(i);
-                    root.open-list = -1;
-                }
-            }
+    same-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.same-y;
+        label: "Same for both sidebars";
+        hint: "One Height and Anchor for Settings and Notes";
+        Switch {
+            checked: root.layout-shared;
+            accessible-name: "Same Height and Anchor for both sidebars";
+            toggled => { root.toggle-layout-shared(); }
+        }
+    }
+
+    if root.split : SubHeading {
+        pf: root.pf;
+        a: 36.0;
+        b: root.settings-head-y;
+        text: "Settings sidebar";
+    }
+
+    h0 := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.h0-y;
+        label: "Height";
+        hint: "As tall as the note, or as its content";
+        PickerButton {
+            text: root.heights[root.settings-height];
+            open: root.open-list == 1;
+            clicked => { root.open-list = root.open-list == 1 ? -1 : 1; }
+        }
+    }
+
+    a0 := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.a0-y;
+        rule: false;
+        label: "Anchor";
+        hint: root.settings-height == 0 ? "Only with Fit content" : "Where it sits beside the note";
+        PickerButton {
+            text: root.anchors[root.settings-anchor];
+            enabled: root.settings-height == 1;
+            open: root.open-list == 2;
+            clicked => { root.open-list = root.open-list == 2 ? -1 : 2; }
+        }
+    }
+
+    if root.split : SubHeading {
+        pf: root.pf;
+        a: 36.0;
+        b: root.notes-head-y;
+        text: "Notes sidebar";
+    }
+
+    h1 := SettingRow {
+        visible: root.split;
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.h1-y;
+        label: "Height";
+        hint: "As tall as the note, or as its content";
+        PickerButton {
+            text: root.heights[root.notes-height];
+            open: root.open-list == 3;
+            clicked => { root.open-list = root.open-list == 3 ? -1 : 3; }
+        }
+    }
+
+    a1 := SettingRow {
+        visible: root.split;
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.a1-y;
+        rule: false;
+        label: "Anchor";
+        hint: root.notes-height == 0 ? "Only with Fit content" : "Where it sits beside the note";
+        PickerButton {
+            text: root.anchors[root.notes-anchor];
+            enabled: root.notes-height == 1;
+            open: root.open-list == 4;
+            clicked => { root.open-list = root.open-list == 4 ? -1 : 4; }
+        }
+    }
+
+    // ---- the lists, last so they sit above the rows under them ----
+    if root.open-list == 0 : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.ui-row-y, ui-row.content-h);
+        names: root.ui-sizes;
+        chosen: root.ui-size;
+        picked(i) => {
+            root.set-ui-size(i);
+            root.open-list = -1;
+        }
+    }
+
+    if root.open-list == 1 : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.h0-y, h0.content-h);
+        names: root.heights;
+        chosen: root.settings-height;
+        picked(i) => {
+            root.set-height(0, i);
+            root.open-list = -1;
+        }
+    }
+
+    if root.open-list == 2 : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.a0-y, a0.content-h);
+        names: root.anchors;
+        chosen: root.settings-anchor;
+        picked(i) => {
+            root.set-anchor(0, i);
+            root.open-list = -1;
+        }
+    }
+
+    if root.open-list == 3 : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.h1-y, h1.content-h);
+        names: root.heights;
+        chosen: root.notes-height;
+        picked(i) => {
+            root.set-height(1, i);
+            root.open-list = -1;
+        }
+    }
+
+    if root.open-list == 4 : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.a1-y, a1.content-h);
+        names: root.anchors;
+        chosen: root.notes-anchor;
+        picked(i) => {
+            root.set-anchor(1, i);
+            root.open-list = -1;
         }
     }
 }

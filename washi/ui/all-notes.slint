@@ -100,12 +100,15 @@ export component AllNotesSidebar inherits Rectangle {
     /// The user pressed the sidebar itself (not a row or the button): the platform drags the window.
     callback start-move();
 
-    // The panel, in window px (its shape from `SidebarPanel`), as tall as the paper (the window
-    // minus the margin).
+    /// Settings › Appearance › Sidebar: 0 Match note, 1 Fit content; anchor 0 Top, 1 Middle, 2 Bottom.
+    in property <int> height-mode: 0;
+    in property <int> anchor: 1;
+
+    // The panel, in window px (its shape from `SidebarPanel`), placed beside the paper (the window
+    // minus the margin, centred) by the Sidebar layout rule.
     property <float> pw: SidebarPanel.width;
-    property <float> ph: max(240.0, root.height / 1px - 84.0);
-    property <float> pcx: SidebarPanel.cx;
-    property <float> pcy: root.height / 1px / 2.0;
+    property <float> paper-h: max(240.0, root.height / 1px - 84.0);
+    property <float> paper-top: (root.height / 1px - root.paper-h) / 2.0;
     property <float> header-h: 104.0;
     property <float> row-pitch: 54.0;
 
@@ -113,6 +116,11 @@ export component AllNotesSidebar inherits Rectangle {
     property <float> n-closed: root.closed-notes.length;
     // The list: two labels and the rows.
     property <float> content-h: 30.0 + root.n-open * root.row-pitch + 14.0 + 30.0 + root.n-closed * root.row-pitch;
+    // Everything the panel holds: the header, the list, the button 14 under it and 16 of padding.
+    property <float> natural-h: root.header-h + root.content-h + 14.0 + 44.0 + 16.0;
+    property <float> ph: SidebarPanel.panel-h(root.paper-h, root.natural-h, root.height-mode);
+    property <float> pcx: SidebarPanel.cx;
+    property <float> pcy: SidebarPanel.panel-top(root.paper-top, root.paper-h, root.ph, root.anchor) + root.ph / 2.0;
     // The button follows the last row while everything fits; once it would not, it is fixed at
     // the panel's bottom and only the rows scroll above it.
     property <float> fit-h: root.ph - root.header-h - 16.0 - 44.0 - 14.0;

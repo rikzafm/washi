@@ -230,7 +230,9 @@ fn every_tab_looks_like_the_mockup() {
             tab::STYLE => (paper_top_rows(&shot, STYLE_COMPARED_H), paper_top_rows(&want, STYLE_COMPARED_H)),
             _ => (paper_top_rows(&shot, shot.1), paper_top_rows(&want, want.1)),
         }];
-        if extra == 0 {
+        // The mockup's Sidebar is 600 tall and centred; the app's (Match note, the default) is as
+        // tall as the Paper, so the two only line up where the Paper is at its 600 minimum.
+        if extra == 0 && MOCKUP_PAPER_H[i] == 600.0 {
             parts.push((strip_top_rows(&shot, SIDEBAR_COMPARED_H), strip_top_rows(&want, SIDEBAR_COMPARED_H)));
         }
         for (shot, want) in parts {
