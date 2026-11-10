@@ -16,8 +16,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-/// The strip the window grows by on the left (logical px). Matches `SidebarPanel.strip` (ui/sidebar-panel.slint).
-pub const SIDEBAR_WIDTH: i32 = 282;
+/// The strip the window grows by on the left (logical px).
+pub const SIDEBAR_WIDTH: i32 = crate::sidebar_panel::STRIP as i32;
 
 /// The transparent margin around a note's paper (`PaperTheme.margin`).
 const MARGIN: i32 = 42;

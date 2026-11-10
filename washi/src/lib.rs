@@ -18,6 +18,7 @@ pub mod occlusion;
 pub mod placement;
 pub mod platform;
 pub mod settings;
+pub mod sidebar_panel;
 pub mod textflow;
 pub mod storage;
 pub mod suspend;

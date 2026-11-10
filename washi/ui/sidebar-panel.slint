@@ -14,8 +14,17 @@ export global SidebarPanel {
     out property <float> radius: 22.0;
     out property <angle> tilt: -1.0deg;
     out property <color> fill: #D6DBE2;
+    /// A row or Tab on the panel: inset `pad` from both sides (`item-w` wide, its left edge `item-u`
+    /// from the panel's centre). Its label is inset `label-inset` more (`label-w` wide, from `label-u`).
+    out property <float> pad: 12.0;
+    out property <float> item-w: root.width - 2.0 * root.pad;
+    out property <float> item-u: -root.width / 2.0 + root.pad;
+    out property <float> label-inset: 16.0;
+    out property <float> label-w: root.item-w - 2.0 * root.label-inset;
+    out property <float> label-u: root.item-u + root.label-inset;
 
-    // The Sidebar layout rule (Settings › Appearance › Sidebar), one for both Sidebars.
+    // The Sidebar layout rule (Settings › Appearance › Sidebar). The rule is the same for both
+    // Sidebars; its values are shared or each Sidebar's own ("Same for both sidebars").
     // Height mode: 0 Match note, 1 Fit content. Anchor: 0 Top, 1 Middle, 2 Bottom.
 
     /// The panel's height: the Paper's (Match note), or its content's but never taller than the
