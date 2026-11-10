@@ -76,17 +76,17 @@ impl WindowScale {
         let old_factor = self.factor();
         let size = w.size().to_logical(old_factor);
         self.os.set(now);
-        if (now - self.factor()).abs() <= EPS {
-            return true; // at Large the platform's scale is already right
-        }
         if keep_logical {
             let phys_pos = w.position();
             self.dispatch(w);
             w.set_size(size);
             w.set_position(slint::WindowPosition::Physical(phys_pos));
-        } else {
-            self.set_ui(w, self.ui.get());
+            return true;
         }
+        if (now - self.factor()).abs() <= EPS {
+            return true; // at Large the platform's scale is already right
+        }
+        self.set_ui(w, self.ui.get());
         true
     }
 
