@@ -4,7 +4,7 @@ use crate::all_notes::AllNotesView;
 use crate::settings::SettingsView;
 use crate::delete_dialog::DeleteDialog;
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
-use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
+use crate::dropdown::{extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu};
 use crate::images::{self, ImageError, Source, Stored};
 use crate::image_viewer::{ImageViewer, ViewerEvent};
 use crate::note_window::{app_icon, note_title, Note, NoteEvent};
@@ -372,7 +372,7 @@ impl App {
         let max = self
             .with_note(id, |n| {
                 let (cx, cy) = n.screen_center();
-                self.physical_work_area_for(cx, cy).map(|wa| (wa.w, wa.h))
+                self.physical_work_area_for(cx, cy).map(|wa| (wa.w as f32, wa.h as f32))
             })
             .flatten()
             .or_else(|| self.0.env.window_control.work_areas().first().map(|r| (r.w as f32, r.h as f32)));
@@ -1193,14 +1193,12 @@ impl App {
     }
 
     /// The work area (physical px) of the monitor a point lies on; the main one if it is on none.
-    fn physical_work_area_for(&self, cx: f32, cy: f32) -> Option<DropdownRect> {
+    fn physical_work_area_for(&self, cx: f32, cy: f32) -> Option<ScreenRect> {
         let areas = self.0.env.window_control.work_areas();
         let on = |a: &&ScreenRect| {
             cx >= a.x as f32 && cx < (a.x + a.w) as f32 && cy >= a.y as f32 && cy < (a.y + a.h) as f32
         };
-        areas.iter().find(on).or_else(|| areas.first()).map(|wa| {
-            DropdownRect::new(wa.x as f32, wa.y as f32, wa.w as f32, wa.h as f32)
-        })
+        areas.iter().find(on).or_else(|| areas.first()).copied()
     }
 
 
@@ -1223,15 +1221,13 @@ impl App {
         let scale = editor.ui().window().scale_factor();
         let phys_pos = editor.ui().window().position();
         let (btn_x, btn_y, btn_w, btn_h) = editor.menu_button_rect();
-        let button_screen = DropdownRect::new(
-            phys_pos.x as f32 + btn_x * scale,
-            phys_pos.y as f32 + btn_y * scale,
-            btn_w * scale,
-            btn_h * scale,
+        let trigger = ScreenRect::new(
+            phys_pos.x + (btn_x * scale).round() as i32,
+            phys_pos.y + (btn_y * scale).round() as i32,
+            (btn_w * scale).round() as i32,
+            (btn_h * scale).round() as i32,
         );
-        let metrics = DropdownMetrics::compact().scaled(scale);
-        let work_area = self.physical_work_area_for(button_screen.x + button_screen.w / 2.0, button_screen.y + button_screen.h / 2.0);
-        let pos = calculate_dropdown_position(button_screen, &metrics, work_area);
+        let work_areas = self.0.env.window_control.work_areas();
 
         let weak = Rc::downgrade(&self.0);
         let on_dismiss = Rc::new(move |_id| {
@@ -1239,7 +1235,7 @@ impl App {
                 App(inner).dismiss_dropdown();
             }
         });
-        let menu = match DropdownMenu::open_compact(id, pos, editor.hwnd(), on_dismiss) {
+        let menu = match DropdownMenu::open_compact(id, trigger, &work_areas, editor.hwnd(), on_dismiss) {
             Ok(menu) => menu,
             Err(e) => {
                 eprintln!("washi: could not open dropdown menu: {e}");
@@ -1307,16 +1303,13 @@ impl App {
         let scale = note.ui().window().scale_factor();
         let phys_pos = note.ui().window().position();
         let (btn_x, btn_y, btn_w, btn_h) = note.menu_button_rect();
-        let button_screen = DropdownRect::new(
-            phys_pos.x as f32 + btn_x * scale,
-            phys_pos.y as f32 + btn_y * scale,
-            btn_w * scale,
-            btn_h * scale,
+        let trigger = ScreenRect::new(
+            phys_pos.x + (btn_x * scale).round() as i32,
+            phys_pos.y + (btn_y * scale).round() as i32,
+            (btn_w * scale).round() as i32,
+            (btn_h * scale).round() as i32,
         );
-
-        let metrics = DropdownMetrics::default().scaled(scale);
-        let work_area = self.physical_work_area_for(button_screen.x + button_screen.w / 2.0, button_screen.y + button_screen.h / 2.0);
-        let pos = calculate_dropdown_position(button_screen, &metrics, work_area);
+        let work_areas = self.0.env.window_control.work_areas();
 
         let weak = Rc::downgrade(&self.0);
         let on_dismiss = Rc::new(move |_id| {
@@ -1326,7 +1319,7 @@ impl App {
         });
 
         let owner_hwnd = note.hwnd();
-        match DropdownMenu::open(id, pos, owner_hwnd, on_dismiss) {
+        match DropdownMenu::open(id, trigger, &work_areas, owner_hwnd, on_dismiss) {
             Ok(menu) => {
                 let recent = self.0.db.recent_notes(id).unwrap_or_default();
                 let now_ms = self.0.env.clock.unix_millis();
