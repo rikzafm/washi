@@ -903,23 +903,23 @@ impl Harness {
     }
 
     pub fn is_dropdown_open(&self) -> bool {
-        self.app.as_ref().map(|a| a.is_dropdown_open()).unwrap_or(false)
+        self.app().dropdown().is_some()
     }
 
     pub fn dropdown_note_id(&self) -> Option<NoteId> {
-        self.app.as_ref().and_then(|a| a.dropdown_note_id())
+        self.app().dropdown().map(|d| d.note_id())
     }
 
     pub fn dropdown_pinned(&self) -> Option<bool> {
-        self.app.as_ref().and_then(|a| a.dropdown_pinned())
+        self.app().dropdown().map(|d| d.is_pinned())
     }
 
     pub fn dropdown_position(&self) -> Option<(f32, f32)> {
-        self.app.as_ref().and_then(|a| a.dropdown_position())
+        self.app().dropdown().map(|d| d.position())
     }
 
     pub fn dropdown_size(&self) -> Option<(f32, f32)> {
-        self.app.as_ref().and_then(|a| a.dropdown_size())
+        self.app().dropdown().map(|d| d.size())
     }
 
     pub fn menu_button_rect(&self, note: usize) -> (f32, f32, f32, f32) {
@@ -950,47 +950,47 @@ impl Harness {
     }
 
     pub fn invoke_dropdown_toggle_pin(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_toggle_pin();
+        if let Some(d) = self.app().dropdown() {
+            d.toggle_pin();
         }
     }
 
     pub fn invoke_dropdown_delete_note(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_delete_note();
+        if let Some(d) = self.app().dropdown() {
+            d.delete_note();
         }
     }
 
     pub fn invoke_dropdown_close_note(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_close_note();
+        if let Some(d) = self.app().dropdown() {
+            d.close_note();
         }
     }
 
     pub fn invoke_dropdown_new_note(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_new_note();
+        if let Some(d) = self.app().dropdown() {
+            d.new_note();
         }
     }
 
     pub fn invoke_dropdown_all_notes(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_all_notes();
+        if let Some(d) = self.app().dropdown() {
+            d.all_notes();
         }
         self.settle();
     }
 
     /// Press Settings in the open dropdown menu.
     pub fn invoke_dropdown_settings(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_settings();
+        if let Some(d) = self.app().dropdown() {
+            d.settings();
         }
         self.settle();
     }
 
     /// Whether the open dropdown menu shows its Settings button (`None` without a dropdown).
     pub fn dropdown_settings_visible(&self) -> Option<bool> {
-        self.app.as_ref().and_then(|a| a.dropdown_settings_visible())
+        self.app().dropdown().map(|d| d.settings_visible())
     }
 
     pub fn is_settings_open(&self) -> bool {
@@ -1361,80 +1361,80 @@ impl Harness {
     }
 
     pub fn invoke_dropdown_select_note(&mut self, id: NoteId) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_select_note(id);
+        if let Some(d) = self.app().dropdown() {
+            d.select_note(id);
         }
     }
 
     pub fn invoke_dropdown_dismiss(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_dropdown_dismiss();
+        if let Some(d) = self.app().dropdown() {
+            d.dismiss();
         }
     }
 
     pub fn press_dropdown_escape(&mut self) {
-        if let Some(app) = &self.app {
-            app.dispatch_dropdown_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::Escape.into(),
-            });
-            app.dispatch_dropdown_event(slint::platform::WindowEvent::KeyReleased {
-                text: slint::platform::Key::Escape.into(),
-            });
-        }
+        self.dispatch_dropdown_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Escape.into(),
+        });
+        self.dispatch_dropdown_event(slint::platform::WindowEvent::KeyReleased {
+            text: slint::platform::Key::Escape.into(),
+        });
     }
 
     pub fn is_delete_dialog_open(&self) -> bool {
-        self.app.as_ref().map_or(false, |a| a.is_delete_dialog_open())
+        self.app().delete_dialog().is_some()
     }
 
     pub fn delete_dialog_note_id(&self) -> Option<NoteId> {
-        self.app.as_ref().and_then(|a| a.delete_dialog_note_id())
+        self.app().delete_dialog().map(|d| d.note_id())
     }
 
     pub fn delete_dialog_position(&self) -> Option<(f32, f32)> {
-        self.app.as_ref().and_then(|a| a.delete_dialog_position())
+        self.app().delete_dialog().map(|d| d.position())
     }
 
     pub fn invoke_confirm_delete(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_confirm_delete();
+        if let Some(d) = self.app().delete_dialog() {
+            d.confirm();
         }
         self.settle();
     }
 
     pub fn invoke_keep_note(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_keep_note();
+        if let Some(d) = self.app().delete_dialog() {
+            d.cancel();
         }
         self.settle();
     }
 
     pub fn press_delete_dialog_escape(&mut self) {
-        if let Some(app) = &self.app {
-            app.dispatch_delete_dialog_event(slint::platform::WindowEvent::KeyPressed {
-                text: slint::platform::Key::Escape.into(),
-            });
-            app.dispatch_delete_dialog_event(slint::platform::WindowEvent::KeyReleased {
-                text: slint::platform::Key::Escape.into(),
-            });
-        }
+        self.dispatch_delete_dialog_event(slint::platform::WindowEvent::KeyPressed {
+            text: slint::platform::Key::Escape.into(),
+        });
+        self.dispatch_delete_dialog_event(slint::platform::WindowEvent::KeyReleased {
+            text: slint::platform::Key::Escape.into(),
+        });
         self.settle();
     }
 
     pub fn dispatch_dropdown_event(&self, event: slint::platform::WindowEvent) {
-        if let Some(app) = &self.app {
-            app.dispatch_dropdown_event(event);
+        if let Some(d) = self.app().dropdown() {
+            d.ui().window().dispatch_event(event);
+        }
+    }
+
+    pub fn dispatch_delete_dialog_event(&self, ev: slint::platform::WindowEvent) {
+        if let Some(d) = self.app().delete_dialog() {
+            d.ui().window().dispatch_event(ev);
         }
     }
 
     pub fn click_dropdown_outside(&mut self) {
-        if let Some(app) = &self.app {
-            let position = slint::LogicalPosition::new(5.0, 5.0);
-            let button = slint::platform::PointerEventButton::Left;
-            app.dispatch_dropdown_event(slint::platform::WindowEvent::PointerMoved { position });
-            app.dispatch_dropdown_event(slint::platform::WindowEvent::PointerPressed { position, button });
-            app.dispatch_dropdown_event(slint::platform::WindowEvent::PointerReleased { position, button });
-        }
+        let position = slint::LogicalPosition::new(5.0, 5.0);
+        let button = slint::platform::PointerEventButton::Left;
+        self.dispatch_dropdown_event(slint::platform::WindowEvent::PointerMoved { position });
+        self.dispatch_dropdown_event(slint::platform::WindowEvent::PointerPressed { position, button });
+        self.dispatch_dropdown_event(slint::platform::WindowEvent::PointerReleased { position, button });
     }
 
     pub fn render_dropdown(&self) -> Option<(u32, u32, Vec<slint::Rgb8Pixel>)> {
@@ -1457,7 +1457,7 @@ impl Harness {
     }
 
     pub fn dropdown_notes(&self) -> Vec<washi::note_window::DropdownNoteItem> {
-        self.app.as_ref().map(|a| a.dropdown_notes()).unwrap_or_default()
+        self.app().dropdown().map(|d| d.notes()).unwrap_or_default()
     }
 
     pub(crate) fn path(&self, name: &str) -> PathBuf {

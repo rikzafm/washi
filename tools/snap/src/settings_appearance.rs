@@ -119,7 +119,9 @@ impl Harness {
 
     /// The open dropdown menu's window on screen (physical px).
     pub fn dropdown_screen_size(&self) -> Option<(u32, u32)> {
-        self.app().dropdown_screen_size()
+        let d = self.app().dropdown()?;
+        let s = d.ui().window().size();
+        Some((s.width, s.height))
     }
 
     /// How many screen pixels one logical px of the Settings window covers.
