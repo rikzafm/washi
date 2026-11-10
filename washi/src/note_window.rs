@@ -28,11 +28,11 @@ pub const SCROLLBAR_HOLD: Duration = Duration::from_millis(600);
 /// A new note's Paper at UI size Large (`PaperTheme.paper-default-*`); its window adds the margins.
 pub const DEFAULT_PAPER: (f32, f32) = (363.0, 384.0);
 
-/// The window a new note opens with at the UI size `scale`: the default Paper and its margins, all
-/// times the scale (logical px).
-pub fn new_note_window_size(scale: f32) -> (u32, u32) {
+/// The window a new note opens with: the default Paper and its margins (logical px; on screen that
+/// is times the UI size, which scales the whole window).
+pub fn new_note_window_size() -> (u32, u32) {
     let m = 2.0 * crate::settings::anim::MARGIN;
-    (((DEFAULT_PAPER.0 + m) * scale).round() as u32, ((DEFAULT_PAPER.1 + m) * scale).round() as u32)
+    ((DEFAULT_PAPER.0 + m).round() as u32, (DEFAULT_PAPER.1 + m).round() as u32)
 }
 
 /// A minimized window reports a position around (-32000, -32000); that is not where the note lives.
@@ -1197,6 +1197,8 @@ pub struct Note {
     /// False for the All Notes editor: its window is wider than the note (the sidebar's strip), so
     /// it must never write its position as the note's.
     saves_geometry: Cell<bool>,
+    /// The window's scale: the monitor's times the UI size.
+    scale: crate::ui_scale::WindowScale,
 }
 
 impl Note {
@@ -1239,8 +1241,8 @@ impl Note {
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
         ui.set_app_icon(app_icon());
-        // before the window shows: it opens at the preferred size, which follows the UI size
-        ui.set_ui_scale(db.ui_scale());
+        // before the window is sized or shows: everything it draws is at the UI size
+        let scale = crate::ui_scale::WindowScale::attach(ui.window());
         if let Some(g) = geometry {
             ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
             ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
@@ -1633,9 +1635,10 @@ impl Note {
             });
         }
         ui.show()?;
+        scale.resync(ui.window(), true);
         let geometry = Rc::new(GeometrySave { id: id.clone(), db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
-        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, on_event, clipboard, paste_image, saves_geometry: Cell::new(true) })
+        Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, on_event, clipboard, paste_image, saves_geometry: Cell::new(true), scale })
     }
 
     /// Where an image added now goes: after the block that has the caret (or last had it).
@@ -1820,6 +1823,8 @@ impl Note {
     /// The user (or the platform) moved or resized the window: save the new geometry after the
     /// geometry debounce.
     pub fn geometry_changed(&self) {
+        // a move to a monitor with another DPI resets the window's scale to the monitor's
+        self.scale.resync(self.ui.window(), false);
         if !self.saves_geometry.get() {
             return;
         }
@@ -1869,8 +1874,12 @@ impl Note {
 
     /// Put the window at `g` (logical px) and remember it as the note's place.
     pub fn place(&self, g: Geometry) {
-        self.ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
-        self.ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
+        // Already there: leave the window alone. Off Large, whole logical px are not whole screen
+        // px, and going through them again could move it by a pixel.
+        if self.geometry.current() != Some(g) {
+            self.ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
+            self.ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
+        }
         self.geometry_changed();
     }
 
@@ -1902,6 +1911,18 @@ impl Note {
         let size = self.doc.images.size(block)?;
         let pixels = self.doc.images.pixels(block);
         (pixels.size().width > 0).then_some((pixels, size))
+    }
+
+    /// Draw at UI size `ui` from now on. The window keeps its size on screen and its content reflows;
+    /// `k` (old UI size / new) carries the geometry it remembers into the new logical px.
+    pub fn set_ui_scale(&self, ui: f32, k: f32) {
+        self.geometry.last.set(self.geometry.last.get().map(|g| g.scaled(k)));
+        self.scale.set_ui(self.ui.window(), ui);
+        // the words step by whole physical pixels, which the scale changes
+        self.doc.relayout(&self.ui);
+        if self.saves_geometry.get() {
+            self.geometry.current();
+        }
     }
 
     /// Where the window is and how big, in logical pixels.

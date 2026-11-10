@@ -48,6 +48,19 @@ pub struct Geometry {
     pub h: u32,
 }
 
+impl Geometry {
+    /// Every length times `k`, rounded: the same rectangle on screen in the logical px of another UI
+    /// size (`k` = old UI size / new UI size), or stored at Large (`k` = the UI size).
+    pub fn scaled(self, k: f32) -> Geometry {
+        if k == 1.0 {
+            return self;
+        }
+        let i = |v: i32| (v as f32 * k).round() as i32;
+        let u = |v: u32| (v as f32 * k).round() as u32;
+        Geometry { x: i(self.x), y: i(self.y), w: u(self.w), h: u(self.h) }
+    }
+}
+
 /// An image as stored: encoded bytes plus what the database knows about them.
 pub struct StoredImage {
     pub mime: String,
@@ -156,9 +169,10 @@ impl Db {
 
     const ROW: &'static str = "SELECT id, content, x, y, w, h, always_on_top FROM notes";
 
-    fn row(r: &rusqlite::Row) -> rusqlite::Result<NoteRow> {
+    /// A row, its geometry read back into logical px at UI size `scale` (see `save_geometry`).
+    fn row(r: &rusqlite::Row, scale: f32) -> rusqlite::Result<NoteRow> {
         let geometry = match (r.get::<_, Option<i32>>(2)?, r.get::<_, Option<i32>>(3)?, r.get::<_, Option<u32>>(4)?, r.get::<_, Option<u32>>(5)?) {
-            (Some(x), Some(y), Some(w), Some(h)) => Some(Geometry { x, y, w, h }),
+            (Some(x), Some(y), Some(w), Some(h)) => Some(Geometry { x, y, w, h }.scaled(1.0 / scale)),
             _ => None,
         };
         Ok(NoteRow { id: r.get(0)?, content: r.get(1)?, geometry, always_on_top: r.get::<_, i64>(6)? != 0 })
@@ -310,13 +324,15 @@ impl Db {
     /// Notes with `is_open = 1`, bottom of the stack first (then oldest first).
     pub fn open_notes(&self) -> Result<Vec<NoteRow>, DbError> {
         let mut stmt = self.conn.prepare(&format!("{} WHERE is_open = 1 ORDER BY z_order, id", Self::ROW))?;
-        let rows = stmt.query_map([], Self::row)?.collect::<Result<Vec<_>, _>>()?;
+        let scale = self.ui_scale();
+        let rows = stmt.query_map([], |r| Self::row(r, scale))?.collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
     pub fn note(&self, id: NoteId) -> Result<Option<NoteRow>, DbError> {
         use rusqlite::OptionalExtension;
-        Ok(self.conn.query_row(&format!("{} WHERE id = ?1", Self::ROW), [id], Self::row).optional()?)
+        let scale = self.ui_scale();
+        Ok(self.conn.query_row(&format!("{} WHERE id = ?1", Self::ROW), [id], |r| Self::row(r, scale)).optional()?)
     }
 
     /// Closed notes, most recently edited first.
@@ -339,7 +355,11 @@ impl Db {
         Ok(())
     }
 
+    /// Remember where a note's window is, `g` in logical px at the current UI size. It is stored at
+    /// Large (UI size 1.0), so it means the same place on screen whatever the UI size is later: rows
+    /// read back (`open_notes`, `note`) are in logical px at the UI size of that moment.
     pub fn save_geometry(&self, id: NoteId, g: Geometry) -> Result<(), DbError> {
+        let g = g.scaled(self.ui_scale());
         self.conn.execute(
             "UPDATE notes SET x = ?1, y = ?2, w = ?3, h = ?4 WHERE id = ?5",
             rusqlite::params![g.x, g.y, g.w, g.h, id],
@@ -685,6 +705,20 @@ mod tests {
         }
         db.set_meta("sidebar_theme_shared", "maybe").unwrap();
         assert!(db.sidebar_theme_shared());
+    }
+
+    #[test]
+    fn geometry_means_the_same_place_on_screen_whatever_the_ui_size() {
+        let (_dir, db) = test_db();
+        let id = db.create_note(1000).unwrap();
+        let at_large = Geometry { x: 600, y: 99, w: 447, h: 468 };
+        db.save_geometry(id, at_large).unwrap();
+        db.set_ui_scale(0.75).unwrap();
+        let small = db.note(id).unwrap().unwrap().geometry.unwrap();
+        assert_eq!(small, Geometry { x: 800, y: 132, w: 596, h: 624 }, "read in Small's logical px");
+        db.save_geometry(id, small).unwrap();
+        db.set_ui_scale(1.0).unwrap();
+        assert_eq!(db.note(id).unwrap().unwrap().geometry, Some(at_large), "saved at Small, read at Large");
     }
 
     #[test]

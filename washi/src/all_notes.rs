@@ -302,6 +302,16 @@ impl AllNotesView {
         self.parked.borrow_mut().insert(id, p);
     }
 
+    /// Draw the editor (and its Sidebar) at UI size `ui`; the parked notes' places are carried into the
+    /// new logical px by `k` (old UI size / new).
+    pub fn set_ui_scale(&self, ui: f32, k: f32) {
+        self.editor.set_ui_scale(ui, k);
+        for p in self.parked.borrow_mut().values_mut() {
+            p.home = p.home.scaled(k);
+            p.at = p.at.scaled(k);
+        }
+    }
+
     /// Every parked note, emptied (All Notes closes).
     pub fn take_parked(&self) -> Vec<(NoteId, Parked)> {
         self.parked.borrow_mut().drain().collect()

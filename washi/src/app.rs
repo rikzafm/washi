@@ -172,6 +172,8 @@ impl App {
         let db = Db::open(&env.data_dir.join("notes.db"), &key, now).map_err(StartError::Db)?;
         drop(key); // zeroized: the raw key is wiped as soon as the database is unlocked
         let db = Rc::new(db);
+        // every window from now on is drawn at the saved UI size
+        crate::ui_scale::set_app_scale(db.ui_scale());
 
         let mut rows = db.open_notes().map_err(StartError::Db)?;
         if rows.is_empty() {
@@ -588,10 +590,47 @@ impl App {
                     }
                 }
             }),
+            ui_scale_changed: Rc::new({
+                let app = app.clone();
+                move |scale| {
+                    if let Some(a) = app() {
+                        a.set_ui_scale(scale);
+                    }
+                }
+            }),
         };
         match SettingsView::open(host, geometry, pinned, hooks) {
             Ok(view) => *self.0.settings.borrow_mut() = Some(view),
             Err(e) => eprintln!("washi: could not open Settings: {e}"),
+        }
+    }
+
+    /// Draw everything at UI size `scale` from now on (Settings › Appearance; the value is already
+    /// saved). Open notes keep their windows' size on screen and their content reflows; the open
+    /// Settings page and All notes Sidebar redraw at once. The Dropdown menu and the delete dialog
+    /// close (they reopen at the new size). Whatever is held in logical px is carried over by
+    /// `k` = old / new, so it stays where it was on screen.
+    pub fn set_ui_scale(&self, scale: f32) {
+        let old = crate::ui_scale::app_scale();
+        if (old - scale).abs() < 1e-4 {
+            return;
+        }
+        crate::ui_scale::set_app_scale(scale);
+        let k = old / scale;
+        self.dismiss_dropdown();
+        self.dismiss_delete_dialog();
+        let notes: Vec<Rc<Note>> = self.0.notes.borrow().clone();
+        for n in &notes {
+            n.set_ui_scale(scale, k);
+        }
+        if let Some(v) = self.all_notes() {
+            v.set_ui_scale(scale, k);
+        }
+        for c in self.0.exit_candidates.borrow_mut().iter_mut() {
+            c.geometry = c.geometry.map(|g| g.scaled(k));
+        }
+        if let Some(s) = self.settings() {
+            s.set_ui_scale(scale, k);
         }
     }
 
@@ -924,7 +963,20 @@ impl App {
             })
         };
         let hooks = crate::all_notes::Hooks { park, make_editor, wire, desktop_visible };
-        match AllNotesView::open(initial_selected_id, host, &rows, now_ms, &self.0.env.window_control.work_areas(), hooks) {
+        // the work areas in the host's logical px, like `host`
+        let scale = self.with_note(initial_selected_id, |n| n.ui().window().scale_factor()).unwrap_or(1.0);
+        let areas: Vec<ScreenRect> = self
+            .0
+            .env
+            .window_control
+            .work_areas()
+            .iter()
+            .map(|a| {
+                let l = |p: i32| (p as f32 / scale).round() as i32;
+                ScreenRect::new(l(a.x), l(a.y), l(a.w), l(a.h))
+            })
+            .collect();
+        match AllNotesView::open(initial_selected_id, host, &rows, now_ms, &areas, hooks) {
             Ok(view) => {
                 *self.0.all_notes.borrow_mut() = Some(Rc::new(view));
                 self.apply_notes_sidebar_layout();
@@ -1060,6 +1112,14 @@ impl App {
     /// The size of the open dropdown menu window in logical pixels, if any.
     pub fn dropdown_size(&self) -> Option<(f32, f32)> {
         self.dropdown().map(|d| d.size())
+    }
+
+    /// The open dropdown menu's window on screen (physical px).
+    pub fn dropdown_screen_size(&self) -> Option<(u32, u32)> {
+        self.dropdown().map(|d| {
+            let s = d.ui().window().size();
+            (s.width, s.height)
+        })
     }
 
     /// Dispatch a window event to the active dropdown window (for testing).
@@ -1659,7 +1719,7 @@ impl App {
     fn create_new_note(&self, from: Option<NoteId>) -> Option<NoteId> {
         // Offset from the note it is opened from, but at the new-note size for the UI size (not that
         // note's own size).
-        let (w, h) = crate::note_window::new_note_window_size(self.0.db.ui_scale());
+        let (w, h) = crate::note_window::new_note_window_size();
         let geometry = from
             .and_then(|from_id| self.with_note(from_id, |n| n.geometry()))
             .map(|g| Geometry { x: g.x + NEW_NOTE_OFFSET, y: g.y + NEW_NOTE_OFFSET, w, h });

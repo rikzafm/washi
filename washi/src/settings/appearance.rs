@@ -52,11 +52,20 @@ pub struct Appearance {
     layout_changed: Rc<dyn Fn()>,
     /// A Sidebar Theme changed: the app redraws any open All notes Sidebar.
     themes_changed: Rc<dyn Fn()>,
+    /// Redraw every window at a new UI size (the app's `set_ui_scale`).
+    ui_scale_changed: Rc<dyn Fn(f32)>,
 }
 
 impl Appearance {
-    pub fn new(ui: &SettingsWindow, db: Rc<Db>, layout_changed: Rc<dyn Fn()>, themes_changed: Rc<dyn Fn()>) -> Rc<Appearance> {
-        let appearance = Rc::new(Appearance { ui: ui.as_weak(), db, layout_changed, themes_changed });
+    pub fn new(
+        ui: &SettingsWindow,
+        db: Rc<Db>,
+        layout_changed: Rc<dyn Fn()>,
+        themes_changed: Rc<dyn Fn()>,
+        ui_scale_changed: Rc<dyn Fn(f32)>,
+    ) -> Rc<Appearance> {
+        let appearance =
+            Rc::new(Appearance { ui: ui.as_weak(), db, layout_changed, themes_changed, ui_scale_changed });
         let me = Rc::downgrade(&appearance);
         ui.on_set_ui_size(move |i| {
             if let Some(a) = me.upgrade() {
@@ -107,6 +116,8 @@ impl Appearance {
         let Some(&scale) = UI_SCALES.get(i as usize) else { return };
         logged("UI size", self.db.set_ui_scale(scale));
         self.refresh();
+        // what is stored is what is shown, even if the write failed
+        (self.ui_scale_changed)(self.db.ui_scale());
     }
 
     /// The Theme's "Same for both sidebars" (independent of the Sidebar group's): turning it on gives
