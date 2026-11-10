@@ -1836,6 +1836,12 @@ impl Note {
         self.geometry_timer.start(TimerMode::SingleShot, GEOMETRY_DELAY, move || g.flush());
     }
 
+    /// Physical screen center (cx, cy) of the window.
+    pub fn screen_center(&self) -> (f32, f32) {
+        let (pos, size) = (self.ui.window().position(), self.ui.window().size());
+        (pos.x as f32 + size.width as f32 / 2.0, pos.y as f32 + size.height as f32 / 2.0)
+    }
+
     /// A restored note must be reachable: if its top strip is on no monitor (it was saved on a
     /// monitor that is gone), move it onto the primary work area. `areas` are physical pixels.
     pub fn keep_on_screen(&self, areas: &[ScreenRect]) {

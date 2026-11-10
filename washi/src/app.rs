@@ -371,8 +371,7 @@ impl App {
         });
         let max = self
             .with_note(id, |n| {
-                let (pos, size) = (n.ui().window().position(), n.ui().window().size());
-                let (cx, cy) = (pos.x as f32 + size.width as f32 / 2.0, pos.y as f32 + size.height as f32 / 2.0);
+                let (cx, cy) = n.screen_center();
                 self.physical_work_area_for(cx, cy).map(|wa| (wa.w, wa.h))
             })
             .flatten()

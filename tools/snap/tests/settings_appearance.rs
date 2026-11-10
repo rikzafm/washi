@@ -495,6 +495,21 @@ fn the_delete_dialog_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dp
     assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0), "{mw}x{mh}");
 }
 
+fn double_click_red_picture(h: &mut Harness, note_idx: usize) {
+    let (w, _, px) = h.render(note_idx);
+    let spots: Vec<(u32, u32)> = px.iter().enumerate()
+        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
+        .map(|(i, _)| (i as u32 % w, i as u32 / w))
+        .collect();
+    assert!(!spots.is_empty(), "the picture is drawn");
+    let n = spots.len() as f32;
+    let scale = h.note_drawing_scale(note_idx);
+    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
+    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
+    h.click(note_idx, x, y);
+    h.click(note_idx, x, y);
+}
+
 #[test]
 fn the_picture_viewer_opens_at_the_ui_size() {
     let red = [200u8, 30, 60];
@@ -508,19 +523,7 @@ fn the_picture_viewer_opens_at_the_ui_size() {
     h.click_image_button(0);
     h.wait_for_images();
 
-    // double click the middle of the picture (found on the render, screen px)
-    let (w, _, px) = h.render(0);
-    let spots: Vec<(u32, u32)> = px.iter().enumerate()
-        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
-        .map(|(i, _)| (i as u32 % w, i as u32 / w))
-        .collect();
-    assert!(!spots.is_empty(), "the picture is drawn");
-    let n = spots.len() as f32;
-    let scale = h.note_drawing_scale(0);
-    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
-    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
-    h.click(0, x, y);
-    h.click(0, x, y);
+    double_click_red_picture(&mut h, 0);
     assert_eq!(h.viewer_drawing_scales(), [0.75], "the viewer is drawn at Small too");
 }
 
@@ -536,18 +539,7 @@ fn an_open_picture_viewer_follows_the_ui_size_live() {
     h.click_image_button(0);
     h.wait_for_images();
 
-    let (w, _, px) = h.render(0);
-    let spots: Vec<(u32, u32)> = px.iter().enumerate()
-        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
-        .map(|(i, _)| (i as u32 % w, i as u32 / w))
-        .collect();
-    assert!(!spots.is_empty(), "the picture is drawn");
-    let n = spots.len() as f32;
-    let scale = h.note_drawing_scale(0);
-    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
-    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
-    h.click(0, x, y);
-    h.click(0, x, y);
+    double_click_red_picture(&mut h, 0);
     assert_eq!(h.viewer_drawing_scales(), [1.0], "the viewer opens at Large");
 
     choose_ui_size(&mut h, SMALL);
@@ -574,18 +566,7 @@ fn picture_viewer_on_secondary_monitor_caps_to_secondary_monitor_work_area() {
     h.click_image_button(0);
     h.wait_for_images();
 
-    let (w, _, px) = h.render(0);
-    let spots: Vec<(u32, u32)> = px.iter().enumerate()
-        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
-        .map(|(i, _)| (i as u32 % w, i as u32 / w))
-        .collect();
-    assert!(!spots.is_empty(), "the picture is drawn");
-    let n = spots.len() as f32;
-    let scale = h.note_drawing_scale(0);
-    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
-    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
-    h.click(0, x, y);
-    h.click(0, x, y);
+    double_click_red_picture(&mut h, 0);
 
     let sizes = h.viewer_window_sizes();
     assert_eq!(sizes.len(), 1);

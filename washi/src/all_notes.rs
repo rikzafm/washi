@@ -132,6 +132,16 @@ pub struct Hooks {
     pub desktop_visible: Rc<dyn Fn(NoteId, bool)>,
 }
 
+/// The editor window's geometry for a given paper geometry (expanded leftward by the sidebar strip).
+fn expand_for_sidebar(paper: Geometry) -> Geometry {
+    Geometry {
+        x: paper.x - SIDEBAR_WIDTH,
+        y: paper.y,
+        w: paper.w + SIDEBAR_WIDTH as u32,
+        h: paper.h,
+    }
+}
+
 pub struct AllNotesView {
     host_note_id: NoteId,
     editor: Rc<Note>,
@@ -158,7 +168,7 @@ impl AllNotesView {
     ) -> Result<Self, slint::PlatformError> {
         let content = rows.iter().find(|r| r.id == host_note_id).map(|r| r.content.clone()).unwrap_or_default();
         let g = clamp_to_screen(
-            Geometry { x: host.x - SIDEBAR_WIDTH, y: host.y, w: host.w + SIDEBAR_WIDTH as u32, h: host.h },
+            expand_for_sidebar(host),
             areas,
         );
         let editor = Rc::new(Self::make(&hooks, host_note_id, &content, g)?);
@@ -307,13 +317,7 @@ impl AllNotesView {
     pub fn set_ui_scale(&self, ui: f32, k: f32) {
         let paper = self.paper_geometry().scaled(k);
         self.editor.set_ui_scale(ui, k);
-        let new_window = Geometry {
-            x: paper.x - SIDEBAR_WIDTH,
-            y: paper.y,
-            w: paper.w + SIDEBAR_WIDTH as u32,
-            h: paper.h,
-        };
-        self.editor.place(new_window);
+        self.editor.place(expand_for_sidebar(paper));
         for p in self.parked.borrow_mut().values_mut() {
             p.home = p.home.scaled(k);
             p.at = p.at.scaled(k);
