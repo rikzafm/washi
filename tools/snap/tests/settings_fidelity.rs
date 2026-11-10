@@ -159,8 +159,22 @@ fn rendered(h: &Harness) -> (u32, u32, Vec<u8>) {
     (shot.width, shot.height, shot.rgb().to_vec())
 }
 
+/// How far left of the mockup's `nav` the Sidebar's panel sits: the mockup centres it at x = 161
+/// (its right edge under the Paper); the app uses the All notes panel, centred at 143.
+const SIDEBAR_SHIFT: u32 = 161 - 143;
+
+/// The mockup render of `tab`, with its Sidebar strip moved `SIDEBAR_SHIFT` left to where the app
+/// draws the panel (the Paper's side is the mockup's as rendered).
 fn reference(tab: &str) -> (u32, u32, Vec<u8>) {
-    load_png_rgb(&reference_dir().join(format!("settings-{tab}.png")))
+    let (w, h, mut rgb) = load_png_rgb(&reference_dir().join(format!("settings-{tab}.png")));
+    let src = rgb.clone();
+    for y in 0..h {
+        for x in 0..STRIP as u32 {
+            let (to, from) = (((y * w + x) * 3) as usize, ((y * w + x + SIDEBAR_SHIFT) * 3) as usize);
+            rgb[to..to + 3].copy_from_slice(&src[from..from + 3]);
+        }
+    }
+    (w, h, rgb)
 }
 
 /// The Paper's logical height as the window has it.
@@ -225,6 +239,48 @@ fn every_tab_looks_like_the_mockup() {
             assert!(far < 0.02, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
         }
     }
+}
+
+/// The leftmost and rightmost Sidebar-panel pixels (the slate fill, #D6DBE2: the desk the shot is
+/// drawn on, #D9DDE1, is 3 levels off in red) in the strip on row `y`.
+fn panel_edges(w: u32, rgb: &[u8], y: usize) -> Option<(usize, usize)> {
+    let slate = |x: usize| {
+        let i = (y * w as usize + x) * 3;
+        (rgb[i] as i32 - 0xD6).abs() <= 1 && (rgb[i + 1] as i32 - 0xDB).abs() <= 1 && (rgb[i + 2] as i32 - 0xE2).abs() <= 1
+    };
+    let xs: Vec<usize> = (0..STRIP as usize).filter(|&x| slate(x)).collect();
+    Some((*xs.first()?, *xs.last()?))
+}
+
+#[test]
+fn the_settings_sidebar_has_the_all_notes_sidebars_panel_outline() {
+    let h = open_on(0);
+    let settings = rendered(&h);
+
+    let mut notes = Harness::new();
+    notes.start().unwrap();
+    notes.set_note_text(0, "# Solo");
+    notes.toggle_dropdown(0);
+    notes.invoke_dropdown_all_notes();
+    notes.advance_frames(ms(600));
+    let (nw, nh, px) = notes.render_all_notes().unwrap();
+    let notes_rgb: Vec<u8> = px.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
+    dump("sidebar-outline-settings.png", &settings);
+    dump("sidebar-outline-all-notes.png", &(nw, nh, notes_rgb.clone()));
+
+    // Both panels are centred on their window's height: compare rows at the same offsets from it.
+    let (s_mid, n_mid) = (settings.1 as i32 / 2, nh as i32 / 2);
+    for dy in [-120, -60, 0, 60, 120] {
+        let s = panel_edges(settings.0, &settings.2, (s_mid + dy) as usize).expect("settings panel drawn");
+        let n = panel_edges(nw, &notes_rgb, (n_mid + dy) as usize).expect("all notes panel drawn");
+        assert!(
+            (s.0 as i32 - n.0 as i32).abs() <= 1 && (s.1 as i32 - n.1 as i32).abs() <= 1,
+            "row {dy:+} from the middle: Settings panel spans {s:?}, All notes {n:?}"
+        );
+    }
+    // Centred at 143, 270 wide: x = 8 to 278, clear of the Paper.
+    let (l, r) = panel_edges(settings.0, &settings.2, s_mid as usize).unwrap();
+    assert!((l as i32 - 8).abs() <= 1 && (r as i32 - 277).abs() <= 1, "Settings panel spans {l}..={r}");
 }
 
 #[test]

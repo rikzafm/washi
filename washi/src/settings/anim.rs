@@ -22,7 +22,7 @@ impl RectF {
     }
 }
 
-/// The strip the Sidebar adds left of the Paper. Same as `AllNotesMetrics.sidebar-w`.
+/// The strip the Sidebar adds left of the Paper. Same as `SidebarPanel.strip` (ui/sidebar-panel.slint).
 pub const SIDEBAR_STRIP: f32 = 282.0;
 /// `PaperTheme.margin`: the transparent margin around the Paper in every window.
 pub const MARGIN: f32 = 42.0;
