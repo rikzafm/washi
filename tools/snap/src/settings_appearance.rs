@@ -164,6 +164,11 @@ impl Harness {
         self.app().viewer_scale_factors()
     }
 
+    /// Physical window sizes of open picture viewers, oldest first.
+    pub fn viewer_window_sizes(&self) -> Vec<(u32, u32)> {
+        self.app().viewer_window_sizes()
+    }
+
     /// The pitch scale used for text layout on note `n`.
     pub fn note_pitch_scale(&self, n: usize) -> f32 {
         let id = self.note_id(n);

@@ -554,6 +554,44 @@ fn an_open_picture_viewer_follows_the_ui_size_live() {
     assert_eq!(h.viewer_drawing_scales(), [0.75], "the viewer updates to Small live");
 }
 
+#[test]
+fn picture_viewer_on_secondary_monitor_caps_to_secondary_monitor_work_area() {
+    use washi::platform::ScreenRect;
+    let red = [200u8, 30, 60];
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("big_red.png");
+    let picture = washi::images::Rgba { width: 1200, height: 900, data: (0..1200 * 900).flat_map(|_| [red[0], red[1], red[2], 255]).collect() };
+    std::fs::write(&path, washi::images::encode_png(&picture).unwrap()).unwrap();
+
+    let mut h = Harness::new();
+    h.set_work_areas(vec![
+        ScreenRect::new(0, 0, 800, 600),          // Small primary monitor
+        ScreenRect::new(1920, 0, 2560, 1440),     // Large secondary monitor
+    ]);
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 2000, y: 100, ..h.note_geometry(0) });
+    h.choose_picture(&path);
+    h.click_image_button(0);
+    h.wait_for_images();
+
+    let (w, _, px) = h.render(0);
+    let spots: Vec<(u32, u32)> = px.iter().enumerate()
+        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
+        .map(|(i, _)| (i as u32 % w, i as u32 / w))
+        .collect();
+    assert!(!spots.is_empty(), "the picture is drawn");
+    let n = spots.len() as f32;
+    let scale = h.note_drawing_scale(0);
+    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
+    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
+    h.click(0, x, y);
+    h.click(0, x, y);
+
+    let sizes = h.viewer_window_sizes();
+    assert_eq!(sizes.len(), 1);
+    assert!(sizes[0].1 > 540, "viewer height ({}) must not be clamped to primary monitor (540)", sizes[0].1);
+}
+
 // ---- Sidebar: Height and Anchor ----
 
 /// Whether two window-px positions agree to within the anti-aliased edge of a tilted panel.

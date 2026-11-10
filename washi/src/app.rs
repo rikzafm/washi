@@ -369,7 +369,14 @@ impl App {
                 App(inner).viewer_event(number, ev);
             }
         });
-        let max = self.0.env.window_control.work_areas().first().map(|r| (r.w as f32, r.h as f32));
+        let max = self
+            .with_note(id, |n| {
+                let (pos, size) = (n.ui().window().position(), n.ui().window().size());
+                let (cx, cy) = (pos.x as f32 + size.width as f32 / 2.0, pos.y as f32 + size.height as f32 / 2.0);
+                self.physical_work_area_for(cx, cy).map(|wa| (wa.w, wa.h))
+            })
+            .flatten()
+            .or_else(|| self.0.env.window_control.work_areas().first().map(|r| (r.w as f32, r.h as f32)));
         match ImageViewer::open(picture, size, &caption, max, app_icon(), on_event) {
             Ok(viewer) => self.0.viewers.borrow_mut().push((number, Rc::new(viewer))),
             Err(e) => eprintln!("washi: could not open the picture viewer: {e}"),
@@ -1133,6 +1140,11 @@ impl App {
     /// How many screen px one logical px of each open picture viewer covers, oldest first.
     pub fn viewer_scale_factors(&self) -> Vec<f32> {
         self.0.viewers.borrow().iter().map(|(_, v)| v.scale_factor()).collect()
+    }
+
+    /// Window sizes (physical px) of open picture viewers, oldest first.
+    pub fn viewer_window_sizes(&self) -> Vec<(u32, u32)> {
+        self.0.viewers.borrow().iter().map(|(_, v)| v.window_size()).collect()
     }
 
     /// Dispatch a window event to the active dropdown window (for testing).

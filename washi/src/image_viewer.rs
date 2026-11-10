@@ -153,6 +153,12 @@ impl ImageViewer {
         self.ui.window().scale_factor()
     }
 
+    /// The physical window size on screen.
+    pub fn window_size(&self) -> (u32, u32) {
+        let s = self.ui.window().size();
+        (s.width, s.height)
+    }
+
     /// The native window handle, once the window exists.
     pub fn hwnd(&self) -> Option<isize> {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
