@@ -15,13 +15,15 @@ impl Harness {
         h - 2 * washi::settings::anim::MARGIN as u32
     }
 
-    /// Make the Tab `tab`'s content `extra` px taller than it lays out (a stand-in for a Tab that
-    /// has grown past the cap). 0 puts it back.
-    pub fn settings_force_tall_tab(&mut self, tab: i32, extra: f32) {
-        let ui = self.height_ui();
-        ui.set_test_tall_tab(tab);
-        ui.set_test_tall_extra(extra);
-        self.settle();
+    /// On the Appearance Tab: turn both "Same for both sidebars" switches off (Theme, then the
+    /// Sidebar group), so each Sidebar gets its own rows and the Tab grows past the Tallest tab.
+    pub fn settings_split_appearance(&mut self) {
+        /// The switches' ids, as `hit-x` in appearance-tab.slint defines them.
+        const THEME_SWITCH: i32 = 40;
+        const LAYOUT_SWITCH: i32 = 4;
+        for id in [THEME_SWITCH, LAYOUT_SWITCH] {
+            self.settings_appearance_click(id);
+        }
     }
 
     /// The Settings height option the Appearance Tab shows: 0 Tallest tab, 1 Screen limit.

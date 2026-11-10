@@ -375,18 +375,7 @@ export component SettingsWindow inherits Window {
     /// Where each tab's content ends, measured from the laid-out rows (paper coordinates), and the
     /// Paper height that gives (the mockup's `min-height: 600` and 44px bottom padding). Every tab is
     /// laid out all the time (only the shown one is drawn), so a tab's height is known before it shows.
-    out property <[float]> content-bottoms: [
-        general.bottom + root.test-extra(0),
-        appearance.bottom + root.test-extra(1),
-        style.bottom + root.test-extra(2),
-        shortcuts.bottom + root.test-extra(3),
-        privacy.bottom + root.test-extra(4)];
-    /// For tests: Tab `test-tall-tab` lays out `test-tall-extra` px taller than its rows.
-    in property <int> test-tall-tab: -1;
-    in property <float> test-tall-extra: 0;
-    pure function test-extra(tab: int) -> float {
-        return tab == root.test-tall-tab ? root.test-tall-extra : 0.0;
-    }
+    out property <[float]> content-bottoms: [general.bottom, appearance.bottom, style.bottom, shortcuts.bottom, privacy.bottom];
     /// The lowest point each tab's dropdown lists can reach (paper coordinates; 0 for a tab without
     /// one). An open list may hang into the Paper's bottom padding and margin, but must end at least
     /// 14px inside the window (16 here, a pixel of slack each way for rounding).
