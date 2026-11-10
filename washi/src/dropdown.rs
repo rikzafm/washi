@@ -257,10 +257,6 @@ impl DropdownMenu {
         &self.scale
     }
 
-    pub fn pinned(&self) -> bool {
-        self.is_pinned()
-    }
-
     pub fn is_pinned(&self) -> bool {
         self.ui.get_pinned()
     }
@@ -287,48 +283,24 @@ impl DropdownMenu {
         self.ui.invoke_toggle_pin();
     }
 
-    pub fn invoke_toggle_pin(&self) {
-        self.toggle_pin();
-    }
-
     pub fn delete_note(&self) {
         self.ui.invoke_delete_note();
-    }
-
-    pub fn invoke_delete_note(&self) {
-        self.delete_note();
     }
 
     pub fn close_note(&self) {
         self.ui.invoke_close_note();
     }
 
-    pub fn invoke_close_note(&self) {
-        self.close_note();
-    }
-
     pub fn new_note(&self) {
         self.ui.invoke_new_note();
-    }
-
-    pub fn invoke_new_note(&self) {
-        self.new_note();
     }
 
     pub fn all_notes(&self) {
         self.ui.invoke_all_notes();
     }
 
-    pub fn invoke_all_notes(&self) {
-        self.all_notes();
-    }
-
     pub fn settings(&self) {
         self.ui.invoke_settings();
-    }
-
-    pub fn invoke_settings(&self) {
-        self.settings();
     }
 
     /// Whether the card offers Settings (not the compact one).
@@ -340,16 +312,8 @@ impl DropdownMenu {
         self.ui.invoke_select_note(id as i32);
     }
 
-    pub fn invoke_select_note(&self, id: NoteId) {
-        self.select_note(id);
-    }
-
     pub fn dismiss(&self) {
         self.ui.invoke_dismiss();
-    }
-
-    pub fn invoke_dismiss(&self) {
-        self.dismiss();
     }
 
     pub fn notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
@@ -607,13 +571,10 @@ mod tests {
         .expect("DropdownMenu::open");
 
         assert!(!menu.is_pinned());
-        assert!(!menu.pinned());
         menu.set_pinned(true);
         assert!(menu.is_pinned());
-        assert!(menu.pinned());
         menu.set_pinned(false);
         assert!(!menu.is_pinned());
-        assert!(!menu.pinned());
         menu.set_owner(0);
         menu.ensure_on_top();
     }
@@ -644,7 +605,7 @@ mod tests {
         menu.ui().on_all_notes(move || {
             anc.set(true);
         });
-        menu.invoke_all_notes();
+        menu.all_notes();
         assert!(all_notes_called.get());
         menu.ui().invoke_dismiss();
         assert!(dismissed.get());

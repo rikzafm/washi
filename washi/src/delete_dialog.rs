@@ -113,16 +113,12 @@ impl DeleteDialog {
         self.ui.invoke_confirm_delete();
     }
 
-    pub fn invoke_confirm_delete(&self) {
-        self.confirm();
-    }
-
     pub fn cancel(&self) {
         self.ui.invoke_keep();
     }
 
-    pub fn invoke_keep(&self) {
-        self.cancel();
+    pub fn dispatch_event(&self, event: slint::platform::WindowEvent) {
+        self.ui.window().dispatch_event(event);
     }
 
     pub fn hwnd(&self) -> Option<isize> {
@@ -219,16 +215,6 @@ mod tests {
 
         // Semantic confirm()
         dialog.confirm();
-        assert!(confirmed.get());
-
-        // Backward-compatible alias invoke_keep()
-        kept.set(false);
-        dialog.invoke_keep();
-        assert!(kept.get());
-
-        // Backward-compatible alias invoke_confirm_delete()
-        confirmed.set(false);
-        dialog.invoke_confirm_delete();
         assert!(confirmed.get());
     }
 }
