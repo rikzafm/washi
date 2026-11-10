@@ -130,13 +130,13 @@ fn the_chosen_ui_size_is_kept_when_settings_reopens_and_after_a_restart() {
 #[test]
 fn a_new_note_opens_at_the_default_size_times_the_ui_size() {
     let mut h = started();
-    let first = h.note_size(0);
+    let first = h.note_screen_size(0);
     assert_eq!(first, new_note_window(1.0));
     for (option, scale) in [(SMALL, 0.75), (MEDIUM, 0.80), (LARGE, 1.0)] {
         choose_ui_size(&mut h, option);
         let n = new_note(&mut h);
-        assert_eq!(h.note_size(n), new_note_window(scale), "UI size {option}");
-        assert_eq!(h.note_size(0), first, "an open note keeps its size");
+        assert_eq!(h.note_screen_size(n), new_note_window(scale), "UI size {option}");
+        assert_eq!(h.note_screen_size(0), first, "an open note keeps its size");
     }
 }
 
@@ -146,7 +146,7 @@ fn a_new_note_ignores_the_size_of_the_note_it_is_opened_from() {
     h.resize_note(0, 600, 560);
     choose_ui_size(&mut h, SMALL);
     let n = new_note(&mut h);
-    assert_eq!(h.note_size(n), new_note_window(0.75));
+    assert_eq!(h.note_screen_size(n), new_note_window(0.75));
 }
 
 #[test]
@@ -157,7 +157,163 @@ fn the_fresh_note_after_a_restart_with_nothing_open_uses_the_ui_size() {
     assert!(h.has_quit());
     h.restart().unwrap();
     assert_eq!(h.open_note_count(), 1);
-    assert_eq!(h.note_size(0), new_note_window(0.75));
+    assert_eq!(h.note_screen_size(0), new_note_window(0.75));
+}
+
+// ---- UI size rescales what Washi draws (ticket 03) ----
+
+/// Where the Paper starts on the middle row of a rendered note: the first bright pixel from the
+/// left (the margin around the Paper is transparent, rendered dark).
+fn paper_left_edge(h: &Harness, note: usize) -> u32 {
+    let (w, hh, px) = h.render(note);
+    let row = hh / 2;
+    (0..w).find(|&x| {
+        let p = px[(row * w + x) as usize];
+        (p.r as u32 + p.g as u32 + p.b as u32) / 3 > 150
+    })
+    .expect("no Paper on the middle row")
+}
+
+fn close_to(a: f32, b: f32, tolerance: f32) -> bool {
+    (a - b).abs() <= tolerance
+}
+
+#[test]
+fn small_and_medium_draw_an_open_note_smaller_inside_the_same_window() {
+    let mut h = started();
+    h.type_text(0, "hello");
+    let window = h.note_screen_size(0);
+    let edge = paper_left_edge(&h, 0) as f32;
+    let words = h.text_runs(0);
+    assert_eq!(h.note_drawing_scale(0), 1.0, "Large is today's size");
+    for (option, scale) in [(SMALL, 0.75), (MEDIUM, 0.80)] {
+        choose_ui_size(&mut h, option);
+        assert_eq!(h.note_screen_size(0), window, "UI size {option}: the window keeps its size");
+        assert_eq!(h.note_drawing_scale(0), scale, "UI size {option}: drawn at {scale}");
+        let (lw, lh) = h.note_size(0);
+        assert!(
+            close_to(lw as f32 * scale, window.0 as f32, 1.0) && close_to(lh as f32 * scale, window.1 as f32, 1.0),
+            "UI size {option}: the content reflows into the bigger logical window, got {lw}x{lh}"
+        );
+        let small_edge = paper_left_edge(&h, 0) as f32;
+        assert!(close_to(small_edge, edge * scale, 2.0), "UI size {option}: margin {small_edge}, want {}", edge * scale);
+        let now = h.text_runs(0);
+        assert_eq!(now.first().map(|r| r.0.clone()), words.first().map(|r| r.0.clone()));
+        // the per-note text size keeps its logical size: the scale comes on top of it
+        assert_eq!(now.first().map(|r| r.5), words.first().map(|r| r.5), "UI size {option}: word width");
+    }
+}
+
+#[test]
+fn going_back_to_large_draws_the_note_exactly_as_before() {
+    let mut h = started();
+    h.type_text(0, "hello world");
+    // the Settings round trip itself, at Large
+    choose_ui_size(&mut h, LARGE);
+    // (an inactive window draws no blinking caret)
+    h.set_window_active(0, false);
+    let before = h.render(0);
+    choose_ui_size(&mut h, SMALL);
+    choose_ui_size(&mut h, LARGE);
+    assert_eq!(h.note_drawing_scale(0), 1.0);
+    h.set_window_active(0, false);
+    let after = h.render(0);
+    assert_eq!((after.0, after.1), (before.0, before.1));
+    let diff: Vec<usize> = (0..after.2.len()).filter(|&i| after.2[i] != before.2[i]).collect();
+    let xy = |i: &usize| (*i as u32 % after.0, *i as u32 / after.0);
+    assert!(diff.is_empty(), "Large is pixel-identical to before: {} px differ, first {:?} last {:?}", diff.len(), diff.first().map(xy), diff.last().map(xy));
+}
+
+#[test]
+fn the_settings_page_shrinks_at_once_and_stays_clickable() {
+    let mut h = started();
+    open_on(&mut h, tab::APPEARANCE);
+    let (w, hh) = h.settings_screen_size().unwrap();
+    h.settings_appearance_click(UI_SIZE_BUTTON);
+    h.settings_appearance_click(SMALL);
+    h.advance_frames(ms(600));
+    let (sw, sh) = h.settings_screen_size().unwrap();
+    assert!(close_to(sw as f32, w as f32 * 0.75, 2.0) && close_to(sh as f32, hh as f32 * 0.75, 2.0),
+        "Settings at Small: {sw}x{sh}, want 75% of {w}x{hh}");
+
+    // the scaled page still answers where it draws its controls
+    h.settings_appearance_click(UI_SIZE_BUTTON);
+    assert_eq!(h.settings_appearance_open_list(), 0);
+    h.settings_appearance_click(LARGE);
+    h.advance_frames(ms(600));
+    assert_eq!(h.settings_ui_size(), 2);
+    assert_eq!(h.settings_screen_size().unwrap(), (w, hh), "back at Large: today's size");
+    h.settings_click_tab(tab::GENERAL);
+    h.advance_frames(ms(600));
+    assert_eq!(h.settings_shown_tab(), tab::GENERAL);
+}
+
+#[test]
+fn closing_settings_puts_the_note_back_at_its_size_after_a_scale_change() {
+    let mut h = started();
+    let (window, at) = (h.note_screen_size(0), h.window_position(0));
+    choose_ui_size(&mut h, SMALL);
+    assert_eq!(h.note_screen_size(0), window);
+    assert_eq!(h.window_position(0), at);
+}
+
+#[test]
+fn the_dropdown_menu_scales() {
+    let mut h = started();
+    h.toggle_dropdown(0);
+    let (w, hh) = h.dropdown_screen_size().unwrap();
+    h.toggle_dropdown(0);
+    choose_ui_size(&mut h, SMALL);
+    h.toggle_dropdown(0);
+    let (sw, sh) = h.dropdown_screen_size().unwrap();
+    assert!(close_to(sw as f32, w as f32 * 0.75, 1.0) && close_to(sh as f32, hh as f32 * 0.75, 1.0),
+        "dropdown at Small: {sw}x{sh}, want 75% of {w}x{hh}");
+}
+
+#[test]
+fn the_all_notes_strip_scales() {
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    let note = h.note_screen_size(0);
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    h.advance_frames(ms(600));
+    let (_, _, w, hh) = h.all_notes_window_geometry().unwrap();
+    assert_eq!(hh, note.1);
+    assert!(close_to((w - note.0) as f32, 282.0 * 0.75, 1.0), "strip {} on screen", w - note.0);
+}
+
+#[test]
+fn the_screen_still_caps_the_settings_page_at_small_and_more_of_a_tab_fits() {
+    let mut h = started();
+    h.set_work_areas(vec![washi::platform::ScreenRect::new(0, 0, 1920, 700)]);
+    open_on(&mut h, tab::SHORTCUTS);
+    let (_, large_on_screen) = h.settings_screen_size().unwrap();
+    let large_paper = h.settings_paper_height();
+    assert!(large_on_screen <= 700, "Large: {large_on_screen} px tall on a 700 px screen");
+    assert!(h.settings_scroll().1 > 0.0, "Large: Shortcuts is capped by the screen and scrolls");
+
+    h.settings_click_tab(tab::APPEARANCE);
+    h.advance_frames(ms(600));
+    h.settings_appearance_click(UI_SIZE_BUTTON);
+    h.settings_appearance_click(SMALL);
+    h.settings_click_tab(tab::SHORTCUTS);
+    h.advance_frames(ms(600));
+    let (_, small_on_screen) = h.settings_screen_size().unwrap();
+    assert!(small_on_screen <= 700, "Small: {small_on_screen} px tall on a 700 px screen");
+    assert!(h.settings_paper_height() > large_paper, "Small: the same screen holds more of the Tab");
+    assert!(small_on_screen < large_on_screen, "Small: the page is shorter on screen");
+}
+
+#[test]
+fn the_saved_ui_size_is_applied_at_startup() {
+    let mut h = started();
+    choose_ui_size(&mut h, MEDIUM);
+    let (window, at) = (h.note_screen_size(0), h.window_position(0));
+    h.restart().unwrap();
+    assert_eq!(h.note_drawing_scale(0), 0.80);
+    assert_eq!(h.note_screen_size(0), window, "the note comes back at the size it had on screen");
+    assert_eq!(h.window_position(0), at);
 }
 
 // ---- Sidebar: Height and Anchor ----
@@ -443,6 +599,34 @@ fn looks_like(p: [u8; 3], theme: i32) -> bool {
         // A translucent white over the desk: clearly lighter than it, not paper-white.
         _ => p.iter().zip(DESK).all(|(a, d)| *a as i32 >= d as i32 + 6) && !near_rgb(p, PAPER_FILL),
     }
+}
+
+/// The width of the Paper-themed All notes panel on its middle row, as rendered (screen px): the run
+/// of paper-white pixels that starts in the Sidebar's strip.
+fn paper_panel_width(h: &Harness) -> u32 {
+    let shot = h.render_all_notes_on_desk().expect("All notes is open");
+    let row = shot.height / 2 + 150;
+    let white = |x: u32| near_rgb(shot.pixel(x, row), PAPER_FILL);
+    let start = (0..shot.width).find(|&x| white(x)).expect("the panel is drawn");
+    let end = (start..shot.width).find(|&x| !white(x)).unwrap_or(shot.width);
+    end - start
+}
+
+#[test]
+fn a_themed_sidebar_scales_with_the_ui_size() {
+    let mut widths = Vec::new();
+    for size in [LARGE, SMALL] {
+        let mut h = started();
+        open_on(&mut h, tab::APPEARANCE);
+        pick_theme(&mut h, THEME_A, PAPER);
+        h.settings_appearance_click(UI_SIZE_BUTTON);
+        h.settings_appearance_click(size);
+        close_settings(&mut h);
+        open_all_notes(&mut h, 0);
+        widths.push(paper_panel_width(&h) as f32);
+    }
+    assert!(close_to(widths[0], 270.0, 3.0), "Large: the 270 px panel, got {}", widths[0]);
+    assert!(close_to(widths[1], widths[0] * 0.75, 3.0), "Small: {} on screen, want 75% of {}", widths[1], widths[0]);
 }
 
 #[test]

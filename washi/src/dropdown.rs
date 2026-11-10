@@ -198,6 +198,7 @@ impl DropdownMenu {
         compact: bool,
     ) -> Result<Self, slint::PlatformError> {
         let ui = DropdownMenuWindow::new()?;
+        let scale = crate::ui_scale::WindowScale::attach(ui.window());
         if compact {
             ui.set_compact(true);
             ui.set_card_height(COMPACT_CARD_HEIGHT);
@@ -219,6 +220,7 @@ impl DropdownMenu {
         }
 
         ui.show()?;
+        scale.resync(ui.window(), true);
         let menu = Self { note_id, ui };
 
         #[cfg(target_os = "windows")]

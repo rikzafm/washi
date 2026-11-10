@@ -57,6 +57,8 @@ pub struct Hooks {
     pub sidebar_layout_changed: Rc<dyn Fn()>,
     /// A Sidebar Theme was changed on the Appearance Tab: redraw the open All notes Sidebar.
     pub sidebar_themes_changed: Rc<dyn Fn()>,
+    /// The UI size changed (already saved): redraw every window at it, this page included.
+    pub ui_scale_changed: Rc<dyn Fn(f32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -89,7 +91,7 @@ pub struct SettingsView {
     hooks: Hooks,
     host: NoteId,
     /// The host note's window geometry when Settings opened: what closing restores.
-    host_window: Geometry,
+    host_window: Cell<Geometry>,
     /// Where the Settings window was last put (to tell a drag by the user from where we placed it).
     placed: Cell<Geometry>,
     /// The window as it is now (logical px): where we put it, moved by any drag since.
@@ -118,6 +120,8 @@ pub struct SettingsView {
     tab: Cell<i32>,
     general: Rc<general::General>,
     _appearance: Rc<appearance::Appearance>,
+    /// The window's scale: the monitor's times the UI size.
+    scale: crate::ui_scale::WindowScale,
 }
 
 impl SettingsView {
@@ -135,12 +139,14 @@ impl SettingsView {
             hooks.general.db.clone(),
             hooks.sidebar_layout_changed.clone(),
             hooks.sidebar_themes_changed.clone(),
+            hooks.ui_scale_changed.clone(),
         );
+        let scale = crate::ui_scale::WindowScale::attach(ui.window());
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,
             hooks,
             host,
-            host_window,
+            host_window: Cell::new(host_window),
             placed: Cell::new(host_window),
             canvas: Cell::new(host_window),
             resizes: Cell::new(0),
@@ -162,6 +168,7 @@ impl SettingsView {
             tab: Cell::new(0),
             general,
             _appearance: appearance,
+            scale,
         });
         view.wire(Rc::downgrade(&view));
         view.morph_to.set(view.open_paper());
@@ -171,6 +178,7 @@ impl SettingsView {
         view.reserve(window_bounds(view.morph_from.get(), 0.0), window_bounds(view.morph_to.get(), SIDEBAR_STRIP));
         view.apply(grow_pose(view.morph_from.get(), view.morph_to.get(), 0.0));
         let _ = view.ui.show();
+        view.scale.resync(view.ui.window(), true);
         view.start_ticking();
         Ok(view)
     }
@@ -178,7 +186,7 @@ impl SettingsView {
     /// The Paper at the Settings size, anchored at the host Paper's top-left and shifted only as far
     /// as keeping the window (with the Sidebar's strip out) on screen needs.
     fn open_paper(&self) -> RectF {
-        let note = paper_of_note(self.host_window);
+        let note = paper_of_note(self.host_window.get());
         let areas = self.areas();
         self.limit_to_screen(note, &areas);
         let want = RectF { x: note.x, y: note.y, w: PAPER_W, h: self.ui.invoke_fitted_height_for(self.tab.get()).max(PAPER_MIN_H) };
@@ -217,6 +225,44 @@ impl SettingsView {
             y: c.y + ui.get_page_y().round() as i32,
             w: ui.get_page_w().round().max(1.0) as u32,
             h: ui.get_page_h().round().max(1.0) as u32,
+        }
+    }
+
+    /// The UI size changed while the page is open: draw it at `ui` at once. The page keeps its top
+    /// left on screen and its logical size, so it shrinks or grows on screen. Whatever the view holds
+    /// in logical px (the host's window, where it put the page) is carried into the new logical px by
+    /// `k` (old UI size / new), so closing still puts the host back where it was on screen.
+    pub fn set_ui_scale(&self, ui: f32, k: f32) {
+        let rect = |r: RectF| RectF { x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k };
+        let page = self.page_geometry().scaled(k);
+        let paper = rect(self.paper.get());
+        for g in [&self.host_window, &self.placed, &self.canvas, &self.close_target] {
+            g.set(g.get().scaled(k));
+        }
+        for r in [&self.morph_to, &self.tab_from, &self.tab_to] {
+            r.set(rect(r.get()));
+        }
+        self.paper.set(paper);
+        self.scale.set_ui(self.ui.window(), ui);
+        self.show_page(page);
+        self.morph_from.set(paper_of_note(self.host_window.get()));
+        // the screen holds more logical px now: the cap follows, then the Paper
+        let areas = self.areas();
+        self.limit_to_screen(paper, &areas);
+        let h = self.ui.invoke_fitted_height_for(self.tab.get()).max(PAPER_MIN_H);
+        let fit = fit_on_screen(RectF { x: paper.x, y: paper.y, w: PAPER_W, h }, SIDEBAR_STRIP, &areas);
+        let phase = self.phase.borrow().clone();
+        match phase {
+            Phase::Open | Phase::Tab { .. } => {
+                *self.phase.borrow_mut() = Phase::Open;
+                self.stop_ticking();
+                self.ui.set_content_dy(0.0);
+                self.morph_to.set(fit);
+                self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, content: 1.0 });
+                self.fit();
+            }
+            Phase::Morph { closing: false, .. } => self.morph_to.set(fit),
+            _ => {}
         }
     }
 
@@ -568,7 +614,7 @@ impl SettingsView {
         let at = w.position();
         let placed = self.placed.get();
         let (dx, dy) = ((at.x as f32 / s).round() as i32 - placed.x, (at.y as f32 / s).round() as i32 - placed.y);
-        let g = self.host_window;
+        let g = self.host_window.get();
         Geometry { x: g.x + dx, y: g.y + dy, ..g }
     }
 

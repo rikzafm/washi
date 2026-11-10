@@ -95,7 +95,12 @@ impl WindowAdapter for StandInWindow {
         self.size_chosen.set(true);
         let sf = self.window.scale_factor();
         let min = self.min_size();
-        let p = size.to_physical(sf);
+        // a logical size lands on whole screen px rounded, as on Windows (Slint's own conversion
+        // truncates)
+        let p = match size {
+            WindowSize::Logical(l) => PhysicalSize::new((l.width * sf).round() as u32, (l.height * sf).round() as u32),
+            WindowSize::Physical(p) => p,
+        };
         let p = PhysicalSize::new(p.width.max(min.width), p.height.max(min.height));
         self.size.set(p);
         self.window.dispatch_event(slint::platform::WindowEvent::Resized { size: p.to_logical(sf) });
@@ -104,7 +109,11 @@ impl WindowAdapter for StandInWindow {
         Some(self.position.get())
     }
     fn set_position(&self, position: WindowPosition) {
-        self.position.set(position.to_physical(self.window.scale_factor()));
+        let sf = self.window.scale_factor();
+        self.position.set(match position {
+            WindowPosition::Logical(l) => PhysicalPosition::new((l.x * sf).round() as i32, (l.y * sf).round() as i32),
+            WindowPosition::Physical(p) => p,
+        });
     }
     fn request_redraw(&self) {
         self.needs_redraw.set(true);

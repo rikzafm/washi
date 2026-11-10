@@ -66,6 +66,7 @@ impl DeleteDialog {
         on_start_move: Rc<dyn Fn(Option<isize>)>,
     ) -> Result<Self, slint::PlatformError> {
         let ui = DeleteNoteDialog::new()?;
+        let scale = crate::ui_scale::WindowScale::attach(ui.window());
         ui.window().set_position(slint::LogicalPosition::new(position.0, position.1));
 
         {
@@ -101,6 +102,7 @@ impl DeleteDialog {
         }
 
         dialog.ui.show()?;
+        scale.resync(dialog.ui.window(), true);
 
         #[cfg(target_os = "windows")]
         if let Some(owner) = owner_hwnd {

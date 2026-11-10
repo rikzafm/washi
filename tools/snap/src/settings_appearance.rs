@@ -97,4 +97,28 @@ impl Harness {
         });
         Some(crate::settings_shots::on_desk(pw, ph, buf))
     }
+
+    // ---- UI size: what the screen shows (physical px, the stand-in monitor is at 100%) ----
+
+    /// A note's window on screen (physical px): what the user sees, whatever the UI size.
+    pub fn note_screen_size(&self, note: usize) -> (u32, u32) {
+        let s = self.app().with_note(self.note_id(note), |n| n.ui().window().size()).unwrap();
+        (s.width, s.height)
+    }
+
+    /// How many screen pixels one logical px of a note covers (1 at Large on a 100% monitor).
+    pub fn note_drawing_scale(&self, note: usize) -> f32 {
+        self.app().with_note(self.note_id(note), |n| n.ui().window().scale_factor()).unwrap()
+    }
+
+    /// The Settings window on screen (physical px).
+    pub fn settings_screen_size(&self) -> Option<(u32, u32)> {
+        let s = self.app().settings()?.ui().window().size();
+        Some((s.width, s.height))
+    }
+
+    /// The open dropdown menu's window on screen (physical px).
+    pub fn dropdown_screen_size(&self) -> Option<(u32, u32)> {
+        self.app().dropdown_screen_size()
+    }
 }
