@@ -1198,7 +1198,7 @@ pub struct Note {
     /// it must never write its position as the note's.
     saves_geometry: Cell<bool>,
     /// The window's scale: the monitor's times the UI size.
-    scale: crate::ui_scale::WindowScale,
+    scale: Rc<crate::ui_scale::WindowScale>,
 }
 
 impl Note {
@@ -1242,7 +1242,18 @@ impl Note {
         ui.set_pinned(always_on_top);
         ui.set_app_icon(app_icon());
         // before the window is sized or shows: everything it draws is at the UI size
-        let scale = crate::ui_scale::WindowScale::attach(ui.window());
+        let scale = Rc::new(crate::ui_scale::WindowScale::attach(ui.window()));
+        {
+            // moved to a monitor with another DPI: put the UI size back on top
+            let (weak, scale, doc) = (ui.as_weak(), scale.clone(), doc.clone());
+            ui.on_scale_factor_changed(move || {
+                if let Some(ui) = weak.upgrade() {
+                    if scale.resync(ui.window(), false) {
+                        doc.relayout(&ui);
+                    }
+                }
+            });
+        }
         if let Some(g) = geometry {
             let sf = scale.factor();
             ui.window().set_size(slint::PhysicalSize::new((g.w as f32 * sf).round() as u32, (g.h as f32 * sf).round() as u32));
@@ -1636,7 +1647,9 @@ impl Note {
             });
         }
         ui.show()?;
-        scale.resync(ui.window(), true);
+        if scale.resync(ui.window(), true) {
+            doc.relayout(&ui);
+        }
         let geometry = Rc::new(GeometrySave { id: id.clone(), db: autosave.db.clone(), ui: ui.as_weak(), last: Cell::new(None), dirty: Cell::new(false) });
         geometry.current(); // remember where the window opened
         Ok(Note { id, ui, doc, autosave, timer, history_timer, geometry, geometry_timer: Rc::new(Timer::default()), scroll_timer, changed, on_event, clipboard, paste_image, saves_geometry: Cell::new(true), scale })

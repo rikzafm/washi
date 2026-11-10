@@ -2,8 +2,8 @@
 //! Note, Settings, the Dropdown menu, the delete dialog, the picture viewer) is drawn at the
 //! platform's own scale (the monitor's DPI) times the UI size. When a window moves to a monitor with
 //! another DPI the platform puts its own scale back on the window, and the window's owner puts the
-//! UI size back on top ([`WindowScale::resync`]): Notes when the move is reported, the other movable
-//! windows when their `scale-factor` property changes. The scale goes in as the Slint window's scale factor, so every
+//! UI size back on top ([`WindowScale::resync`]): movable windows (Notes, Settings, the delete dialog,
+//! the picture viewer) when their `scale-factor` property changes (and Notes when a move is reported). The scale goes in as the Slint window's scale factor, so every
 //! logical length shrinks evenly (text, chrome, margins, hit-testing) and stacks with the per-Note
 //! text size, while the .slint files and the layout code keep working in logical px.
 //!

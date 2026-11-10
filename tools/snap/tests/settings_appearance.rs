@@ -349,6 +349,25 @@ fn the_delete_dialog_position_is_centered_when_scaled() {
     }
 }
 
+#[test]
+fn the_delete_dialog_position_is_centered_after_restart_without_moving_note() {
+    for size in [MEDIUM, SMALL] {
+        let mut h = started();
+        choose_ui_size(&mut h, size);
+        h.restart().unwrap();
+        h.press_ctrl(0, 'd');
+        assert!(h.is_delete_dialog_open());
+
+        let (dx, dy) = h.delete_dialog_position().expect("delete dialog position");
+        let geom = h.note_geometry(0);
+        let expected_center_x = geom.x as f32 + (geom.w as f32 - washi::delete_dialog::DIALOG_WIDTH) / 2.0;
+        let expected_center_y = geom.y as f32 + (geom.h as f32 - washi::delete_dialog::DIALOG_HEIGHT) / 2.0;
+
+        assert!((dx - expected_center_x).abs() <= 2.0, "dialog dx ({dx}) must center over note ({expected_center_x}) at size {size:?}");
+        assert!((dy - expected_center_y).abs() <= 2.0, "dialog dy ({dy}) must center over note ({expected_center_y}) at size {size:?}");
+    }
+}
+
 
 #[test]
 fn the_all_notes_strip_scales() {

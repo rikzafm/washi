@@ -4,10 +4,20 @@ import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
 
-import { AllNotesSidebar, AllNotesActionBar, AllNoteItem } from "all-notes.slint";
+import {
+    AllNotesSidebar,
+    AllNotesActionBar,
+    AllNoteItem,
+} from "all-notes.slint";
 import { SidebarPanel } from "sidebar-panel.slint";
 
-export { BlockData, BlockKind, MarkerData, RuleData, RunData } from "block.slint";
+export {
+    BlockData,
+    BlockKind,
+    MarkerData,
+    RuleData,
+    RunData,
+} from "block.slint";
 export { Theme } from "theme.slint";
 export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
@@ -17,7 +27,13 @@ export { SettingsWindow } from "settings.slint";
 export { ShortcutRow } from "settings-pages.slint";
 export { DeleteNoteDialog } from "delete-dialog.slint";
 export { PaletteEntry, PickerPalette } from "color-picker.slint";
-import { Toolbar, ToolbarMetrics, MenuButton, Frame, TRect } from "toolbar.slint";
+import {
+    Toolbar,
+    ToolbarMetrics,
+    MenuButton,
+    Frame,
+    TRect,
+} from "toolbar.slint";
 import { ColorPicker, ColorPickerNav, PickerPalette } from "color-picker.slint";
 import { WindowHandles } from "resize-zones.slint";
 import { ScrollBar, ScrollMetrics } from "scroll.slint";
@@ -42,6 +58,11 @@ export component NoteWindow inherits Window {
     title: window-title;
     always-on-top: pinned;
     icon: app-icon;
+    /// The window's scale factor (screen px per logical px). The platform resets it when the window
+    /// moves to a monitor with another DPI: Rust then puts the UI size back on top.
+    out property <float> scale-factor: 1px / 1phx;
+    callback scale-factor-changed();
+    changed scale-factor => { root.scale-factor-changed(); }
 
     // All Notes view properties and callbacks
     in-out property <bool> all-notes-open: false;
@@ -158,7 +179,10 @@ export component NoteWindow inherits Window {
     // 0 the moment another note is shown, 1 at rest. `settle-jump` makes the step to 0 instant.
     property <bool> settle-jump: false;
     property <float> settle: 1;
-    animate settle { duration: root.settle-jump ? 0ms : Theme.switch-settle; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    animate settle {
+        duration: root.settle-jump ? 0ms : Theme.switch-settle;
+        easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
     changed switch-serial => {
         root.settle-jump = true;
         root.settle = 0;
@@ -270,7 +294,10 @@ export component NoteWindow inherits Window {
     // All Notes opening: the sidebar slides out from behind the paper (0 just opened, 1 at rest).
     property <bool> intro-jump: false;
     property <float> intro: 1;
-    animate intro { duration: root.intro-jump ? 0ms : Theme.sidebar-intro; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+    animate intro {
+        duration: root.intro-jump ? 0ms : Theme.sidebar-intro;
+        easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
     changed all-notes-open => {
         if (root.all-notes-open) {
             root.intro-jump = true;
@@ -283,7 +310,7 @@ export component NoteWindow inherits Window {
     out property <float> all-notes-intro: root.intro;
 
     // The sidebar (All Notes): left of the paper, in the strip the window grew by.
-    if root.all-notes-open : AllNotesSidebar {
+    if root.all-notes-open: AllNotesSidebar {
         x: (1 - root.intro) * Theme.sidebar-intro-shift;
         opacity: Theme.sidebar-intro-from + (1 - Theme.sidebar-intro-from) * root.intro;
         y: 0px;
@@ -320,199 +347,269 @@ export component NoteWindow inherits Window {
         width: root.note-w;
         height: root.height;
 
-    // Shadow and paper (the look: see paper.slint). Behind everything.
+        // Shadow and paper (the look: see paper.slint). Behind everything.
     Paper {
-        width: root.note-w;
-        height: root.height;
-        cx: root.note-w / 2;
-        cy: root.height / 2;
-        paper-w: root.note-w - 2 * root.margin;
-        paper-h: root.height - 2 * root.margin;
-    }
+            width: root.note-w;
+            height: root.height;
+            cx: root.note-w / 2;
+            cy: root.height / 2;
+            paper-w: root.note-w - 2 * root.margin;
+            paper-h: root.height - 2 * root.margin;
+        }
 
-    // The whole note: it holds everything, so `has-hover` stays true over the editor and the
+        // The whole note: it holds everything, so `has-hover` stays true over the editor and the
     // toolbar too (ADR 0001). The editor ignores the right button, so a right click anywhere
     // reaches this.
     paper-touch := TouchArea {
-        scroll-event(e) => {
-            if (root.max-scroll <= 0px) { return reject; }
-            root.scroll-y = max(0px, min(root.max-scroll, root.scroll-y - e.delta-y));
-            root.scrolling = true;
-            root.scroll-activity();
-            accept
-        }
-        pointer-event(e) => {
-            if (e.kind == PointerEventKind.move) { root.pointer-moved(); }
-            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
-                root.context-menu(self.mouse-x, self.mouse-y);
+            scroll-event(e) => {
+                if (root.max-scroll <= 0px) { return reject; }
+                root.scroll-y = max(0px, min(root.max-scroll, root.scroll-y - e.delta-y));
+                root.scrolling = true;
+                root.scroll-activity();
+                accept
             }
-        }
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.move) { root.pointer-moved(); }
+                if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
+                    root.context-menu(self.mouse-x, self.mouse-y);
+                }
+            }
 
-        keys := FocusScope {
+            keys := FocusScope {
             // While the popover is open its keys are taken here, before the focused text field sees
             // them: the field keeps the focus, the caret and the range, and the popover has no
             // focus of its own (its hit areas never take it). Space and Enter pick only once an
             // arrow has put the focus ring on a swatch; before that they stay plain typing.
             capture-key-pressed(e) => {
-                if (!root.picker-open || e.modifiers.control || e.modifiers.alt || e.modifiers.meta || e.modifiers.shift) { return reject; }
-                if (e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.UpArrow || e.text == Key.DownArrow) {
-                    root.picker-focus = ColorPickerNav.step(root.picker-focus, e.text);
-                    return accept;
-                }
-                if ((e.text == Key.Return || e.text == " ") && root.picker-focus >= 0) {
-                    if (root.picker-focus < 10) { root.pick-ink(root.picker-focus); } else { root.pick-marker(root.picker-focus - 10); }
-                    return accept;
-                }
-                reject
-            }
-            key-pressed(e) => {
-                if (e.text == Key.Escape && root.all-notes-open && !root.picker-open) {
-                    if (root.all-notes-confirming-delete) {
-                        root.all-notes-confirming-delete = false;
-                        root.all-notes-cancel-delete();
-                    } else {
-                        root.all-notes-close-view();
+                    if (!root.picker-open || e.modifiers.control || e.modifiers.alt || e.modifiers.meta || e.modifiers.shift) { return reject; }
+                    if (e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.UpArrow || e.text == Key.DownArrow) {
+                        root.picker-focus = ColorPickerNav.step(root.picker-focus, e.text);
+                        return accept;
                     }
-                    return accept;
+                    if ((e.text == Key.Return || e.text == " ") && root.picker-focus >= 0) {
+                        if (root.picker-focus < 10) { root.pick-ink(root.picker-focus); } else { root.pick-marker(root.picker-focus - 10); }
+                        return accept;
+                    }
+                    reject
                 }
-                if (e.text == Key.Escape && root.picker-open) { root.picker-open = false; return accept; }
-                if (e.modifiers.control && !e.modifiers.shift && !e.modifiers.alt) {
-                    if (e.text == "n" || e.text == "\u{e}") { root.new-note(); return accept; }
-                    if (e.text == "w" || e.text == "\u{17}") { root.close-note(); return accept; }
-                    if (e.text == "d" || e.text == "\u{4}") { root.delete-note(); return accept; }
-                    if ((e.text == "v" || e.text == "\u{16}") && root.paste-image()) { return accept; }
-                    if (e.text == "b" || e.text == "\u{2}") { root.format(0); return accept; }
-                    if (e.text == "i" || e.text == "\u{9}") { root.format(1); return accept; }
-                    if (e.text == "u" || e.text == "\u{15}") { root.format(2); return accept; }
+                key-pressed(e) => {
+                    if (e.text == Key.Escape && root.all-notes-open && !root.picker-open) {
+                        if (root.all-notes-confirming-delete) {
+                            root.all-notes-confirming-delete = false;
+                            root.all-notes-cancel-delete();
+                        } else {
+                            root.all-notes-close-view();
+                        }
+                        return accept;
+                    }
+                    if (e.text == Key.Escape && root.picker-open) { root.picker-open = false; return accept; }
+                    if (e.modifiers.control && !e.modifiers.shift && !e.modifiers.alt) {
+                        if (e.text == "n" || e.text == "\u{e}") { root.new-note(); return accept; }
+                        if (e.text == "w" || e.text == "\u{17}") { root.close-note(); return accept; }
+                        if (e.text == "d" || e.text == "\u{4}") { root.delete-note(); return accept; }
+                        if ((e.text == "v" || e.text == "\u{16}") && root.paste-image()) { return accept; }
+                        if (e.text == "b" || e.text == "\u{2}") { root.format(0); return accept; }
+                        if (e.text == "i" || e.text == "\u{9}") { root.format(1); return accept; }
+                        if (e.text == "u" || e.text == "\u{15}") { root.format(2); return accept; }
+                    }
+                    if (e.modifiers.control && e.modifiers.shift && !e.modifiers.alt) {
+                        if (e.text == "x" || e.text == "X" || e.text == "\u{18}") { root.format(3); return accept; }
+                        if (e.text == "l" || e.text == "L" || e.text == "\u{c}") { root.format(4); return accept; }
+                    }
+                    reject
                 }
-                if (e.modifiers.control && e.modifiers.shift && !e.modifiers.alt) {
-                    if (e.text == "x" || e.text == "X" || e.text == "\u{18}") { root.format(3); return accept; }
-                    if (e.text == "l" || e.text == "L" || e.text == "\u{c}") { root.format(4); return accept; }
-                }
-                reject
-            }
 
             // The text area ends where the toolbar band begins, so text never sits under the toolbar.
             // The text layer is laid out in the paper's frame (fixed insets from its top-left corner).
             text-view := Rectangle {
-                opacity: root.content-opacity * (Theme.switch-from-opacity + (1 - Theme.switch-from-opacity) * root.settle);
-                x: root.margin;
+                    opacity: root.content-opacity * (Theme.switch-from-opacity + (1 - Theme.switch-from-opacity) * root.settle);
+                    x: root.margin;
                 // The tilted paper's top edge rises by half the paper width times sin(tilt) at the left.
                 // The clip starts at the highest point of the tilted top edge so images and text can reach the tilted edge.
                 y: root.paper-top - root.tilt-allowance;
-                width: root.note-w - 2 * root.margin;
+                    width: root.note-w - 2 * root.margin;
                 // The tilted band's top edge swings by the same amount either side of level, and a
                 // level clip cannot follow it: the clip reaches the lowest point and the tilted
                 // cover below (see `band-cover`) hides what lies past the tilted edge.
                 height: root.paper-bottom - ToolbarMetrics.band-height - Theme.text-bottom-gap - self.y + root.tilt-allowance;
-                clip: true;
+                    clip: true;
 
-                text-layer := TextLayer {
-                    allow-autofocus: root.autofocus;
-                    x: 0px;
-                    y: -root.scroll-y - (text-view.y - root.paper-top) + (1 - root.settle) * Theme.switch-drop;
-                    width: root.note-w - 2 * root.margin;
+                    text-layer := TextLayer {
+                        allow-autofocus: root.autofocus;
+                        x: 0px;
+                        y: -root.scroll-y - (text-view.y - root.paper-top) + (1 - root.settle) * Theme.switch-drop;
+                        width: root.note-w - 2 * root.margin;
                     // at least the text's height, or the blocks' layout would squeeze them together
                     height: max(root.paper-bottom - root.paper-top, root.content);
-                    paper-w: root.note-w - 2 * root.margin;
-                    paper-h: root.height - 2 * root.margin;
-                    tilt: root.tilt;
-                    scroll-y: root.scroll-y;
-                    pitch-scale: root.pitch-scale;
-                    blocks: root.blocks;
-                    runs: root.runs;
-                    rules: root.rules;
-                    sel-rects: root.sel-rects;
-                    image-handles: root.image-handles;
-                    layer-right-click(x, y) => { root.text-right-click(x, y); }
-                    markers: root.markers;
-                    marker-wash: root.marker-wash;
-                    select-all => { root.select-all(); }
-                    focus-entered(i) => { root.focus-entered(i); }
-                    suspended: root.suspended;
-                    resync: root.text-resync;
-                    focus-block: root.focus-block;
-                    focus-offset: root.focus-offset;
-                    focus-serial: root.focus-serial;
-                    focus-anchor: root.focus-anchor;
-                    wash: root.wash;
-                    pointer-down(x, y, shift) => { root.picker-open = false; root.pointer-down(x, y, shift); }
-                    pointer-drag(x, y) => { root.pointer-drag(x, y); }
-                    pointer-up => { root.pointer-up(); }
-                    right-click(x, y) => { root.context-menu(x, y); }
-                    pointer-moved => { root.pointer-moved(); }
-                    paste-image => { return root.paste-image(); }
-                    copy-image(i) => { return root.copy-image(i); }
-                    cut-image(i) => { return root.cut-image(i); }
-                    range-text => { return root.range-text(); }
-                    copy-range => { return root.copy-range(); }
-                    cut-range => { return root.cut-range(); }
-                    paste-range => { return root.paste-range(); }
-                    range-replace(t) => { root.picker-open = false; root.range-replace(t); }
-                    range-key(k, s) => { return root.range-key(k, s); }
-                    block-edited(i, t, c) => { root.picker-open = false; root.block-edited(i, t, c); }
-                    block-key(i, k, o) => { return root.block-key(i, k, o); }
-                    caret-moved(i, o, a) => { root.caret-moved(i, o, a); }
+                        paper-w: root.note-w - 2 * root.margin;
+                        paper-h: root.height - 2 * root.margin;
+                        tilt: root.tilt;
+                        scroll-y: root.scroll-y;
+                        pitch-scale: root.pitch-scale;
+                        blocks: root.blocks;
+                        runs: root.runs;
+                        rules: root.rules;
+                        sel-rects: root.sel-rects;
+                        image-handles: root.image-handles;
+                        layer-right-click(x, y) => { root.text-right-click(x, y); }
+                        markers: root.markers;
+                        marker-wash: root.marker-wash;
+                        select-all => { root.select-all(); }
+                        focus-entered(i) => { root.focus-entered(i); }
+                        suspended: root.suspended;
+                        resync: root.text-resync;
+                        focus-block: root.focus-block;
+                        focus-offset: root.focus-offset;
+                        focus-serial: root.focus-serial;
+                        focus-anchor: root.focus-anchor;
+                        wash: root.wash;
+                        pointer-down(x, y, shift) => { root.picker-open = false; root.pointer-down(x, y, shift); }
+                        pointer-drag(x, y) => { root.pointer-drag(x, y); }
+                        pointer-up => { root.pointer-up(); }
+                        right-click(x, y) => { root.context-menu(x, y); }
+                        pointer-moved => { root.pointer-moved(); }
+                        paste-image => { return root.paste-image(); }
+                        copy-image(i) => { return root.copy-image(i); }
+                        cut-image(i) => { return root.cut-image(i); }
+                        range-text => { return root.range-text(); }
+                        copy-range => { return root.copy-range(); }
+                        cut-range => { return root.cut-range(); }
+                        paste-range => { return root.paste-range(); }
+                        range-replace(t) => { root.picker-open = false; root.range-replace(t); }
+                        range-key(k, s) => { return root.range-key(k, s); }
+                        block-edited(i, t, c) => { root.picker-open = false; root.block-edited(i, t, c); }
+                        block-key(i, k, o) => { return root.block-key(i, k, o); }
+                        caret-moved(i, o, a) => { root.caret-moved(i, o, a); }
+                    }
                 }
             }
-        }
 
-        // The tilted top edge of the toolbar band: a paper-colored cover that hides what the level
+            // The tilted top edge of the toolbar band: a paper-colored cover that hides what the level
         // clip lets through, so the text is cut cleanly along the paper's own tilt.
         // (Touches pass through: none of these is a TouchArea.)
         band-cover := Rectangle {
-            x: 0px;
-            y: 0px;
-            width: root.note-w;
-            height: root.height;
-            property <float> pw: (root.note-w - 2 * root.margin) / 1px;
-            property <float> ph: (root.height - 2 * root.margin) / 1px;
-            property <float> vb: self.ph / 2.0 - (ToolbarMetrics.band-height + Theme.text-bottom-gap) / 1px;
+                x: 0px;
+                y: 0px;
+                width: root.note-w;
+                height: root.height;
+                property <float> pw: (root.note-w - 2 * root.margin) / 1px;
+                property <float> ph: (root.height - 2 * root.margin) / 1px;
+                property <float> vb: self.ph / 2.0 - (ToolbarMetrics.band-height + Theme.text-bottom-gap) / 1px;
 
-            TRect {
+                TRect {
+                    f: root.paper-frame;
+                    u0: -parent.pw / 2.0;
+                    v0: parent.vb;
+                    w: parent.pw;
+                    h: parent.ph / 2.0 - parent.vb;
+                    fill: PaperTheme.paper-color;
+                }
+            }
+
+            // Invisible grips for moving and resizing (inside paper-touch, so hovering them keeps the
+        // toolbar up). Above the editor; none of them reaches into the text area.
+        WindowHandles {
+                x: 0px;
+                y: 0px;
+                width: root.note-w;
+                height: root.height;
+                start-move => { root.picker-open = false; root.start-move(); }
+                start-resize(d) => { root.picker-open = false; root.start-resize(d); }
+                right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
+                pointer-over => { root.pointer-moved(); }
+            }
+
+            // The scrollbar: drawn in the paper's frame (like the toolbar), hugging its right edge.
+        scrollbar := ScrollBar {
+                opacity: root.content-opacity;
+                x: 0px;
+                y: 0px;
+                width: root.note-w;
+                height: root.height;
+                paper-w: root.note-w - 2 * root.margin;
+                paper-h: root.height - 2 * root.margin;
+                view: root.text-view-height;
+                content: root.content;
+                offset <=> root.scroll-y;
+                scrolling: root.scrolling;
+                pressed => { root.picker-open = false; }
+                right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
+                pointer-over => { root.pointer-moved(); }
+            }
+
+            // Drawn in the paper's frame, which tilts with the paper. Above the editor, so its buttons
+        // get the clicks while shown; while hidden it takes no part in hit testing at all.
+        toolbar := Toolbar {
+                x: 0px;
+                y: 0px;
+                width: root.note-w;
+                height: root.height;
+                paper-x: root.margin;
+                paper-y: root.paper-top;
+                paper-w: root.note-w - 2 * root.margin;
+                paper-h: root.height - 2 * root.margin;
+                tilt: root.tilt;
+                bold-active: root.fmt-bold;
+                italic-active: root.fmt-italic;
+                underline-active: root.fmt-underline;
+                strike-active: root.fmt-strike;
+                list-active: root.fmt-list;
+                picker-open: root.picker-open;
+                color-active: root.fmt-ink != 0 || root.fmt-marker != 0;
+                ink-color: PickerPalette.ink(root.fmt-ink);
+                marker-color: PickerPalette.marker(root.fmt-marker);
+                activated(k) => {
+                    if (k == 4) { root.picker-open = !root.picker-open; return; }
+                    root.picker-open = false;
+                    if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
+                }
+                property <bool> wanted: paper-touch.has-hover || self.any-pressed || root.dropdown-open;
+                opacity: root.content-opacity * (self.wanted ? 1 : 0);
+                visible: !root.all-notes-open && self.opacity > 0;
+                animate opacity {
+                    duration: self.wanted ? ToolbarMetrics.fade : ToolbarMetrics.fade-out;
+                    easing: self.wanted ? ease-out : ease-in-out;
+                }
+            }
+
+            // The top-right "..." trigger button for the dropdown menu
+        menu-btn := MenuButton {
+                f: toolbar.f;
+                du: (root.note-w - 2 * root.margin) / 2px - ToolbarMetrics.menu-button-right-inset / 1px;
+                dv: -(root.height - 2 * root.margin) / 2px + ToolbarMetrics.menu-button-top-inset / 1px;
+                active: root.dropdown-open;
+                clicked => { root.open-dropdown(); }
+                property <bool> wanted: paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open;
+                opacity: root.content-opacity * (self.wanted ? 1 : 0);
+                visible: self.opacity > 0;
+                animate opacity {
+                    duration: self.wanted ? ToolbarMetrics.fade : ToolbarMetrics.fade-out;
+                    easing: self.wanted ? ease-out : ease-in-out;
+                }
+            }
+
+            // While All Notes is open, its action bar takes the toolbar's place.
+        if root.all-notes-open: AllNotesActionBar {
+                x: 0px;
+                y: 0px;
+                width: root.note-w;
+                height: root.height;
                 f: root.paper-frame;
-                u0: -parent.pw / 2.0;
-                v0: parent.vb;
-                w: parent.pw;
-                h: parent.ph / 2.0 - parent.vb;
-                fill: PaperTheme.paper-color;
+                paper-w: (root.note-w - 2 * root.margin) / 1px;
+                paper-h: (root.height - 2 * root.margin) / 1px;
+                selected-note-open: root.all-notes-selected-is-open;
+                confirming-delete <=> root.all-notes-confirming-delete;
+                open-or-focus-note => { root.all-notes-open-or-focus(); }
+                close-note => { root.all-notes-close-note(); }
+                export-note => { root.all-notes-export-note(); }
+                request-delete => { root.all-notes-request-delete(); }
+                cancel-delete => { root.all-notes-cancel-delete(); }
+                confirm-delete => { root.all-notes-confirm-delete(); }
             }
         }
 
-        // Invisible grips for moving and resizing (inside paper-touch, so hovering them keeps the
-        // toolbar up). Above the editor; none of them reaches into the text area.
-        WindowHandles {
-            x: 0px;
-            y: 0px;
-            width: root.note-w;
-            height: root.height;
-            start-move => { root.picker-open = false; root.start-move(); }
-            start-resize(d) => { root.picker-open = false; root.start-resize(d); }
-            right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
-            pointer-over => { root.pointer-moved(); }
-        }
-
-        // The scrollbar: drawn in the paper's frame (like the toolbar), hugging its right edge.
-        scrollbar := ScrollBar {
-            opacity: root.content-opacity;
-            x: 0px;
-            y: 0px;
-            width: root.note-w;
-            height: root.height;
-            paper-w: root.note-w - 2 * root.margin;
-            paper-h: root.height - 2 * root.margin;
-            view: root.text-view-height;
-            content: root.content;
-            offset <=> root.scroll-y;
-            scrolling: root.scrolling;
-            pressed => { root.picker-open = false; }
-            right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
-            pointer-over => { root.pointer-moved(); }
-        }
-
-        // Drawn in the paper's frame, which tilts with the paper. Above the editor, so its buttons
-        // get the clicks while shown; while hidden it takes no part in hit testing at all.
-        toolbar := Toolbar {
+        // The color popover: above the toolbar band, in the paper's frame, over the editor.
+    color-picker := ColorPicker {
             x: 0px;
             y: 0px;
             width: root.note-w;
@@ -522,81 +619,20 @@ export component NoteWindow inherits Window {
             paper-w: root.note-w - 2 * root.margin;
             paper-h: root.height - 2 * root.margin;
             tilt: root.tilt;
-            bold-active: root.fmt-bold;
-            italic-active: root.fmt-italic;
-            underline-active: root.fmt-underline;
-            strike-active: root.fmt-strike;
-            list-active: root.fmt-list;
-            picker-open: root.picker-open;
-            color-active: root.fmt-ink != 0 || root.fmt-marker != 0;
-            ink-color: PickerPalette.ink(root.fmt-ink);
-            marker-color: PickerPalette.marker(root.fmt-marker);
-            activated(k) => {
-                if (k == 4) { root.picker-open = !root.picker-open; return; }
-                root.picker-open = false;
-                if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
-            }
-            property <bool> wanted: paper-touch.has-hover || self.any-pressed || root.dropdown-open;
-            opacity: root.content-opacity * (self.wanted ? 1 : 0);
-            visible: !root.all-notes-open && self.opacity > 0;
-            animate opacity { duration: self.wanted ? ToolbarMetrics.fade : ToolbarMetrics.fade-out; easing: self.wanted ? ease-out : ease-in-out; }
+            open: !root.all-notes-open && root.picker-open;
+            focus-index: root.picker-focus;
+            ink: root.fmt-ink;
+            marker: root.fmt-marker;
+            pick-ink(i) => { root.pick-ink(i); }
+            pick-marker(i) => { root.pick-marker(i); }
+            clear => { root.clear-color(); }
+            dismiss => { root.picker-open = false; }
         }
 
-        // The top-right "..." trigger button for the dropdown menu
-        menu-btn := MenuButton {
-            f: toolbar.f;
-            du: (root.note-w - 2 * root.margin) / 2px - ToolbarMetrics.menu-button-right-inset / 1px;
-            dv: -(root.height - 2 * root.margin) / 2px + ToolbarMetrics.menu-button-top-inset / 1px;
-            active: root.dropdown-open;
-            clicked => { root.open-dropdown(); }
-            property <bool> wanted: paper-touch.has-hover || self.has-hover || self.pressed || root.dropdown-open;
-            opacity: root.content-opacity * (self.wanted ? 1 : 0);
-            visible: self.opacity > 0;
-            animate opacity { duration: self.wanted ? ToolbarMetrics.fade : ToolbarMetrics.fade-out; easing: self.wanted ? ease-out : ease-in-out; }
-        }
-
-        // While All Notes is open, its action bar takes the toolbar's place.
-        if root.all-notes-open : AllNotesActionBar {
-            x: 0px;
-            y: 0px;
+        // The tapes lie over the paper.
+    Tapes {
             width: root.note-w;
             height: root.height;
-            f: root.paper-frame;
-            paper-w: (root.note-w - 2 * root.margin) / 1px;
-            paper-h: (root.height - 2 * root.margin) / 1px;
-            selected-note-open: root.all-notes-selected-is-open;
-            confirming-delete <=> root.all-notes-confirming-delete;
-            open-or-focus-note => { root.all-notes-open-or-focus(); }
-            close-note => { root.all-notes-close-note(); }
-            export-note => { root.all-notes-export-note(); }
-            request-delete => { root.all-notes-request-delete(); }
-            cancel-delete => { root.all-notes-cancel-delete(); }
-            confirm-delete => { root.all-notes-confirm-delete(); }
         }
-    }
-
-    // The color popover: above the toolbar band, in the paper's frame, over the editor.
-    color-picker := ColorPicker {
-        x: 0px;
-        y: 0px;
-        width: root.note-w;
-        height: root.height;
-        paper-x: root.margin;
-        paper-y: root.paper-top;
-        paper-w: root.note-w - 2 * root.margin;
-        paper-h: root.height - 2 * root.margin;
-        tilt: root.tilt;
-        open: !root.all-notes-open && root.picker-open;
-        focus-index: root.picker-focus;
-        ink: root.fmt-ink;
-        marker: root.fmt-marker;
-        pick-ink(i) => { root.pick-ink(i); }
-        pick-marker(i) => { root.pick-marker(i); }
-        clear => { root.clear-color(); }
-        dismiss => { root.picker-open = false; }
-    }
-
-    // The tapes lie over the paper.
-    Tapes { width: root.note-w; height: root.height; }
     }
 }

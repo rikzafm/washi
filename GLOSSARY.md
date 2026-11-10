@@ -16,6 +16,10 @@ _Avoid_: Card, page
 The popup opened from a Note's menu button. It lists notes to jump to and holds the New, All notes and Settings actions.
 _Avoid_: Context menu (that is the separate right-click menu), overflow menu
 
+**Delete dialog**:
+The confirmation dialog opened when deleting a Note, asking to keep or delete the note.
+_Avoid_: Confirmation box, prompt, modal alert
+
 **All notes**:
 The view that lists every Note in a Sidebar beside the Note being edited.
 _Avoid_: Note list, manager
