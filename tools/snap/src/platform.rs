@@ -130,7 +130,7 @@ impl WindowAdapter for StandInWindow {
         Some(self.position.get())
     }
     fn set_position(&self, position: WindowPosition) {
-        let sf = self.window.scale_factor();
+        let sf = self.monitor.get();
         self.position.set(match position {
             WindowPosition::Logical(l) => PhysicalPosition::new((l.x * sf).round() as i32, (l.y * sf).round() as i32),
             WindowPosition::Physical(p) => p,

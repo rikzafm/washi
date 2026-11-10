@@ -324,8 +324,8 @@ impl SettingsView {
         if (self.hooks.set_bounds)(self.hwnd(), phys(g.x), phys(g.y), phys(g.w as i32), phys(g.h as i32)) {
             return;
         }
-        w.set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
-        w.set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
+        w.set_size(slint::PhysicalSize::new(phys(g.w as i32) as u32, phys(g.h as i32) as u32));
+        w.set_position(slint::PhysicalPosition::new(phys(g.x), phys(g.y)));
     }
 
     fn wire(&self, me: Weak<SettingsView>) {

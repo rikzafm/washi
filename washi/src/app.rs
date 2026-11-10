@@ -2,7 +2,7 @@
 
 use crate::all_notes::AllNotesView;
 use crate::settings::SettingsView;
-use crate::delete_dialog::{calculate_dialog_position, DeleteDialog};
+use crate::delete_dialog::{calculate_dialog_position_scaled, DeleteDialog, DIALOG_HEIGHT, DIALOG_WIDTH};
 use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
 use crate::dropdown::{calculate_dropdown_position, extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu, DropdownMetrics, Rect as DropdownRect};
 use crate::images::{self, ImageError, Source, Stored};
@@ -1178,17 +1178,17 @@ impl App {
         self.open_dropdown(id);
     }
 
-    /// The work area (logical px) of the monitor a button lies on; the main one if it is on none.
-    fn work_area_for(&self, rect: &DropdownRect, scale: f32) -> Option<DropdownRect> {
+    /// The work area (physical px) of the monitor a point lies on; the main one if it is on none.
+    fn physical_work_area_for(&self, cx: f32, cy: f32) -> Option<DropdownRect> {
         let areas = self.0.env.window_control.work_areas();
-        let (cx, cy) = ((rect.x + rect.w / 2.0) * scale, (rect.y + rect.h / 2.0) * scale);
         let on = |a: &&ScreenRect| {
             cx >= a.x as f32 && cx < (a.x + a.w) as f32 && cy >= a.y as f32 && cy < (a.y + a.h) as f32
         };
         areas.iter().find(on).or_else(|| areas.first()).map(|wa| {
-            DropdownRect::new(wa.x as f32 / scale, wa.y as f32 / scale, wa.w as f32 / scale, wa.h as f32 / scale)
+            DropdownRect::new(wa.x as f32, wa.y as f32, wa.w as f32, wa.h as f32)
         })
     }
+
 
     /// Toggle the trimmed dropdown of the All Notes editor.
     fn toggle_editor_dropdown(&self) {
@@ -1206,12 +1206,18 @@ impl App {
     fn open_editor_dropdown(&self, v: &Rc<AllNotesView>) {
         let id = v.editor_note_id();
         let editor = v.editor_handle();
-        let geom = editor.geometry();
-        let (btn_x, btn_y, btn_w, btn_h) = editor.menu_button_rect();
-        let button_screen = DropdownRect::new(geom.x as f32 + btn_x, geom.y as f32 + btn_y, btn_w, btn_h);
         let scale = editor.ui().window().scale_factor();
-        let work_area = self.work_area_for(&button_screen, scale);
-        let pos = calculate_dropdown_position(button_screen, &DropdownMetrics::compact(), work_area);
+        let phys_pos = editor.ui().window().position();
+        let (btn_x, btn_y, btn_w, btn_h) = editor.menu_button_rect();
+        let button_screen = DropdownRect::new(
+            phys_pos.x as f32 + btn_x * scale,
+            phys_pos.y as f32 + btn_y * scale,
+            btn_w * scale,
+            btn_h * scale,
+        );
+        let metrics = DropdownMetrics::compact().scaled(scale);
+        let work_area = self.physical_work_area_for(button_screen.x + button_screen.w / 2.0, button_screen.y + button_screen.h / 2.0);
+        let pos = calculate_dropdown_position(button_screen, &metrics, work_area);
 
         let weak = Rc::downgrade(&self.0);
         let on_dismiss = Rc::new(move |_id| {
@@ -1284,20 +1290,18 @@ impl App {
         let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
         let Some(note) = note else { return };
 
-        let geom = note.geometry();
+        let scale = note.ui().window().scale_factor();
+        let phys_pos = note.ui().window().position();
         let (btn_x, btn_y, btn_w, btn_h) = note.menu_button_rect();
         let button_screen = DropdownRect::new(
-            geom.x as f32 + btn_x,
-            geom.y as f32 + btn_y,
-            btn_w,
-            btn_h,
+            phys_pos.x as f32 + btn_x * scale,
+            phys_pos.y as f32 + btn_y * scale,
+            btn_w * scale,
+            btn_h * scale,
         );
 
-        let metrics = DropdownMetrics::default();
-
-        let scale = note.ui().window().scale_factor();
-        let work_area = self.work_area_for(&button_screen, scale);
-
+        let metrics = DropdownMetrics::default().scaled(scale);
+        let work_area = self.physical_work_area_for(button_screen.x + button_screen.w / 2.0, button_screen.y + button_screen.h / 2.0);
         let pos = calculate_dropdown_position(button_screen, &metrics, work_area);
 
         let weak = Rc::downgrade(&self.0);
@@ -1651,17 +1655,26 @@ impl App {
         let note = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned();
         let Some(note) = note else { return };
 
-        let geom = note.geometry();
         let scale = note.ui().window().scale_factor();
-        let note_rect = DropdownRect::new(geom.x as f32, geom.y as f32, geom.w as f32, geom.h as f32);
-        let work_area = self.work_area_for(&note_rect, scale).map(|wa| (
+        let phys_pos = note.ui().window().position();
+        let phys_size = note.ui().window().size();
+        let dialog_phys_w = DIALOG_WIDTH * scale;
+        let dialog_phys_h = DIALOG_HEIGHT * scale;
+
+        let cx = phys_pos.x as f32 + phys_size.width as f32 / 2.0;
+        let cy = phys_pos.y as f32 + phys_size.height as f32 / 2.0;
+        let work_area = self.physical_work_area_for(cx, cy).map(|wa| (
             wa.x,
             wa.y,
             wa.w,
             wa.h,
         ));
 
-        let pos = calculate_dialog_position((geom.x, geom.y, geom.w, geom.h), work_area);
+        let pos = calculate_dialog_position_scaled(
+            (phys_pos.x, phys_pos.y, phys_size.width, phys_size.height),
+            (dialog_phys_w, dialog_phys_h),
+            work_area,
+        );
 
         let weak = Rc::downgrade(&self.0);
         let on_keep = Rc::new(move |_note_id| {

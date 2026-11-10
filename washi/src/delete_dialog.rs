@@ -18,19 +18,30 @@ pub fn calculate_dialog_position(
     note_geom: (i32, i32, u32, u32),
     work_area: Option<(f32, f32, f32, f32)>,
 ) -> (f32, f32) {
+    calculate_dialog_position_scaled(note_geom, (DIALOG_WIDTH, DIALOG_HEIGHT), work_area)
+}
+
+/// Calculate the top-left position of the delete dialog given an explicit dialog size
+/// (e.g. scaled to physical pixels), centered over `note_geom` and clamped to `work_area`.
+pub fn calculate_dialog_position_scaled(
+    note_geom: (i32, i32, u32, u32),
+    dialog_size: (f32, f32),
+    work_area: Option<(f32, f32, f32, f32)>,
+) -> (f32, f32) {
     let (nx, ny, nw, nh) = note_geom;
-    let mut x = nx as f32 + (nw as f32 - DIALOG_WIDTH) / 2.0;
-    let mut y = ny as f32 + (nh as f32 - DIALOG_HEIGHT) / 2.0;
+    let (dw, dh) = dialog_size;
+    let mut x = nx as f32 + (nw as f32 - dw) / 2.0;
+    let mut y = ny as f32 + (nh as f32 - dh) / 2.0;
 
     if let Some((wax, way, waw, wah)) = work_area {
-        if x + DIALOG_WIDTH > wax + waw {
-            x = wax + waw - DIALOG_WIDTH;
+        if x + dw > wax + waw {
+            x = wax + waw - dw;
         }
         if x < wax {
             x = wax;
         }
-        if y + DIALOG_HEIGHT > way + wah {
-            y = way + wah - DIALOG_HEIGHT;
+        if y + dh > way + wah {
+            y = way + wah - dh;
         }
         if y < way {
             y = way;
@@ -78,7 +89,7 @@ impl DeleteDialog {
                 }
             });
         }
-        ui.window().set_position(slint::LogicalPosition::new(position.0, position.1));
+        ui.window().set_position(slint::PhysicalPosition::new(position.0.round() as i32, position.1.round() as i32));
 
         {
             let on_keep = on_keep.clone();

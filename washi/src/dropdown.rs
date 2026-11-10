@@ -113,6 +113,15 @@ impl DropdownMetrics {
     pub fn compact() -> Self {
         Self { card_height: COMPACT_CARD_HEIGHT, ..Self::default() }
     }
+
+    pub fn scaled(&self, scale: f32) -> Self {
+        Self {
+            card_width: self.card_width * scale,
+            card_height: self.card_height * scale,
+            shadow_margin: self.shadow_margin * scale,
+            gap: self.gap * scale,
+        }
+    }
 }
 
 impl Default for DropdownMetrics {
@@ -138,7 +147,8 @@ pub fn calculate_dropdown_position(
     metrics: &DropdownMetrics,
     work_area: Option<Rect>,
 ) -> (f32, f32) {
-    let mut card_x = button_rect.x - 14.0;
+    let offset_x = 14.0 * (metrics.card_width / 268.0);
+    let mut card_x = button_rect.x - offset_x;
     let mut card_y = button_rect.bottom() + metrics.gap;
 
     if let Some(wa) = work_area {
@@ -203,7 +213,7 @@ impl DropdownMenu {
             ui.set_compact(true);
             ui.set_card_height(COMPACT_CARD_HEIGHT);
         }
-        ui.window().set_position(slint::LogicalPosition::new(position.0, position.1));
+        ui.window().set_position(slint::PhysicalPosition::new(position.0.round() as i32, position.1.round() as i32));
 
         {
             let on_dismiss = on_dismiss.clone();

@@ -1244,8 +1244,9 @@ impl Note {
         // before the window is sized or shows: everything it draws is at the UI size
         let scale = crate::ui_scale::WindowScale::attach(ui.window());
         if let Some(g) = geometry {
-            ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
-            ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
+            let sf = scale.factor();
+            ui.window().set_size(slint::PhysicalSize::new((g.w as f32 * sf).round() as u32, (g.h as f32 * sf).round() as u32));
+            ui.window().set_position(slint::PhysicalPosition::new((g.x as f32 * sf).round() as i32, (g.y as f32 * sf).round() as i32));
         }
         let autosave = Rc::new(Autosave { id: id.clone(), db, clock, ui: ui.as_weak(), dirty: Cell::new(false) });
         let timer = Rc::new(Timer::default());
@@ -1877,8 +1878,9 @@ impl Note {
         // Already there: leave the window alone. Off Large, whole logical px are not whole screen
         // px, and going through them again could move it by a pixel.
         if self.geometry.current() != Some(g) {
-            self.ui.window().set_size(slint::LogicalSize::new(g.w as f32, g.h as f32));
-            self.ui.window().set_position(slint::LogicalPosition::new(g.x as f32, g.y as f32));
+            let sf = self.scale.factor();
+            self.ui.window().set_size(slint::PhysicalSize::new((g.w as f32 * sf).round() as u32, (g.h as f32 * sf).round() as u32));
+            self.ui.window().set_position(slint::PhysicalPosition::new((g.x as f32 * sf).round() as i32, (g.y as f32 * sf).round() as i32));
         }
         self.geometry_changed();
     }
