@@ -144,6 +144,12 @@ impl DeleteDialog {
         hwnd_of(&self.ui)
     }
 
+    pub fn position(&self) -> (f32, f32) {
+        let pos = self.ui.window().position();
+        let scale = self.ui.window().scale_factor();
+        (pos.x as f32 / scale, pos.y as f32 / scale)
+    }
+
     pub fn set_owner(&self, owner_hwnd: isize) {
         #[cfg(target_os = "windows")]
         if let Some(hwnd) = self.hwnd() {

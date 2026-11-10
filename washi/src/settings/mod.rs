@@ -339,6 +339,15 @@ impl SettingsView {
         }
         {
             let me = me.clone();
+            self.ui.window().on_close_requested(move || {
+                if let Some(v) = me.upgrade() {
+                    v.close();
+                }
+                slint::CloseRequestResponse::KeepWindowShown
+            });
+        }
+        {
+            let me = me.clone();
             self.ui.on_start_move(move || {
                 if let Some(v) = me.upgrade() {
                     (v.hooks.begin_move)(v.hwnd());

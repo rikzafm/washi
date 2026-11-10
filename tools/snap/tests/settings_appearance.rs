@@ -275,6 +275,28 @@ fn the_dropdown_menu_scales() {
 }
 
 #[test]
+fn the_dropdown_menu_position_is_aligned_when_scaled() {
+    let mut h = started();
+    choose_ui_size(&mut h, MEDIUM);
+    h.drag(0, (80.0, 48.0), (300.0, 200.0));
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+
+    let (win_x, win_y) = h.dropdown_position().expect("dropdown position");
+    let (bx, by, _bw, bh) = h.menu_button_rect(0);
+    let note_geom = h.note_geometry(0);
+    let btn_screen_x = note_geom.x as f32 + bx;
+    let btn_screen_y = note_geom.y as f32 + by;
+
+    let metrics = washi::dropdown::DropdownMetrics::default();
+    let card_x = win_x + metrics.shadow_margin;
+    let card_y = win_y + metrics.shadow_margin;
+
+    assert!((card_x - (btn_screen_x - 14.0)).abs() <= 2.0, "card_x ({card_x}) must align with button ({btn_screen_x} - 14.0)");
+    assert!((card_y - (btn_screen_y + bh + metrics.gap)).abs() <= 2.0, "card_y ({card_y}) must align below button");
+}
+
+#[test]
 fn the_all_notes_strip_scales() {
     let mut h = started();
     choose_ui_size(&mut h, SMALL);

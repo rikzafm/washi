@@ -622,3 +622,27 @@ fn all_notes_bottom_actions_open_close_export_and_delete_confirmation() {
     assert_eq!(h.all_notes_closed_count(), Some(1));
     assert_eq!(h.all_notes_selected_id(), Some(id1), "next available note id1 should be selected");
 }
+
+#[test]
+fn test_click_dropdown_settings_button() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+
+    // Window size is 300 x 352
+    // card is x: 16, y: 16, w: 268, h: 320
+    // action bar is y: 16 + 256 = 272, h: 58. middle y = 301.
+    // action bar x: 16 + 6 = 22, w: 256.
+    // 3 buttons: New (22..104), All notes (108..190), Settings (194..276).
+    // Middle of Settings button: x = 235.0, y = 301.0.
+    let position = slint::LogicalPosition::new(235.0, 301.0);
+    let button = slint::platform::PointerEventButton::Left;
+    h.dispatch_dropdown_event(slint::platform::WindowEvent::PointerMoved { position });
+    h.dispatch_dropdown_event(slint::platform::WindowEvent::PointerPressed { position, button });
+    h.dispatch_dropdown_event(slint::platform::WindowEvent::PointerReleased { position, button });
+    h.advance_frames(ms(600));
+
+    assert!(h.is_settings_open(), "clicking Settings button should open settings!");
+}
+

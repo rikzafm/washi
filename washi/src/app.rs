@@ -483,8 +483,9 @@ impl App {
             // (still fading the host's text out: nothing to bring forward yet)
             if s.is_shown() {
                 self.0.env.window_control.bring_to_front(0, s.hwnd());
+                return;
             }
-            return;
+            *self.0.settings.borrow_mut() = None;
         }
         let Some((geometry, pinned)) = self.with_note(host, |n| {
             n.flush();
@@ -601,7 +602,10 @@ impl App {
             }),
         };
         match SettingsView::open(host, geometry, pinned, hooks) {
-            Ok(view) => *self.0.settings.borrow_mut() = Some(view),
+            Ok(view) => {
+                self.0.env.window_control.bring_to_front(0, view.hwnd());
+                *self.0.settings.borrow_mut() = Some(view);
+            }
             Err(e) => eprintln!("washi: could not open Settings: {e}"),
         }
     }
@@ -1590,6 +1594,11 @@ impl App {
         self.0.delete_dialog.borrow().as_ref().map(|d| d.note_id())
     }
 
+    /// Top-left of the delete dialog window in logical screen coordinates, if open.
+    pub fn delete_dialog_position(&self) -> Option<(f32, f32)> {
+        self.delete_dialog().map(|d| d.position())
+    }
+
     /// Dismiss the open delete dialog if any.
     pub fn dismiss_delete_dialog(&self) {
         if let Some(dialog) = self.0.delete_dialog.borrow_mut().take() {
@@ -1643,13 +1652,13 @@ impl App {
         let Some(note) = note else { return };
 
         let geom = note.geometry();
-        let work_areas = self.0.env.window_control.work_areas();
         let scale = note.ui().window().scale_factor();
-        let work_area = work_areas.first().map(|wa| (
-            wa.x as f32 / scale,
-            wa.y as f32 / scale,
-            wa.w as f32 / scale,
-            wa.h as f32 / scale,
+        let note_rect = DropdownRect::new(geom.x as f32, geom.y as f32, geom.w as f32, geom.h as f32);
+        let work_area = self.work_area_for(&note_rect, scale).map(|wa| (
+            wa.x,
+            wa.y,
+            wa.w,
+            wa.h,
         ));
 
         let pos = calculate_dialog_position((geom.x, geom.y, geom.w, geom.h), work_area);

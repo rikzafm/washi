@@ -584,3 +584,28 @@ fn closing_mid_tab_switch_still_puts_the_host_back() {
     assert!(h.note_visible(0));
     assert_eq!(h.note_geometry(0), note);
 }
+
+#[test]
+fn os_close_request_closes_settings_and_allows_reopening() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    let note = h.note_geometry(0);
+
+    open_settings_from(&mut h, 0);
+    assert!(h.is_settings_open());
+    assert!(!h.note_visible(0));
+
+    // Simulate Alt+F4 or OS close request
+    h.settings_request_close();
+    h.advance_frames(ms(600));
+
+    assert!(!h.is_settings_open(), "settings should be closed");
+    assert!(h.note_visible(0), "host note should be restored");
+    assert_eq!(h.note_geometry(0), note);
+
+    // Opening settings again from the dropdown must succeed
+    open_settings_from(&mut h, 0);
+    assert!(h.is_settings_open(), "settings must open again after OS close");
+    assert!(!h.note_visible(0));
+}

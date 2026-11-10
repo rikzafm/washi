@@ -1076,6 +1076,14 @@ impl Harness {
         self.settle();
     }
 
+    /// Send an OS window close request to the Settings window (e.g. Alt+F4 / taskbar close).
+    pub fn settings_request_close(&mut self) {
+        if let Some(s) = self.app.as_ref().and_then(|a| a.settings()) {
+            s.ui().window().dispatch_event(WindowEvent::CloseRequested);
+        }
+        self.settle();
+    }
+
     pub fn settings_press_escape(&mut self) {
         if let Some(app) = &self.app {
             app.dispatch_settings_event(WindowEvent::KeyPressed { text: Key::Escape.into() });
@@ -1383,6 +1391,10 @@ impl Harness {
         self.app.as_ref().and_then(|a| a.delete_dialog_note_id())
     }
 
+    pub fn delete_dialog_position(&self) -> Option<(f32, f32)> {
+        self.app.as_ref().and_then(|a| a.delete_dialog_position())
+    }
+
     pub fn invoke_confirm_delete(&mut self) {
         if let Some(app) = &self.app {
             app.invoke_confirm_delete();
@@ -1407,6 +1419,12 @@ impl Harness {
             });
         }
         self.settle();
+    }
+
+    pub fn dispatch_dropdown_event(&self, event: slint::platform::WindowEvent) {
+        if let Some(app) = &self.app {
+            app.dispatch_dropdown_event(event);
+        }
     }
 
     pub fn click_dropdown_outside(&mut self) {

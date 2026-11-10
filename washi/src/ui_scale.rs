@@ -73,7 +73,8 @@ impl WindowScale {
         if (now - self.factor()).abs() <= EPS {
             return false;
         }
-        let (size, position) = (w.size().to_logical(now), w.position().to_logical(now));
+        let old_factor = self.factor();
+        let (size, position) = (w.size().to_logical(old_factor), w.position().to_logical(old_factor));
         self.os.set(now);
         if (now - self.factor()).abs() <= EPS {
             return true; // at Large the platform's scale is already right

@@ -124,3 +124,30 @@ fn triggering_delete_again_does_not_open_duplicate_dialog() {
     assert!(!h.is_delete_dialog_open());
 }
 
+#[test]
+fn delete_dialog_centers_over_note_on_secondary_monitor() {
+    use washi::platform::ScreenRect;
+    let mut h = Harness::new();
+    h.set_work_areas(vec![
+        ScreenRect::new(0, 0, 1920, 1080),       // Top-left (primary)
+        ScreenRect::new(1920, 0, 1920, 1080),    // Top-right
+        ScreenRect::new(0, 1080, 1920, 1080),    // Bottom-left
+        ScreenRect::new(1920, 1080, 1920, 1080), // Bottom-right
+    ]);
+    h.start().unwrap();
+
+    // Place the note on the bottom-right monitor (drag by 2400, 1400 from pink tape)
+    h.drag(0, (80.0, 48.0), (2400.0, 1400.0));
+
+    h.press_ctrl(0, 'd');
+    assert!(h.is_delete_dialog_open());
+
+    let (dx, dy) = h.delete_dialog_position().expect("delete dialog position");
+    // Dialog should be centered over the note on the bottom-right monitor (around 2400 + (447 - 392)/2 = 2427)
+    // NOT clamped to the primary monitor (which would be <= 1920 - 392 = 1528)
+    assert!(dx >= 1920.0, "dialog x ({dx}) must be on the secondary monitor (>= 1920), not clamped to primary monitor");
+    assert!(dy >= 1080.0, "dialog y ({dy}) must be on the bottom monitor (>= 1080), not clamped to primary monitor");
+    assert!((dx - (2400.0 + (447.0 - 392.0) / 2.0)).abs() <= 2.0, "dx ({dx}) centered over note x (2400)");
+}
+
+
