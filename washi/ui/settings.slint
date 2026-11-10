@@ -6,7 +6,7 @@ import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PaperTheme } from "paper-theme.slint";
 import { Paper } from "paper.slint";
-import { SidebarPanel, SidebarBackdrop, SidebarThemes, HaloOffset } from "sidebar-panel.slint";
+import { SidebarPanel, SidebarBackdrop, SidebarThemes, HaloOffset, HaloText } from "sidebar-panel.slint";
 import { ShortcutRow, ShortcutsPage, PrivacyPage } from "settings-pages.slint";
 import { GeneralTab } from "settings-general.slint";
 import { StyleTab } from "style-tab.slint";
@@ -76,31 +76,19 @@ component SidebarTab inherits Rectangle {
         fill: rgba(255, 255, 253, 0.55);
     }
 
-    for o in root.halo : PText {
-        pf: root.pf;
-        a: 29.0 + o.dx;
-        b: root.b + o.dy;
-        nudge: -1.0;
+    // (a pixel higher than its line box, as `PText` with `nudge: -1`; the shadow along the panel's tilt)
+    HaloText {
+        x: PX.x(root.pf, 29.0, root.b - 1.0);
+        y: PX.y(root.pf, 29.0, root.b - 1.0);
+        cs: root.pf.f.cs;
+        sn: root.pf.f.sn;
         width: SidebarPanel.label-w * 1px;
         height: 48px;
         text: root.text;
         font-size: 24px;
         font-weight: root.selected ? 700 : 400;
         vertical-alignment: center;
-        color: SidebarThemes.halo-color;
-    }
-
-    PText {
-        pf: root.pf;
-        a: 29.0;
-        b: root.b;
-        nudge: -1.0;
-        width: SidebarPanel.label-w * 1px;
-        height: 48px;
-        text: root.text;
-        font-size: 24px;
-        font-weight: root.selected ? 700 : 400;
-        vertical-alignment: center;
+        halo: root.halo;
     }
 
     hit := TouchArea {
@@ -172,29 +160,17 @@ component SettingsSidebar inherits Rectangle {
 
     // "Settings": 44px on its natural line, 6px in from the 12px padding, 14px down (its text
     // shadow first, in the Transparent theme).
-    for o in SidebarThemes.halo-for(root.theme) : PText {
-        pf: root.pf;
-        a: 19.0 + o.dx;
-        b: 14.0 + o.dy;
-        nudge: -1.0;
+    HaloText {
+        x: PX.x(root.pf, 19.0, 14.0 - 1.0);
+        y: PX.y(root.pf, 19.0, 14.0 - 1.0);
+        cs: root.pf.f.cs;
+        sn: root.pf.f.sn;
         width: 240px;
         height: 71px;
         text: "Settings";
         font-size: 44px;
         vertical-alignment: center;
-        color: SidebarThemes.halo-color;
-    }
-
-    PText {
-        pf: root.pf;
-        a: 19.0;
-        b: 14.0;
-        nudge: -1.0;
-        width: 240px;
-        height: 71px;
-        text: "Settings";
-        font-size: 44px;
-        vertical-alignment: center;
+        halo: SidebarThemes.halo-for(root.theme);
     }
 
     // Close (x): a 44px button 10px in from the panel's top right corner, with a 20px icon.

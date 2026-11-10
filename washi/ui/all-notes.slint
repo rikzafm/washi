@@ -8,7 +8,7 @@
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { Frame, Tilt, TRect } from "toolbar.slint";
-import { SidebarPanel, SidebarBackdrop, SidebarThemes, HaloOffset } from "sidebar-panel.slint";
+import { SidebarPanel, SidebarBackdrop, SidebarThemes, HaloOffset, HaloText } from "sidebar-panel.slint";
 
 export struct AllNoteItem {
     id: int,
@@ -55,32 +55,17 @@ component SidebarRow inherits Rectangle {
         fill: #FFFFFD;
     }
 
-    for o in root.halo : Text {
-        x: (Tilt.x(root.f, SidebarPanel.label-u, root.v0) + o.dx) * 1px;
-        y: (Tilt.y(root.f, SidebarPanel.label-u, root.v0) + o.dy) * 1px;
-        width: SidebarPanel.label-w * 1px;
-        height: 52px;
-        text: root.item.title;
-        font-family: "Shadows Into Light";
-        font-size: 22px;
-        font-weight: root.selected ? 700 : 400;
-        color: SidebarThemes.halo-color;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    Text {
+    HaloText {
         x: Tilt.x(root.f, SidebarPanel.label-u, root.v0) * 1px;
         y: Tilt.y(root.f, SidebarPanel.label-u, root.v0) * 1px;
         width: SidebarPanel.label-w * 1px;
         height: 52px;
         text: root.item.title;
-        font-family: "Shadows Into Light";
         font-size: 22px;
         font-weight: root.selected ? 700 : 400;
-        color: #2B2F36;
         vertical-alignment: center;
         overflow: elide;
+        halo: root.halo;
     }
 
     TouchArea {
@@ -196,22 +181,12 @@ export component AllNotesSidebar inherits Rectangle {
         theme: root.theme;
     }
 
-    for o in root.halo : Text {
-        x: (Tilt.x(root.pf, -113.0, root.top-v + 8.0) + o.dx) * 1px;
-        y: (Tilt.y(root.pf, -113.0, root.top-v + 8.0) + o.dy) * 1px;
-        text: "Notes";
-        font-family: "Shadows Into Light";
-        font-size: 44px;
-        color: SidebarThemes.halo-color;
-    }
-
-    Text {
+    HaloText {
         x: Tilt.x(root.pf, -113.0, root.top-v + 8.0) * 1px;
         y: Tilt.y(root.pf, -113.0, root.top-v + 8.0) * 1px;
         text: "Notes";
-        font-family: "Shadows Into Light";
         font-size: 44px;
-        color: #2B2F36;
+        halo: root.halo;
     }
 
     // Close (x) at the panel's top right: closes the list.
@@ -244,22 +219,13 @@ export component AllNotesSidebar inherits Rectangle {
         }
     }
 
-    for o in root.halo : Text {
-        x: (Tilt.x(root.pf, -113.0, root.top-v + 68.0) + o.dx) * 1px;
-        y: (Tilt.y(root.pf, -113.0, root.top-v + 68.0) + o.dy) * 1px;
-        text: root.open-count + " open · " + root.closed-count + " closed";
-        font-family: "Shadows Into Light";
-        font-size: 18px;
-        color: SidebarThemes.halo-color;
-    }
-
-    Text {
+    HaloText {
         x: Tilt.x(root.pf, -113.0, root.top-v + 68.0) * 1px;
         y: Tilt.y(root.pf, -113.0, root.top-v + 68.0) * 1px;
         text: root.open-count + " open · " + root.closed-count + " closed";
-        font-family: "Shadows Into Light";
         font-size: 18px;
-        color: #5B616B;
+        ink: #5B616B;
+        halo: root.halo;
     }
 
     // The list viewport: rows scroll inside it and never over the header or the button.
@@ -278,24 +244,14 @@ export component AllNotesSidebar inherits Rectangle {
             scroll-event(e) => { return root.scroll-by(e.delta-y); }
         }
 
-        for o in root.halo : Text {
-            x: (Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) + o.dx) * 1px;
-            y: (Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) + o.dy) * 1px;
-            text: "OPEN";
-            font-family: "Shadows Into Light";
-            font-size: 18px;
-            letter-spacing: 0.72px;
-            color: SidebarThemes.halo-color;
-        }
-
-        Text {
+        HaloText {
             x: Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
             y: Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
             text: "OPEN";
-            font-family: "Shadows Into Light";
             font-size: 18px;
             letter-spacing: 0.72px;
-            color: #5B616B;
+            ink: #5B616B;
+            halo: root.halo;
         }
 
         for item[i] in root.open-notes: SidebarRow {
@@ -309,24 +265,14 @@ export component AllNotesSidebar inherits Rectangle {
             scrolled(dy) => { return root.scroll-by(dy); }
         }
 
-        for o in root.halo : Text {
-            x: (Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) + o.dx) * 1px;
-            y: (Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) + o.dy) * 1px;
-            text: "CLOSED";
-            font-family: "Shadows Into Light";
-            font-size: 18px;
-            letter-spacing: 0.72px;
-            color: SidebarThemes.halo-color;
-        }
-
-        Text {
+        HaloText {
             x: Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) * 1px;
             y: Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) * 1px;
             text: "CLOSED";
-            font-family: "Shadows Into Light";
             font-size: 18px;
             letter-spacing: 0.72px;
-            color: #5B616B;
+            ink: #5B616B;
+            halo: root.halo;
         }
 
         for item[j] in root.closed-notes: SidebarRow {

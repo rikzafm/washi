@@ -68,6 +68,57 @@ export global SidebarThemes {
     }
 }
 
+/// A label on a Sidebar with its light text shadow: the `halo` copies (`SidebarThemes.halo-for`:
+/// none outside Transparent) in `SidebarThemes.halo-color`, then the label itself. Placed and sized
+/// like a Text, window px (its own text's size unless given one). Each copy sits its offset away
+/// along the axes `cs`/`sn`: the window's by default, or a tilted frame's.
+export component HaloText inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size;
+    in property <int> font-weight;
+    in property <length> letter-spacing;
+    /// The label's color.
+    in property <color> ink: #2B2F36;
+    in property <TextVerticalAlignment> vertical-alignment: top;
+    in property <TextOverflow> overflow: clip;
+    in property <[HaloOffset]> halo: [];
+    in property <float> cs: 1.0;
+    in property <float> sn: 0.0;
+
+    width: label.preferred-width;
+    height: label.preferred-height;
+
+    for o in root.halo : Text {
+        x: (o.dx * root.cs - o.dy * root.sn) * 1px;
+        y: (o.dx * root.sn + o.dy * root.cs) * 1px;
+        width: root.width;
+        height: root.height;
+        text: root.text;
+        font-family: "Shadows Into Light";
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        letter-spacing: root.letter-spacing;
+        color: SidebarThemes.halo-color;
+        vertical-alignment: root.vertical-alignment;
+        overflow: root.overflow;
+    }
+
+    label := Text {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        text: root.text;
+        font-family: "Shadows Into Light";
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        letter-spacing: root.letter-spacing;
+        color: root.ink;
+        vertical-alignment: root.vertical-alignment;
+        overflow: root.overflow;
+    }
+}
+
 /// The panel's backdrop in `theme`: a `SidebarPanel.width` by `ph` rounded rectangle centred on the
 /// tilted frame `f` (the panel's centre). Default is the slate fill; Transparent draws nothing; Paper
 /// is the Note's paper with its shadow (no tape); Liquid glass is faked (no real blur): a translucent
