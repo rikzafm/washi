@@ -513,6 +513,36 @@ fn the_picture_viewer_opens_at_the_ui_size() {
     assert_eq!(h.viewer_drawing_scales(), [0.75], "the viewer is drawn at Small too");
 }
 
+#[test]
+fn an_open_picture_viewer_follows_the_ui_size_live() {
+    let red = [200u8, 30, 60];
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("red.png");
+    let picture = washi::images::Rgba { width: 300, height: 150, data: (0..300 * 150).flat_map(|_| [red[0], red[1], red[2], 255]).collect() };
+    std::fs::write(&path, washi::images::encode_png(&picture).unwrap()).unwrap();
+    let mut h = started();
+    h.choose_picture(&path);
+    h.click_image_button(0);
+    h.wait_for_images();
+
+    let (w, _, px) = h.render(0);
+    let spots: Vec<(u32, u32)> = px.iter().enumerate()
+        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
+        .map(|(i, _)| (i as u32 % w, i as u32 / w))
+        .collect();
+    assert!(!spots.is_empty(), "the picture is drawn");
+    let n = spots.len() as f32;
+    let scale = h.note_drawing_scale(0);
+    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
+    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
+    h.click(0, x, y);
+    h.click(0, x, y);
+    assert_eq!(h.viewer_drawing_scales(), [1.0], "the viewer opens at Large");
+
+    choose_ui_size(&mut h, SMALL);
+    assert_eq!(h.viewer_drawing_scales(), [0.75], "the viewer updates to Small live");
+}
+
 // ---- Sidebar: Height and Anchor ----
 
 /// Whether two window-px positions agree to within the anti-aliased edge of a tilted panel.

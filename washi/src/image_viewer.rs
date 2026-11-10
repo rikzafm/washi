@@ -61,7 +61,7 @@ const TILT_DEG: f64 = 1.5;
 pub struct ImageViewer {
     ui: ImageViewerWindow,
     /// The window's scale: the monitor's times the UI size.
-    _scale: Rc<crate::ui_scale::WindowScale>,
+    scale: Rc<crate::ui_scale::WindowScale>,
 }
 
 impl ImageViewer {
@@ -140,7 +140,12 @@ impl ImageViewer {
         }
         ui.show()?;
         scale.resync(ui.window(), true);
-        Ok(ImageViewer { ui, _scale: scale })
+        Ok(ImageViewer { ui, scale })
+    }
+
+    /// Draw at UI size `ui` from now on, keeping the window's size on screen.
+    pub fn set_ui_scale(&self, ui: f32) {
+        self.scale.set_ui(self.ui.window(), ui);
     }
 
     /// How many screen px one logical px covers: the monitor's scale times the UI size.

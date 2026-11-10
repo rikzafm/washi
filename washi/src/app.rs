@@ -637,6 +637,9 @@ impl App {
         if let Some(s) = self.settings() {
             s.set_ui_scale(scale, k);
         }
+        for (_, v) in self.0.viewers.borrow().iter() {
+            v.set_ui_scale(scale);
+        }
     }
 
     /// The Settings page has closed: drop it on the next turn of the loop, never inside its own callback.
