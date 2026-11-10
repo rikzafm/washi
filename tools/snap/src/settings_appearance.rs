@@ -169,6 +169,11 @@ impl Harness {
         self.app().viewer_window_sizes()
     }
 
+    /// Set the UI scale factor directly.
+    pub fn set_ui_scale(&self, scale: f32) {
+        self.app().set_ui_scale(scale);
+    }
+
     /// The pitch scale used for text layout on note `n`.
     pub fn note_pitch_scale(&self, n: usize) -> f32 {
         let id = self.note_id(n);

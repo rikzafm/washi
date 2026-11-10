@@ -592,6 +592,28 @@ fn picture_viewer_on_secondary_monitor_caps_to_secondary_monitor_work_area() {
     assert!(sizes[0].1 > 540, "viewer height ({}) must not be clamped to primary monitor (540)", sizes[0].1);
 }
 
+#[test]
+fn exit_candidate_geometry_rescales_on_ui_scale_change() {
+    let mut h = started();
+    h.type_text(0, "note 0");
+    h.right_click(0, Some(&["New note"]));
+    h.type_text(1, "note 1");
+    let initial_geom = h.note_geometry(1);
+    h.close_note(1);
+
+    let candidates = h.exit_candidates();
+    assert_eq!(candidates.len(), 1);
+    let g_before = candidates[0].geometry.unwrap();
+    assert_eq!(g_before, initial_geom);
+
+    h.set_ui_scale(0.75);
+
+    let candidates = h.exit_candidates();
+    let g_after = candidates[0].geometry.unwrap();
+    let expected = g_before.scaled(1.0 / 0.75);
+    assert_eq!(g_after, expected, "candidate geometry must scale by k on UI scale change");
+}
+
 // ---- Sidebar: Height and Anchor ----
 
 /// Whether two window-px positions agree to within the anti-aliased edge of a tilted panel.
