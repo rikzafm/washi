@@ -257,6 +257,10 @@ fn swatch_marker(marker: Option<u32>) -> slint::Color {
 /// The shown text of an empty note.
 pub const HINT: &str = "Note Something....";
 
+const CURSOR_TEXT: i32 = 0;
+const CURSOR_DEFAULT: i32 = 1;
+const CURSOR_RESIZE: i32 = 2;
+
 impl Doc {
     fn new(images: NoteImages) -> Rc<Doc> {
         Rc::new(Doc {
@@ -315,15 +319,11 @@ impl Doc {
 
     /// A press at `at` on the selected picture's grip starts a resize: true when it did.
     fn grab_grip(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
-        let doc = self.doc.borrow();
-        let Some(i) = self.selected_image(&doc) else { return false };
-        let Some(r) = textflow::image_rect(doc.blocks(), i, self.paper.get().0, &Self::tokens(ui), &|b| self.images.size(b)) else { return false };
-        let g = Self::grip_rect(&doc.blocks()[i], r);
-        let slop = 6.0;
-        let (x, y) = (at.0 as f64, at.1 as f64);
-        if x < g.x - slop || x > g.x + g.width + slop || y < g.y - slop || y > g.y + g.height + slop {
+        if !self.grip_at(ui, at) {
             return false;
         }
+        let doc = self.doc.borrow();
+        let Some(i) = self.selected_image(&doc) else { return false };
         *self.grip.borrow_mut() = Some((i, doc.clone()));
         true
     }
@@ -361,6 +361,29 @@ impl Doc {
         let r = textflow::image_rect(doc.blocks(), block, self.paper.get().0, &Self::tokens(ui), &|b| self.images.size(b))?;
         let (x, y) = (at.0 as f64, at.1 as f64);
         (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height).then_some(block)
+    }
+
+    /// Whether `at` falls within the active picture resize grip.
+    fn grip_at(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
+        let doc = self.doc.borrow();
+        let Some(i) = self.selected_image(&doc) else { return false };
+        let Some(r) = textflow::image_rect(doc.blocks(), i, self.paper.get().0, &Self::tokens(ui), &|b| self.images.size(b)) else { return false };
+        let g = Self::grip_rect(&doc.blocks()[i], r);
+        let slop = 6.0;
+        let (x, y) = (at.0 as f64, at.1 as f64);
+        !(x < g.x - slop || x > g.x + g.width + slop || y < g.y - slop || y > g.y + g.height + slop)
+    }
+
+    /// The mouse cursor kind to show in the text editor: 0 for text I-beam, 1 for default arrow
+    /// (over images), 2 for nwse-resize (over image grip).
+    fn cursor_kind_at(&self, ui: &NoteWindow, at: (f32, f32)) -> i32 {
+        if self.grip_at(ui, at) {
+            return CURSOR_RESIZE;
+        }
+        if self.image_at(ui, at).is_some() {
+            return CURSOR_DEFAULT;
+        }
+        CURSOR_TEXT
     }
 
     /// Replace everything (opening a note, or text set from outside).
@@ -1535,6 +1558,17 @@ impl Note {
             let (on_event, id) = (on_event.clone(), id.clone());
             move || on_event(id.get(), ev)
         };
+        {
+            let doc = doc.clone();
+            let weak = ui.as_weak();
+            ui.on_pointer_motion(move |x, y| {
+                let Some(ui) = weak.upgrade() else { return };
+                let kind = doc.cursor_kind_at(&ui, (x, y));
+                if ui.get_text_cursor_kind() != kind {
+                    ui.set_text_cursor_kind(kind);
+                }
+            });
+        }
         ui.on_pointer_moved(forward(NoteEvent::PointerMoved));
         ui.on_start_move(forward(NoteEvent::StartMove));
         {
@@ -2167,5 +2201,25 @@ mod tests {
     fn note_event_open_dropdown_and_helpers() {
         let ev = NoteEvent::OpenDropdown;
         assert_eq!(ev, NoteEvent::OpenDropdown);
+    }
+
+    #[test]
+    fn note_editor_text_cursor_kinds() {
+        crate::dropdown::init_test_platform();
+        let ui = NoteWindow::new().expect("NoteWindow::new");
+        ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));
+
+        // Default text-cursor-kind is CURSOR_TEXT (text I-beam)
+        assert_eq!(ui.get_text_cursor_kind(), CURSOR_TEXT);
+
+        // Setting to CURSOR_DEFAULT (default arrow, e.g. over image) and CURSOR_RESIZE (nwse-resize, over grip)
+        ui.set_text_cursor_kind(CURSOR_DEFAULT);
+        assert_eq!(ui.get_text_cursor_kind(), CURSOR_DEFAULT);
+
+        ui.set_text_cursor_kind(CURSOR_RESIZE);
+        assert_eq!(ui.get_text_cursor_kind(), CURSOR_RESIZE);
+
+        ui.set_text_cursor_kind(CURSOR_TEXT);
+        assert_eq!(ui.get_text_cursor_kind(), CURSOR_TEXT);
     }
 }

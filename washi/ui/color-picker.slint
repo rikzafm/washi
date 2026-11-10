@@ -112,6 +112,7 @@ component HitAt inherits TouchArea {
     in property <float> dv;
     x: Tilt.x(root.f, root.du, root.dv) * 1px - self.width / 2;
     y: Tilt.y(root.f, root.du, root.dv) * 1px - self.height / 2;
+    mouse-cursor: pointer;
 }
 
 /// The "none" chip's dashed outline: short dashes along the four sides of a square at (u0, v0).

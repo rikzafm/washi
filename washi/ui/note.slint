@@ -240,6 +240,8 @@ export component NoteWindow inherits Window {
     callback context-menu(length, length);
     /// The mouse moved over the paper (the app wakes from suspension).
     callback pointer-moved();
+    callback pointer-motion(length, length);
+    in-out property <int> text-cursor-kind: 0;
     /// The user pressed either tape: the platform drags the window.
     callback start-move();
     /// The user pressed a resize zone (0 north, then clockwise: see resize-zones.slint).
@@ -468,6 +470,8 @@ export component NoteWindow inherits Window {
                         pointer-up => { root.pointer-up(); }
                         right-click(x, y) => { root.context-menu(x, y); }
                         pointer-moved => { root.pointer-moved(); }
+                        pointer-motion(x, y) => { root.pointer-motion(x, y); }
+                        text-cursor-kind: root.text-cursor-kind;
                         paste-image => { return root.paste-image(); }
                         copy-image(i) => { return root.copy-image(i); }
                         cut-image(i) => { return root.cut-image(i); }

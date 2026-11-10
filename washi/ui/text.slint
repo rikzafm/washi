@@ -203,6 +203,7 @@ export component TextLayer inherits Rectangle {
     /// The overlay takes every pointer event, so what the paper listens to is forwarded.
     callback right-click(length, length);
     callback pointer-moved();
+    callback pointer-motion(length, length);
     /// Ctrl+C on an image block: true when taken.
     callback copy-image(int) -> bool;
     /// Ctrl+X on an image block: true when taken.
@@ -409,7 +410,7 @@ export component TextLayer inherits Rectangle {
             }
             italic: b.italic;
             autofocus: i == 0 && root.allow-autofocus;
-            show-input: !root.hide-inputs && root.flat >= 1;
+            show-input: !root.hide-inputs && root.flat >= 0.99;
             resync: root.resync;
             // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
             gap-before: i == 0 || root.blocks[i - 1].kind == b.kind || (root.blocks[i - 1].kind == BlockKind.list-item && b.kind == BlockKind.body) || (root.blocks[i - 1].kind == BlockKind.body && b.kind == BlockKind.list-item) ? 0px
@@ -443,14 +444,20 @@ export component TextLayer inherits Rectangle {
         ink: Theme.ink;
     }
 
+    in property <int> text-cursor-kind: 0;
+
     // The note owns the pointer: transparent, over the fields (which no longer see the mouse).
     TouchArea {
         x: 0;
         y: 0;
         width: root.width;
         height: root.height;
+        mouse-cursor: root.text-cursor-kind == 1 ? MouseCursor.default : (root.text-cursor-kind == 2 ? MouseCursor.nwse-resize : MouseCursor.text);
         pointer-event(e) => {
-            if (e.kind == PointerEventKind.move) { root.pointer-moved(); }
+            if (e.kind == PointerEventKind.move) {
+                root.pointer-motion(self.mouse-x, self.mouse-y);
+                root.pointer-moved();
+            }
             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
                 root.pointer-down(self.mouse-x, self.mouse-y, e.modifiers.shift);
             }

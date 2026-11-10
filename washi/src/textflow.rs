@@ -270,7 +270,19 @@ pub struct CaretLine {
 }
 
 fn line_starts(lines: &[Vec<Word>]) -> Vec<usize> {
-    lines.iter().enumerate().map(|(i, l)| if i == 0 { 0 } else { l.first().map_or(0, |w| w.off) }).collect()
+    let mut starts = Vec::with_capacity(lines.len());
+    let mut prev = 0;
+    for (i, l) in lines.iter().enumerate() {
+        if i == 0 {
+            starts.push(0);
+        } else if let Some(w) = l.first() {
+            prev = w.off;
+            starts.push(w.off);
+        } else {
+            starts.push(prev);
+        }
+    }
+    starts
 }
 
 /// The visual line and x of the caret at byte `offset` of block `b`, in a paper `paper_w` wide.
@@ -294,18 +306,21 @@ pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> us
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
     let line = line.min(lines.len() - 1);
-    let (start, end) = (starts[line], starts.get(line + 1).copied().unwrap_or(b.text.len() + 1));
+    let start = starts[line];
+    let line_words = &lines[line];
+    let line_text_end = line_words.last().map_or(b.text.len(), |w| w.off + w.text.len());
     let mut best = (start, f64::MAX);
     let mut at = 0.0;
-    for (i, c) in b.text[start..].char_indices().map(|(i, c)| (start + i, c)).chain(std::iter::once((b.text.len(), ' '))) {
-        if i >= end {
-            break;
-        }
+    for (i, c) in b.text[start..line_text_end].char_indices().map(|(i, c)| (start + i, c)) {
         let d = (at - x).abs();
         if d < best.1 {
             best = (i, d);
         }
         at += m.advance(c);
+    }
+    let d = (at - x).abs();
+    if d < best.1 {
+        best = (line_text_end, d);
     }
     best.0
 }
@@ -830,6 +845,14 @@ mod tests {
         let h = image_height(363.0 - TOKENS.inset_left - TOKENS.inset_right, (200, 100));
         assert_eq!(hit(d.blocks(), (100.0, tops[1] + h * 0.25), 363.0, &TOKENS, &size), Caret { block: 1, offset: 0 });
         assert_eq!(hit(d.blocks(), (100.0, tops[1] + h * 0.75), 363.0, &TOKENS, &size), Caret { block: 1, offset: 0 });
+    }
+
+    #[test]
+    fn clicking_to_the_right_of_a_wrapped_sentence_snaps_to_the_end_of_the_sentence_not_trailing_whitespace() {
+        let b = Block::new(Kind::Body, "Sentence one wraps here. Sentence two continues on the next line.");
+        let line0_end = "Sentence one wraps here.".len();
+        let at_end = offset_at(&b, 0, 5000.0, 363.0, &TOKENS);
+        assert_eq!(at_end, line0_end, "Caret must sit directly after the sentence on line 0, before any wrapped spaces");
     }
 
     fn rects(d: &Document, range: Range) -> Vec<Rect> {
