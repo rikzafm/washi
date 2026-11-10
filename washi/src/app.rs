@@ -400,70 +400,8 @@ impl App {
     }
 
     /// Clone the handle to the open dropdown menu, if any.
-    fn dropdown(&self) -> Option<Rc<DropdownMenu>> {
+    pub fn dropdown(&self) -> Option<Rc<DropdownMenu>> {
         self.0.dropdown.borrow().clone()
-    }
-
-    /// Whether the dropdown menu is open for any note.
-    pub fn is_dropdown_open(&self) -> bool {
-        self.0.dropdown.borrow().is_some()
-    }
-
-    /// The note whose dropdown menu is currently open, if any.
-    pub fn dropdown_note_id(&self) -> Option<NoteId> {
-        self.0.dropdown.borrow().as_ref().map(|d| d.note_id())
-    }
-
-    /// The pinned state of the currently open dropdown menu, if any.
-    pub fn dropdown_pinned(&self) -> Option<bool> {
-        self.0.dropdown.borrow().as_ref().map(|d| d.pinned())
-    }
-
-    /// Invoke the toggle pin callback on the active dropdown (for testing).
-    pub fn invoke_dropdown_toggle_pin(&self) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_toggle_pin();
-        }
-    }
-
-    /// Invoke the delete note callback on the active dropdown (for testing).
-    pub fn invoke_dropdown_delete_note(&self) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_delete_note();
-        }
-    }
-
-    /// Invoke the close note callback on the active dropdown (for testing).
-    pub fn invoke_dropdown_close_note(&self) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_close_note();
-        }
-    }
-
-    /// Invoke the new note callback on the active dropdown (for testing).
-    pub fn invoke_dropdown_new_note(&self) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_new_note();
-        }
-    }
-
-    /// Invoke the all notes callback on the active dropdown (for testing).
-    pub fn invoke_dropdown_all_notes(&self) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_all_notes();
-        }
-    }
-
-    /// Whether the open dropdown menu offers Settings (`None` without a dropdown).
-    pub fn dropdown_settings_visible(&self) -> Option<bool> {
-        self.dropdown().map(|d| d.settings_visible())
-    }
-
-    /// Press Settings on the active dropdown (for testing).
-    pub fn invoke_dropdown_settings(&self) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_settings();
-        }
     }
 
     /// Clone the handle to the open Settings page, if any.
@@ -721,7 +659,7 @@ impl App {
         if let Some(v) = self.all_notes() {
             v.set_confirming_delete(false);
         }
-        let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
+        let from = self.dropdown().map(|d| d.note_id()).or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
         let new_id = self.create_new_note(from);
         self.refresh_all_notes(new_id);
         // a new note is made to be typed in
@@ -1091,17 +1029,6 @@ impl App {
         }
     }
 
-    /// The list of notes in the currently open dropdown menu.
-    pub fn dropdown_notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
-        self.dropdown().map(|d| d.notes()).unwrap_or_default()
-    }
-
-    /// Invoke the select note callback on the active dropdown (for testing).
-    pub fn invoke_dropdown_select_note(&self, id: NoteId) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_select_note(id);
-        }
-    }
 
     /// The bounding rectangle of the menu button of note `id` in window logical coordinates.
     pub fn menu_button_rect(&self, id: NoteId) -> Option<(f32, f32, f32, f32)> {
@@ -1118,24 +1045,6 @@ impl App {
         self.with_note(id, |n| n.menu_button_shown())
     }
 
-    /// The screen position of the open dropdown menu window in logical pixels, if any.
-    pub fn dropdown_position(&self) -> Option<(f32, f32)> {
-        self.dropdown().map(|d| d.position())
-    }
-
-    /// The size of the open dropdown menu window in logical pixels, if any.
-    pub fn dropdown_size(&self) -> Option<(f32, f32)> {
-        self.dropdown().map(|d| d.size())
-    }
-
-    /// The open dropdown menu's window on screen (physical px).
-    pub fn dropdown_screen_size(&self) -> Option<(u32, u32)> {
-        self.dropdown().map(|d| {
-            let s = d.ui().window().size();
-            (s.width, s.height)
-        })
-    }
-
     /// How many screen px one logical px of each open picture viewer covers, oldest first.
     pub fn viewer_scale_factors(&self) -> Vec<f32> {
         self.0.viewers.borrow().iter().map(|(_, v)| v.scale_factor()).collect()
@@ -1144,20 +1053,6 @@ impl App {
     /// Window sizes (physical px) of open picture viewers, oldest first.
     pub fn viewer_window_sizes(&self) -> Vec<(u32, u32)> {
         self.0.viewers.borrow().iter().map(|(_, v)| v.window_size()).collect()
-    }
-
-    /// Dispatch a window event to the active dropdown window (for testing).
-    pub fn dispatch_dropdown_event(&self, event: slint::platform::WindowEvent) {
-        if let Some(d) = self.dropdown() {
-            d.dispatch_event(event);
-        }
-    }
-
-    /// Invoke dismiss on the active dropdown (for testing).
-    pub fn invoke_dropdown_dismiss(&self) {
-        if let Some(d) = self.dropdown() {
-            d.invoke_dismiss();
-        }
     }
 
     /// Dismiss the open dropdown menu and reset the parent note's button state.
@@ -1175,14 +1070,14 @@ impl App {
 
     /// Dismiss the open dropdown menu if it belongs to note `id`.
     fn dismiss_dropdown_if(&self, id: NoteId) {
-        if self.dropdown_note_id() == Some(id) {
+        if self.dropdown().map(|d| d.note_id()) == Some(id) {
             self.dismiss_dropdown();
         }
     }
 
     /// Toggle the dropdown menu for note `id`.
     pub fn toggle_dropdown(&self, id: NoteId) {
-        if let Some(open_id) = self.dropdown_note_id() {
+        if let Some(open_id) = self.dropdown().map(|d| d.note_id()) {
             if open_id == id {
                 self.dismiss_dropdown();
                 return;
@@ -1206,7 +1101,7 @@ impl App {
     fn toggle_editor_dropdown(&self) {
         let Some(v) = self.all_notes() else { return };
         let id = v.editor_note_id();
-        if self.dropdown_note_id() == Some(id) {
+        if self.dropdown().map(|d| d.note_id()) == Some(id) {
             self.dismiss_dropdown();
             return;
         }
@@ -1454,7 +1349,7 @@ impl App {
                 n.flush_text();
             }
         }
-        if let Some(open_id) = self.dropdown_note_id() {
+        if let Some(open_id) = self.dropdown().map(|d| d.note_id()) {
             let state = self.0.env.signals.window_state(open_id);
             if state.minimized || (!state.focused && self.0.env.signals.app_in_background()) {
                 self.dismiss_dropdown();
@@ -1595,21 +1490,6 @@ impl App {
         self.0.delete_dialog.borrow().clone()
     }
 
-    /// Whether the delete dialog is open for any note.
-    pub fn is_delete_dialog_open(&self) -> bool {
-        self.0.delete_dialog.borrow().is_some()
-    }
-
-    /// The note whose delete dialog is currently open, if any.
-    pub fn delete_dialog_note_id(&self) -> Option<NoteId> {
-        self.0.delete_dialog.borrow().as_ref().map(|d| d.note_id())
-    }
-
-    /// Top-left of the delete dialog window in logical screen coordinates, if open.
-    pub fn delete_dialog_position(&self) -> Option<(f32, f32)> {
-        self.delete_dialog().map(|d| d.position())
-    }
-
     /// Dismiss the open delete dialog if any.
     pub fn dismiss_delete_dialog(&self) {
         if let Some(dialog) = self.0.delete_dialog.borrow_mut().take() {
@@ -1619,29 +1499,8 @@ impl App {
 
     /// Dismiss the open delete dialog if it belongs to note `id`.
     pub fn dismiss_delete_dialog_if(&self, id: NoteId) {
-        if self.delete_dialog_note_id() == Some(id) {
+        if self.delete_dialog().map(|d| d.note_id()) == Some(id) {
             self.dismiss_delete_dialog();
-        }
-    }
-
-    /// Invoke "Keep it" callback on the active delete dialog (for testing).
-    pub fn invoke_keep_note(&self) {
-        if let Some(d) = self.delete_dialog() {
-            d.cancel();
-        }
-    }
-
-    /// Invoke "Delete" callback on the active delete dialog (for testing).
-    pub fn invoke_confirm_delete(&self) {
-        if let Some(d) = self.delete_dialog() {
-            d.confirm();
-        }
-    }
-
-    /// Dispatch a window event to the active delete dialog (for testing).
-    pub fn dispatch_delete_dialog_event(&self, ev: slint::platform::WindowEvent) {
-        if let Some(d) = self.delete_dialog() {
-            d.ui().window().dispatch_event(ev);
         }
     }
 
@@ -1649,7 +1508,7 @@ impl App {
     pub fn delete_note(&self, id: NoteId) {
         self.dismiss_dropdown_if(id);
 
-        if let Some(open_id) = self.delete_dialog_note_id() {
+        if let Some(open_id) = self.delete_dialog().map(|d| d.note_id()) {
             if open_id == id {
                 if let Some(d) = self.delete_dialog() {
                     self.0.env.window_control.bring_to_front(0, d.hwnd());
@@ -1762,7 +1621,7 @@ impl App {
 
     /// Open a fresh empty note. If an open note exists, offsets from it.
     pub fn new_note(&self) {
-        let from = self.dropdown_note_id().or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
+        let from = self.dropdown().map(|d| d.note_id()).or_else(|| self.0.notes.borrow().last().map(|n| n.id()));
         if self.create_new_note(from).is_some() && self.is_all_notes_open() {
             self.refresh_all_notes(None);
         }
