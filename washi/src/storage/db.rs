@@ -199,6 +199,34 @@ impl Db {
         Ok(())
     }
 
+    /// A stored app-wide preference (`meta` table), if it was ever set.
+    fn meta(&self, key: &str) -> Option<String> {
+        self.conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get::<_, String>(0)).ok()
+    }
+
+    /// Store an app-wide preference (`meta` table), replacing any earlier value.
+    pub(crate) fn set_meta(&self, key: &str, value: &str) -> Result<(), DbError> {
+        self.conn.execute(
+            "INSERT INTO meta(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
+    }
+
+    /// The UI size (Settings › Appearance) as a scale factor, one of `UI_SCALES`. Large (1.0) when
+    /// never set or when the stored value is not one of the choices.
+    pub fn ui_scale(&self) -> f32 {
+        self.meta("ui_scale")
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .and_then(|v| UI_SCALES.iter().copied().find(|s| (s - v).abs() < 1e-3))
+            .unwrap_or(1.0)
+    }
+
+    pub fn set_ui_scale(&self, scale: f32) -> Result<(), DbError> {
+        self.set_meta("ui_scale", &format!("{scale:.2}"))
+    }
+
     /// Apply the new-note defaults to a note just created and return whether it starts Always on
     /// top. The preference write is best effort: a failure is logged and never stops a note opening.
     pub fn apply_new_note_defaults(&self, id: NoteId) -> bool {
@@ -359,6 +387,9 @@ pub struct AllNoteRow {
     pub z_order: i64,
 }
 
+/// The UI size choices (Settings › Appearance: Small, Medium, Large), as the scale each one saves.
+pub const UI_SCALES: [f32; 3] = [0.75, 0.80, 1.00];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentNote {
     pub id: NoteId,
@@ -404,6 +435,23 @@ mod tests {
         assert!(db.new_notes_on_top());
         db.set_new_notes_on_top(false).unwrap();
         assert!(!db.new_notes_on_top());
+    }
+
+    #[test]
+    fn ui_scale_is_large_until_set_survives_reopening_and_falls_back_on_nonsense() {
+        let (dir, db) = test_db();
+        assert_eq!(db.ui_scale(), 1.0, "never set: Large");
+        db.set_ui_scale(0.75).unwrap();
+        assert_eq!(db.ui_scale(), 0.75);
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert_eq!(db.ui_scale(), 0.75, "kept across a restart");
+        db.set_ui_scale(0.8).unwrap();
+        assert_eq!(db.ui_scale(), 0.8);
+        for junk in ["", "big", "NaN", "inf", "-1", "0", "0.5", "1.5"] {
+            db.set_meta("ui_scale", junk).unwrap();
+            assert_eq!(db.ui_scale(), 1.0, "{junk:?} reads as Large");
+        }
     }
 
     #[test]

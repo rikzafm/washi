@@ -1,6 +1,6 @@
 //! The Settings page: its window lifecycle (open from a dropdown, close back to the note).
 
-use snap::Harness;
+use snap::{tab, Harness};
 use std::time::Duration;
 use washi::platform::ScreenRect;
 use washi::storage::Geometry;
@@ -110,15 +110,19 @@ fn either_tape_drags_the_settings_window() {
 fn the_sidebars_tabs_and_close_are_clicked_where_the_panel_puts_them() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
-    let (x, y, _, hh) = window_at(&h);
-    let (wx, wy, _, _) = h.settings_native_window_geometry().unwrap();
-    let (px, py) = ((x - wx) as f32, (y - wy) as f32);
-    // The 600-tall panel is centred on the window; Tab 2 is 189..237 down it, 12..258 across.
-    let top = py + hh as f32 / 2.0 - 300.0;
+    // The panel's top-left corner in the window: the 600-tall panel is centred on the page.
+    let panel = |h: &Harness| {
+        let (x, y, _, hh) = window_at(h);
+        let (wx, wy, _, _) = h.settings_native_window_geometry().unwrap();
+        ((x - wx) as f32, (y - wy) as f32 + hh as f32 / 2.0 - 300.0)
+    };
+    // The third Tab is 189..237 down the panel, 12..258 across.
+    let (px, top) = panel(&h);
     h.settings_press_at(px + 28.0, top + 213.0);
-    assert_eq!(h.settings_selected_tab(), 2, "the Shortcuts Tab at its left end");
+    assert_eq!(h.settings_selected_tab(), tab::STYLE, "the Font & Style Tab at its left end");
     h.advance_frames(ms(600));
-    // The X: 44px around (238, 32) on the panel.
+    // The X: 44px around (238, 32) on the panel (which moved with the shorter page).
+    let (px, top) = panel(&h);
     h.settings_press_at(px + 232.0, top + 32.0);
     h.advance_frames(ms(600));
     assert!(!h.is_settings_open(), "the X closed Settings");
@@ -217,8 +221,11 @@ const FULL_W: u32 = STRIP as u32 + PAPER_W + 2 * MARGIN as u32;
 
 /// Each tab's Paper height: the laid-out content plus the Paper's padding, at least 600 (the mockup's
 /// 658, 603, 767 and 600; see settings_fidelity.rs), in whole logical px as the window has them.
+/// Appearance (not in the mockup) and Font & Style (since Fade text edge and UI size left it) are
+/// shorter than the minimum.
 const GENERAL_H: u32 = 740;
-const STYLE_H: u32 = 605;
+const APPEARANCE_H: u32 = 600;
+const STYLE_H: u32 = 600;
 const SHORTCUTS_H: u32 = 768;
 const PRIVACY_H: u32 = 600;
 
@@ -340,7 +347,7 @@ fn frames_hold_the_fine_timer_resolution_only_while_they_run() {
     assert_eq!(h.control.fine_timer_holds.get(), 1, "held while opening");
     h.advance_frames(ms(300));
     assert_eq!(h.control.fine_timer_holds.get(), 0, "given back at rest");
-    h.settings_click_tab(1);
+    h.settings_click_tab(tab::STYLE);
     assert_eq!(h.control.fine_timer_holds.get(), 1, "held for a tab switch");
     h.advance_frames(ms(300));
     h.settings_close();
@@ -429,7 +436,7 @@ fn each_tab_ends_at_its_height_and_the_width_stays() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
     let (x0, y0, _, _) = window_at(&h);
-    for (tab, paper) in [(1, STYLE_H), (0, GENERAL_H), (2, SHORTCUTS_H), (3, PRIVACY_H)] {
+    for (tab, paper) in [(tab::STYLE, STYLE_H), (tab::GENERAL, GENERAL_H), (tab::APPEARANCE, APPEARANCE_H), (tab::SHORTCUTS, SHORTCUTS_H), (tab::PRIVACY, PRIVACY_H)] {
         h.settings_click_tab(tab);
         h.advance_frames(ms(250));
         let (x, y, w, _) = window_at(&h);
@@ -447,11 +454,11 @@ fn each_tab_ends_at_its_height_and_the_width_stays() {
 fn the_height_tweens_over_about_130ms() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
-    h.settings_click_tab(1);
-    h.settings_click_tab(0);
+    h.settings_click_tab(tab::STYLE);
+    h.settings_click_tab(tab::GENERAL);
     h.advance_frames(ms(250));
     assert_eq!(paper_h(&h), GENERAL_H);
-    h.settings_click_tab(1);
+    h.settings_click_tab(tab::STYLE);
     h.advance_frames(ms(32));
     let mid = paper_h(&h);
     assert!(mid > STYLE_H && mid < GENERAL_H, "mid-tween: {mid}");
@@ -467,14 +474,14 @@ fn the_height_tweens_over_about_130ms() {
 fn switching_mid_tween_retargets_smoothly() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
-    h.settings_click_tab(2); // Shortcuts
+    h.settings_click_tab(tab::SHORTCUTS); // Shortcuts
     h.advance_frames(ms(250));
-    h.settings_click_tab(0); // towards General
+    h.settings_click_tab(tab::GENERAL); // towards General
     h.advance_frames(ms(64));
-    h.settings_click_tab(1); // retarget to Font & Style
+    h.settings_click_tab(tab::STYLE); // retarget to Font & Style
     let mut last_h = paper_h(&h) as i32;
     let mut last_o = h.settings_content_opacity();
-    assert_eq!(h.settings_shown_tab(), 1, "the new tab shows at once");
+    assert_eq!(h.settings_shown_tab(), tab::STYLE, "the new tab shows at once");
     for _ in 0..20 {
         h.advance_frames(ms(16));
         let now_h = paper_h(&h) as i32;
@@ -486,7 +493,7 @@ fn switching_mid_tween_retargets_smoothly() {
         last_o = o;
     }
     assert_eq!(last_h, STYLE_H as i32);
-    assert_eq!(h.settings_shown_tab(), 1);
+    assert_eq!(h.settings_shown_tab(), tab::STYLE);
     assert_eq!(h.settings_content_opacity(), 1.0);
 }
 
@@ -494,9 +501,9 @@ fn switching_mid_tween_retargets_smoothly() {
 fn the_new_tab_shows_at_once_and_settles_in_without_going_blank() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
-    h.settings_click_tab(2);
-    assert_eq!(h.settings_selected_tab(), 2, "the Sidebar lights up at once");
-    assert_eq!(h.settings_shown_tab(), 2, "and the content with it");
+    h.settings_click_tab(tab::SHORTCUTS);
+    assert_eq!(h.settings_selected_tab(), tab::SHORTCUTS, "the Sidebar lights up at once");
+    assert_eq!(h.settings_shown_tab(), tab::SHORTCUTS, "and the content with it");
     let (o0, dy0) = (h.settings_content_opacity(), h.settings_content_dy());
     assert!(o0 >= 0.45 - 1e-6 && o0 < 0.6, "starts half visible: {o0}");
     assert!(dy0 > 4.0, "a little low: {dy0}");
@@ -515,7 +522,7 @@ fn the_new_tab_shows_at_once_and_settles_in_without_going_blank() {
 fn a_tab_switch_does_not_resize_the_window_every_frame() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
-    for tab in [1, 0, 2, 3, 0] {
+    for tab in [tab::STYLE, tab::GENERAL, tab::APPEARANCE, tab::SHORTCUTS, tab::PRIVACY, tab::GENERAL] {
         let before = h.settings_window_resizes();
         h.settings_click_tab(tab);
         h.advance_frames(ms(250));
@@ -549,12 +556,12 @@ fn a_taller_tab_lifts_the_page_near_the_bottom_of_the_screen() {
     h.start().unwrap();
     h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
     open_settings_from(&mut h, 0);
-    h.settings_click_tab(1);
+    h.settings_click_tab(tab::STYLE);
     h.advance_frames(ms(250));
     let (_, y_short, _, hh) = window_at(&h);
     assert_eq!(hh, STYLE_H + 2 * MARGIN as u32);
 
-    h.settings_click_tab(2);
+    h.settings_click_tab(tab::SHORTCUTS);
     h.advance_frames(ms(250));
     let (_, y, _, hh) = window_at(&h);
     assert_eq!(hh, SHORTCUTS_H + 2 * MARGIN as u32);
@@ -569,7 +576,7 @@ fn closing_mid_tab_switch_still_puts_the_host_back() {
     h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
     let note = h.note_geometry(0);
     open_settings_from(&mut h, 0);
-    h.settings_click_tab(2);
+    h.settings_click_tab(tab::SHORTCUTS);
     h.advance_frames(ms(64));
     close_settings(&mut h);
     assert!(!h.is_settings_open());

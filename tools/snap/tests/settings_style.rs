@@ -1,7 +1,7 @@
 //! The Settings page's Font & Style tab: every control works and moves the preview, and nothing leaves
 //! the page.
 
-use snap::Harness;
+use snap::{tab, Harness};
 use std::time::Duration;
 use washi::storage::Geometry;
 
@@ -21,10 +21,6 @@ const TAPE_BUTTON: i32 = 10;
 const fn tape_item(i: i32) -> i32 {
     11 + i
 }
-const FADE: i32 = 15;
-const fn ui_seg(i: i32) -> i32 {
-    16 + i
-}
 const BLANK_PAPER: i32 = 20;
 
 /// Settings open on the Font & Style tab, with the transition and tab switch finished.
@@ -32,7 +28,7 @@ fn open_style_tab(h: &mut Harness) {
     h.toggle_dropdown(0);
     h.invoke_dropdown_settings();
     h.advance_frames(ms(600));
-    h.settings_click_tab(1);
+    h.settings_click_tab(tab::STYLE);
     h.advance_frames(ms(600));
 }
 
@@ -47,7 +43,7 @@ fn started() -> Harness {
 fn the_tab_opens_on_the_defaults() {
     let mut h = started();
     open_style_tab(&mut h);
-    assert_eq!(h.settings_style_state(), (0, 1, 0, true, 0, -1));
+    assert_eq!(h.settings_style_state(), (0, 1, 0, -1));
     assert_eq!(h.settings_style_preview_font_size(), 24.0);
 }
 
@@ -68,16 +64,16 @@ fn font_and_tape_pickers_open_choose_and_close() {
     open_style_tab(&mut h);
 
     h.settings_style_click(FONT_BUTTON);
-    assert_eq!(h.settings_style_state().5, 0, "font list open");
+    assert_eq!(h.settings_style_state().3, 0, "font list open");
     h.settings_style_click(font_item(2));
     assert_eq!(h.settings_style_state().0, 2);
-    assert_eq!(h.settings_style_state().5, -1, "choosing closes the list");
+    assert_eq!(h.settings_style_state().3, -1, "choosing closes the list");
 
     h.settings_style_click(TAPE_BUTTON);
-    assert_eq!(h.settings_style_state().5, 1, "tape list open");
+    assert_eq!(h.settings_style_state().3, 1, "tape list open");
     h.settings_style_click(tape_item(3));
     assert_eq!(h.settings_style_state().2, 3);
-    assert_eq!(h.settings_style_state().5, -1);
+    assert_eq!(h.settings_style_state().3, -1);
 }
 
 #[test]
@@ -98,11 +94,11 @@ fn opening_one_list_replaces_the_other_and_an_outside_click_closes_it() {
     open_style_tab(&mut h);
     h.settings_style_click(TAPE_BUTTON);
     h.settings_style_click(FONT_BUTTON);
-    assert_eq!(h.settings_style_state().5, 0, "the tape list closed when the font list opened");
+    assert_eq!(h.settings_style_state().3, 0, "the tape list closed when the font list opened");
 
     h.settings_style_click(BLANK_PAPER);
     let s = h.settings_style_state();
-    assert_eq!(s.5, -1, "outside click closes");
+    assert_eq!(s.3, -1, "outside click closes");
     assert_eq!((s.0, s.1, s.2), (0, 1, 0), "and changes nothing");
 }
 
@@ -113,24 +109,10 @@ fn escape_closes_an_open_list_before_it_closes_settings() {
     h.settings_style_click(FONT_BUTTON);
     h.settings_press_escape();
     assert!(h.is_settings_open());
-    assert_eq!(h.settings_style_state().5, -1);
+    assert_eq!(h.settings_style_state().3, -1);
     h.settings_press_escape();
     h.advance_frames(ms(600));
     assert!(!h.is_settings_open());
-}
-
-#[test]
-fn fade_toggle_and_ui_size_respond() {
-    let mut h = started();
-    open_style_tab(&mut h);
-    h.settings_style_click(FADE);
-    assert!(!h.settings_style_state().3);
-    h.settings_style_click(FADE);
-    assert!(h.settings_style_state().3);
-    h.settings_style_click(ui_seg(1));
-    assert_eq!(h.settings_style_state().4, 1);
-    h.settings_style_click(ui_seg(0));
-    assert_eq!(h.settings_style_state().4, 0);
 }
 
 #[test]
@@ -138,17 +120,16 @@ fn choices_survive_a_tab_switch_but_not_reopening_settings() {
     let mut h = started();
     open_style_tab(&mut h);
     h.settings_style_click(size_seg(2));
-    h.settings_style_click(FADE);
-    h.settings_click_tab(0);
+    h.settings_click_tab(tab::GENERAL);
     h.advance_frames(ms(600));
-    h.settings_click_tab(1);
+    h.settings_click_tab(tab::STYLE);
     h.advance_frames(ms(600));
-    assert_eq!(h.settings_style_state(), (0, 2, 0, false, 0, -1));
+    assert_eq!(h.settings_style_state(), (0, 2, 0, -1));
 
     h.settings_close();
     h.advance_frames(ms(600));
     open_style_tab(&mut h);
-    assert_eq!(h.settings_style_state(), (0, 1, 0, true, 0, -1), "defaults again");
+    assert_eq!(h.settings_style_state(), (0, 1, 0, -1), "defaults again");
 }
 
 #[test]
@@ -167,8 +148,6 @@ fn nothing_the_tab_does_reaches_any_note() {
             h.settings_style_click(font_item(3));
             h.settings_style_click(TAPE_BUTTON);
             h.settings_style_click(tape_item(1));
-            h.settings_style_click(FADE);
-            h.settings_style_click(ui_seg(1));
         }
         h.settings_close();
         h.advance_frames(ms(600));
@@ -182,11 +161,19 @@ fn nothing_the_tab_does_reaches_any_note() {
     assert!(untouched == used, "the note looks exactly the same whatever was chosen");
 }
 
+/// Where the mockup's Font & Style content ends (its 603.2 Paper less the 44px bottom padding), less
+/// the two rows taken out of it since: Fade text edge (80px, its hint on two lines, and its 2px rule)
+/// and UI size (the 56px minimum, the last row, so no rule; the Tape color row above it loses its rule
+/// instead).
+const STYLE_CONTENT_BOTTOM: f32 = 603.2 - 44.0 - 82.0 - 56.0 - 2.0;
+
 #[test]
-fn the_tab_is_as_tall_as_its_preview_and_rows_need() {
+fn the_tab_has_no_fade_or_ui_size_row_and_its_rows_close_up() {
     let mut h = started();
     open_style_tab(&mut h);
+    let bottom = h.settings_content_bottoms()[tab::STYLE as usize];
+    assert!((bottom - STYLE_CONTENT_BOTTOM).abs() <= 3.0, "content ends at {bottom}, want about {STYLE_CONTENT_BOTTOM}");
     let (_, _, _, total) = h.settings_window_geometry().unwrap();
-    // 603 in the mockup; at least the 600 minimum (see settings_fidelity.rs).
-    assert!((684..=690).contains(&total), "{total}");
+    // Shorter than the 600 minimum now, so the Paper is 600 (plus the 42px margins).
+    assert_eq!(total, 600 + 2 * 42);
 }

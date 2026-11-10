@@ -1,0 +1,112 @@
+// Settings > Appearance: how big Washi draws (UI size). Later rows (the Sidebar Theme, Height and
+// Anchor, Settings height) go under it. Laid out like the other tabs in the Paper's tilted frame `pf`,
+// rows stacked from `top`; `bottom` (paper coordinates) is where the last row ends.
+//
+// Rust owns every value here (they are app-wide preferences in the database): the tab shows what it
+// is given and reports a choice through a callback. Only which dropdown is open lives in the tab.
+
+import { PX, PaperFrame, TapeShape, PBox, SettingRow, PickerButton, ListItem, ListPanel } from "settings-widgets.slint";
+
+export component AppearanceTab inherits Rectangle {
+    in property <PaperFrame> pf;
+    in property <TapeShape> dots;
+    /// The first row's top, from the Paper's top edge.
+    in property <float> top;
+
+    /// The chosen UI size: 0 Small (75%), 1 Medium (80%), 2 Large (100%).
+    in property <int> ui-size: 2;
+    callback set-ui-size(int);
+
+    /// -1 none, 0 the UI size list.
+    in-out property <int> open-list: -1;
+
+    out property <[string]> ui-sizes: ["Small 75%", "Medium 80%", "Large 100%"];
+    /// The Paper a new Note opens with at each size (363 by 384 times the scale).
+    property <[string]> new-note-sizes: ["272 × 288", "290 × 307", "363 × 384"];
+    out property <string> ui-size-label: root.ui-sizes[root.ui-size];
+
+    out property <float> ui-row-y: root.top;
+    out property <float> bottom: root.ui-row-y + ui-row.total;
+    /// The lowest point the open list reaches (paper coordinates): it hangs 48px under its button,
+    /// 6px of padding around three 42px entries.
+    out property <float> lists-bottom: root.ui-row-y + 6.0 + 48.0 + 12.0 + 3 * 42.0;
+
+    x: 0px;
+    y: 0px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
+
+    /// Where the control `id` is, in the Paper frame's px, for tests: 0 the UI size button, 1 to 3 its
+    /// options (Small, Medium, Large), 20 a blank part of the paper.
+    public pure function hit-x(id: int) -> length {
+        return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
+    }
+    public pure function hit-y(id: int) -> length {
+        return PX.y(root.pf, root.hit-a(id), root.hit-b(id));
+    }
+    pure function hit-a(id: int) -> float {
+        if (id >= 1 && id <= 3) {
+            return 484.0 - 130.0;
+        }
+        if (id == 20) {
+            return 140.0;
+        }
+        return 484.0 - 118.0;
+    }
+    pure function hit-b(id: int) -> float {
+        if (id >= 1 && id <= 3) {
+            return root.ui-row-y + 6.0 + 48.0 + 6.0 + (id - 1) * 42.0 + 21.0;
+        }
+        if (id == 20) {
+            return root.ui-row-y + 260.0;
+        }
+        return root.ui-row-y + 28.0;
+    }
+
+    // An outside click closes the open list.
+    if root.open-list >= 0 : TouchArea {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        clicked => { root.open-list = -1; }
+    }
+
+    ui-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.ui-row-y;
+        rule: false;
+        label: "UI size";
+        hint: "New notes open at " + root.new-note-sizes[root.ui-size];
+        PickerButton {
+            text: root.ui-size-label;
+            open: root.open-list == 0;
+            clicked => { root.open-list = root.open-list == 0 ? -1 : 0; }
+        }
+    }
+
+    // ---- the lists, last so they sit above the rows under them ----
+    if root.open-list == 0 : PBox {
+        pf: root.pf;
+        a: 484.0 - 260.0;
+        b: root.ui-row-y + 6.0 + 48.0;
+        width: 260px;
+        height: 12px + 3 * 42px;
+
+        ListPanel {
+            height: parent.height;
+            for name[i] in root.ui-sizes : ListItem {
+                x: 6px;
+                y: 6px + i * 42px;
+                width: parent.width - 12px;
+                text: name;
+                chosen: i == root.ui-size;
+                clicked => {
+                    root.set-ui-size(i);
+                    root.open-list = -1;
+                }
+            }
+        }
+    }
+}

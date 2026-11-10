@@ -69,10 +69,14 @@ export component NoteWindow inherits Window {
     // (everything below but the sidebar) is `note-w` wide and starts at `sidebar-w`.
     out property <length> sidebar-w: root.all-notes-open ? AllNotesMetrics.sidebar-w : 0px;
     out property <length> note-w: root.width - root.sidebar-w;
-    preferred-width: PaperTheme.paper-default-width + 2 * PaperTheme.margin + root.sidebar-w;
-    preferred-height: PaperTheme.paper-default-height + 2 * PaperTheme.margin;
-    min-width: PaperTheme.paper-min-width + 2 * PaperTheme.margin + root.sidebar-w;
-    min-height: PaperTheme.paper-min-height + 2 * PaperTheme.margin;
+    /// The UI size (Settings > Appearance) when the note opened: 0.75, 0.8 or 1. For now it sizes the
+    /// window only (the size a new note opens at, and the smallest it may be made); the drawing inside
+    /// does not scale yet.
+    in property <float> ui-scale: 1.0;
+    preferred-width: (PaperTheme.paper-default-width + 2 * PaperTheme.margin) * root.ui-scale + root.sidebar-w;
+    preferred-height: (PaperTheme.paper-default-height + 2 * PaperTheme.margin) * root.ui-scale;
+    min-width: (PaperTheme.paper-min-width + 2 * PaperTheme.margin) * root.ui-scale + root.sidebar-w;
+    min-height: (PaperTheme.paper-min-height + 2 * PaperTheme.margin) * root.ui-scale;
 
     /// The note's stored text, kept by the app; `blocks` is the same text split into styled blocks.
     in property <string> text;

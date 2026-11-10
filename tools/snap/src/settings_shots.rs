@@ -51,11 +51,12 @@ impl Harness {
     }
 
     /// Where each tab's content ends (paper px from the Paper's top edge), as laid out.
-    pub fn settings_content_bottoms(&self) -> [f32; 4] {
+    /// Indexed by tab (see `snap::tab`).
+    pub fn settings_content_bottoms(&self) -> [f32; 5] {
         let ui = self.app().settings().expect("Settings is not open").ui().clone_strong();
         let m = ui.get_content_bottoms();
         use slint::Model;
-        [m.row_data(0).unwrap(), m.row_data(1).unwrap(), m.row_data(2).unwrap(), m.row_data(3).unwrap()]
+        std::array::from_fn(|i| m.row_data(i).unwrap())
     }
 
     /// Move the pointer over the Settings window's top-left corner (off every control).

@@ -1626,9 +1626,12 @@ impl App {
     }
 
     fn create_new_note(&self, from: Option<NoteId>) -> Option<NoteId> {
+        // Offset from the note it is opened from, but at the new-note size for the UI size (not that
+        // note's own size).
+        let (w, h) = crate::note_window::new_note_window_size(self.0.db.ui_scale());
         let geometry = from
             .and_then(|from_id| self.with_note(from_id, |n| n.geometry()))
-            .map(|g| Geometry { x: g.x + NEW_NOTE_OFFSET, y: g.y + NEW_NOTE_OFFSET, ..g });
+            .map(|g| Geometry { x: g.x + NEW_NOTE_OFFSET, y: g.y + NEW_NOTE_OFFSET, w, h });
         let id = match self.0.db.create_note(self.0.env.clock.unix_millis()) {
             Ok(id) => id,
             Err(e) => {

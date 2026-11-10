@@ -3,7 +3,7 @@
 // Every control here updates the preview note and nothing else: the state lives in properties of this
 // component (bound to the Settings window, which is created fresh each time Settings opens, so the
 // defaults come back), and no callback leaves it. Rust never reads these properties except in tests.
-// Laid out like the mockup's CSS in the Paper's tilted frame `pf`: the preview card, then five rows;
+// Laid out like the mockup's CSS in the Paper's tilted frame `pf`: the preview card, then three rows;
 // `bottom` (paper coordinates) is where the last row ends.
 //
 // Only Shadows Into Light is bundled, so the other fonts in the list are labels: the preview and
@@ -11,161 +11,7 @@
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
-import { PX, PaperFrame, TapeShape, TapePalette, TextMetrics, PText, PBox, PRect, PShadow, UShadow, VTape, StripedShape, SettingRow, Switch, PillButton } from "settings-widgets.slint";
-
-/// A closed dropdown (the mockup's `.ddb`): the chosen option and a chevron, 236 by 44. With
-/// `chips`, two tape chips come before the label.
-component PickerButton inherits Rectangle {
-    in property <string> text;
-    in property <bool> open;
-    in property <bool> chips: false;
-    in property <TapeShape> chip-shape;
-    in property <color> chip-a-base;
-    in property <color> chip-a-stripe;
-    in property <color> chip-b-base;
-    in property <color> chip-b-stripe;
-    callback clicked();
-    width: 236px;
-    height: 44px;
-    border-radius: 10.8px;
-    background: hit.has-hover ? #E6E6E3 : #F0F0EE;
-    accessible-role: button;
-    accessible-label: root.text;
-    accessible-expanded: root.open;
-
-    if root.chips : StripedShape {
-        x: 12px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-a-base;
-        stripe: root.chip-a-stripe;
-        shadow: false;
-    }
-
-    if root.chips : StripedShape {
-        x: 46px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-b-base;
-        stripe: root.chip-b-stripe;
-        shadow: false;
-    }
-
-    Text {
-        x: root.chips ? 80px : 12px;
-        width: root.width - self.x - 38px;
-        height: root.height;
-        text: root.text;
-        font-family: "Shadows Into Light";
-        font-size: 21px;
-        color: #2B2F36;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    // The chevron: a 24-unit icon drawn at 16px, stroke 2.2 units.
-    Path {
-        x: root.width - 28px;
-        y: (root.height - 16px) / 2;
-        width: 16px;
-        height: 16px;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: "M 6 9 L 12 15 L 18 9";
-        stroke: #2B2F36;
-        stroke-width: 1.47px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
-    }
-
-    hit := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-/// An option of an open list (the mockup's `.ddi`, 42px tall).
-component ListItem inherits Rectangle {
-    in property <string> text;
-    in property <bool> chosen;
-    in property <bool> chips: false;
-    in property <TapeShape> chip-shape;
-    in property <color> chip-a-base;
-    in property <color> chip-a-stripe;
-    in property <color> chip-b-base;
-    in property <color> chip-b-stripe;
-    callback clicked();
-    height: 42px;
-    border-radius: 8px;
-    background: (item-hit.has-hover || root.chosen) ? #F0F0EE : transparent;
-
-    if root.chips : StripedShape {
-        x: 10px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-a-base;
-        stripe: root.chip-a-stripe;
-        shadow: false;
-    }
-
-    if root.chips : StripedShape {
-        x: 46px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-b-base;
-        stripe: root.chip-b-stripe;
-        shadow: false;
-    }
-
-    Text {
-        x: root.chips ? 82px : 10px;
-        width: root.width - self.x - 10px;
-        height: root.height;
-        text: root.text;
-        font-family: "Shadows Into Light";
-        font-size: 21px;
-        font-weight: root.chosen ? 700 : 400;
-        color: #2B2F36;
-        vertical-alignment: center;
-    }
-
-    item-hit := TouchArea {
-        mouse-cursor: pointer;
-        accessible-role: list-item;
-        accessible-label: root.text;
-        clicked => { root.clicked(); }
-    }
-}
-
-/// The open list's panel (the mockup's `.ddl`): white, 10.8px corners, a soft double shadow, 6px padding.
-component ListPanel inherits Rectangle {
-    width: 260px;
-    border-radius: 10.8px;
-    background: #FFFFFD;
-
-    // The mockup's `0 14px 24px -8px` and `0 2px 5px` shadows.
-    UShadow {
-        r: 10.8;
-        dy: 14;
-        spread: -8;
-        blur: 24;
-        alpha: 0.4;
-    }
-
-    UShadow {
-        r: 10.8;
-        dy: 2;
-        blur: 5;
-        alpha: 0.15;
-    }
-
-    Rectangle {
-        border-radius: 10.8px;
-        background: #FFFFFD;
-    }
-
-    @children
-}
+import { PX, PaperFrame, TapeShape, TapePalette, TextMetrics, PText, PBox, PRect, PShadow, VTape, SettingRow, PillButton, PickerButton, ListItem, ListPanel } from "settings-widgets.slint";
 
 export component StyleTab inherits Rectangle {
     in property <PaperFrame> pf;
@@ -176,12 +22,10 @@ export component StyleTab inherits Rectangle {
     in-out property <int> font: 0;
     in-out property <int> size: 1;
     in-out property <int> tape: 0;
-    in-out property <bool> fade: true;
-    in-out property <int> ui-size: 0;
     /// -1 none, 0 the font list, 1 the tape list.
     in-out property <int> open-list: -1;
     out property <length> preview-font-size: [19px, 24px, 30px][root.size];
-    out property <float> bottom: root.ui-row-y + ui-row.total;
+    out property <float> bottom: root.tape-row-y + tape-row.total;
 
     property <[string]> fonts: ["Shadows Into Light", "Patrick Hand", "Caveat", "Gloria Hallelujah", "Indie Flower", "Kalam"];
 
@@ -195,8 +39,6 @@ export component StyleTab inherits Rectangle {
     out property <float> font-row-y: root.rows-y;
     out property <float> size-row-y: root.rows-y + root.row-pitch;
     out property <float> tape-row-y: root.rows-y + 2.0 * root.row-pitch;
-    out property <float> fade-row-y: root.rows-y + 3.0 * root.row-pitch;
-    out property <float> ui-row-y: root.fade-row-y + fade-row.total;
     /// The lowest point either open list reaches (paper coordinates): the lists hang 48px under their
     /// button, 6px of padding around six or four 42px entries.
     out property <float> lists-bottom: max(root.font-row-y + 6.0 + 48.0 + 12.0 + 6 * 42.0, root.tape-row-y + 6.0 + 48.0 + 12.0 + 4 * 42.0);
@@ -207,8 +49,8 @@ export component StyleTab inherits Rectangle {
     height: root.pf.f.h * 1px;
 
     /// Where the control `id` is, in the Paper frame's px, for tests: 0 font button, 1 to 6 font
-    /// options, 7 to 9 text sizes, 10 tape button, 11 to 14 tape options, 15 the fade switch, 16 and
-    /// 17 the UI sizes, 20 the Text size label (a blank part of the paper).
+    /// options, 7 to 9 text sizes, 10 tape button, 11 to 14 tape options, 20 the Text size label (a
+    /// blank part of the paper).
     public pure function hit-x(id: int) -> length {
         return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
     }
@@ -218,12 +60,6 @@ export component StyleTab inherits Rectangle {
     pure function hit-a(id: int) -> float {
         if (id >= 7 && id <= 9) {
             return 484.0 - 226.4 + (id - 7 + 0.5) * 226.4 / 3.0;
-        }
-        if (id == 15) {
-            return 484.0 - 26.0;
-        }
-        if (id == 16 || id == 17) {
-            return 484.0 - 143.0 + (id - 16 + 0.5) * 143.0 / 2.0;
         }
         if (id == 20) {
             return 140.0;
@@ -249,10 +85,7 @@ export component StyleTab inherits Rectangle {
         if (id >= 11 && id <= 14) {
             return root.tape-row-y + 6.0 + 48.0 + 6.0 + (id - 11) * 42.0 + 21.0;
         }
-        if (id == 15) {
-            return root.fade-row-y + fade-row.content-h / 2.0;
-        }
-        return root.ui-row-y + 28.0;
+        return root.font-row-y + 28.0;
     }
 
     // ---- the preview card ----
@@ -330,33 +163,6 @@ export component StyleTab inherits Rectangle {
         }
     }
 
-    fade-row := SettingRow {
-        pf: root.pf;
-        dots: root.tapes[3];
-        row-y: root.fade-row-y;
-        label: "Fade text edge";
-        hint: "Softens the bottom of a long note while more text is below";
-        Switch {
-            checked: root.fade;
-            accessible-name: "Fade text edge";
-            toggled => { root.fade = !root.fade; }
-        }
-    }
-
-    ui-row := SettingRow {
-        pf: root.pf;
-        dots: root.tapes[3];
-        row-y: root.ui-row-y;
-        rule: false;
-        label: "UI size";
-        hint: root.ui-size == 0 ? "New notes open at 363 × 384" : "New notes open at 360 × 360";
-        for label[i] in ["Normal", "Small"] : PillButton {
-            text: label;
-            chosen: i == root.ui-size;
-            clicked => { root.ui-size = i; root.open-list = -1; }
-        }
-    }
-
     // An outside click closes the open list. The Font and Tape color rows come after it, so pressing
     // the other button switches lists instead.
     if root.open-list >= 0 : TouchArea {
@@ -383,6 +189,7 @@ export component StyleTab inherits Rectangle {
         pf: root.pf;
         dots: root.tapes[3];
         row-y: root.tape-row-y;
+        rule: false;
         label: "Tape color";
         PickerButton {
             text: TapePalette.names[root.tape];
