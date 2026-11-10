@@ -1179,9 +1179,9 @@ impl App {
     }
 
     /// The work area (logical px) of the monitor a button lies on; the main one if it is on none.
-    fn work_area_for(&self, button: &DropdownRect, scale: f32) -> Option<DropdownRect> {
+    fn work_area_for(&self, rect: &DropdownRect, scale: f32) -> Option<DropdownRect> {
         let areas = self.0.env.window_control.work_areas();
-        let (cx, cy) = ((button.x + button.w / 2.0) * scale, (button.y + button.h / 2.0) * scale);
+        let (cx, cy) = ((rect.x + rect.w / 2.0) * scale, (rect.y + rect.h / 2.0) * scale);
         let on = |a: &&ScreenRect| {
             cx >= a.x as f32 && cx < (a.x + a.w) as f32 && cy >= a.y as f32 && cy < (a.y + a.h) as f32
         };

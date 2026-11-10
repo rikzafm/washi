@@ -297,6 +297,40 @@ fn the_dropdown_menu_position_is_aligned_when_scaled() {
 }
 
 #[test]
+fn the_dropdown_menu_position_is_aligned_on_secondary_monitor_when_scaled() {
+    use washi::platform::ScreenRect;
+    let mut h = Harness::new();
+    h.set_work_areas(vec![
+        ScreenRect::new(0, 0, 1920, 1080),       // Top-left (primary)
+        ScreenRect::new(1920, 0, 1920, 1080),    // Top-right
+        ScreenRect::new(0, 1080, 1920, 1080),    // Bottom-left
+        ScreenRect::new(1920, 1080, 1920, 1080), // Bottom-right
+    ]);
+    h.start().unwrap();
+
+    choose_ui_size(&mut h, MEDIUM);
+    // Move note to bottom-right monitor
+    h.drag(0, (80.0, 48.0), (2400.0, 1400.0));
+    h.toggle_dropdown(0);
+    assert!(h.is_dropdown_open());
+
+    let (win_x, win_y) = h.dropdown_position().expect("dropdown position");
+    let (bx, by, _bw, bh) = h.menu_button_rect(0);
+    let note_geom = h.note_geometry(0);
+    let btn_screen_x = note_geom.x as f32 + bx;
+    let btn_screen_y = note_geom.y as f32 + by;
+
+    let metrics = washi::dropdown::DropdownMetrics::default();
+    let menu_x = win_x + metrics.shadow_margin;
+    let menu_y = win_y + metrics.shadow_margin;
+
+    assert!(menu_x >= 1920.0, "menu_x ({menu_x}) must be on the secondary monitor (>= 1920)");
+    assert!(menu_y >= 1080.0, "menu_y ({menu_y}) must be on the bottom monitor (>= 1080)");
+    assert!((menu_x - (btn_screen_x - 14.0)).abs() <= 2.0, "menu_x ({menu_x}) must align with button ({btn_screen_x} - 14.0)");
+    assert!((menu_y - (btn_screen_y + bh + metrics.gap)).abs() <= 2.0, "menu_y ({menu_y}) must align below button");
+}
+
+#[test]
 fn the_all_notes_strip_scales() {
     let mut h = started();
     choose_ui_size(&mut h, SMALL);
