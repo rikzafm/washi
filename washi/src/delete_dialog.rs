@@ -54,6 +54,8 @@ fn hwnd_of(ui: &DeleteNoteDialog) -> Option<isize> {
 pub struct DeleteDialog {
     note_id: NoteId,
     ui: DeleteNoteDialog,
+    /// The window's scale: the monitor's times the UI size.
+    scale: Rc<crate::ui_scale::WindowScale>,
 }
 
 impl DeleteDialog {
@@ -66,7 +68,16 @@ impl DeleteDialog {
         on_start_move: Rc<dyn Fn(Option<isize>)>,
     ) -> Result<Self, slint::PlatformError> {
         let ui = DeleteNoteDialog::new()?;
-        let scale = crate::ui_scale::WindowScale::attach(ui.window());
+        let scale = Rc::new(crate::ui_scale::WindowScale::attach(ui.window()));
+        {
+            // moved to a monitor with another DPI: put the UI size back on top
+            let (weak, scale) = (ui.as_weak(), scale.clone());
+            ui.on_scale_factor_changed(move || {
+                if let Some(ui) = weak.upgrade() {
+                    scale.resync(ui.window(), false);
+                }
+            });
+        }
         ui.window().set_position(slint::LogicalPosition::new(position.0, position.1));
 
         {
@@ -89,7 +100,7 @@ impl DeleteDialog {
             });
         }
 
-        let dialog = Self { note_id, ui };
+        let dialog = Self { note_id, ui, scale };
 
         {
             // Look the handle up at drag time: it does not exist until the window is shown.
@@ -102,7 +113,7 @@ impl DeleteDialog {
         }
 
         dialog.ui.show()?;
-        scale.resync(dialog.ui.window(), true);
+        dialog.scale.resync(dialog.ui.window(), true);
 
         #[cfg(target_os = "windows")]
         if let Some(owner) = owner_hwnd {

@@ -60,6 +60,8 @@ const TILT_DEG: f64 = 1.5;
 
 pub struct ImageViewer {
     ui: ImageViewerWindow,
+    /// The window's scale: the monitor's times the UI size.
+    _scale: Rc<crate::ui_scale::WindowScale>,
 }
 
 impl ImageViewer {
@@ -73,6 +75,17 @@ impl ImageViewer {
         on_event: Rc<dyn Fn(ViewerEvent)>,
     ) -> Result<ImageViewer, slint::PlatformError> {
         let ui = ImageViewerWindow::new()?;
+        // drawn at the UI size, like every window
+        let scale = Rc::new(crate::ui_scale::WindowScale::attach(ui.window()));
+        {
+            // moved to a monitor with another DPI: put the UI size back on top
+            let (weak, scale) = (ui.as_weak(), scale.clone());
+            ui.on_scale_factor_changed(move || {
+                if let Some(ui) = weak.upgrade() {
+                    scale.resync(ui.window(), false);
+                }
+            });
+        }
         // The software renderer cannot turn a picture, so it is turned here, once, by the paper's tilt.
         let shown = picture.to_rgba8().map(|buf| crate::note_images::turn(&buf, TILT_DEG));
         match shown {
@@ -95,8 +108,8 @@ impl ImageViewer {
         ui.set_info_pieces(pieces(&info, INFO_SIZE));
         ui.set_info_width(textflow::line_width(&info, INFO_SIZE) as f32);
         ui.set_app_icon(icon);
-        let scale = ui.window().scale_factor();
-        let (w, h) = window_size(size, max.map(|(mw, mh)| (mw / scale, mh / scale)));
+        let factor = scale.factor();
+        let (w, h) = window_size(size, max.map(|(mw, mh)| (mw / factor, mh / factor)));
         ui.window().set_size(slint::LogicalSize::new(w, h));
         {
             let on_event = on_event.clone();
@@ -126,7 +139,13 @@ impl ImageViewer {
             });
         }
         ui.show()?;
-        Ok(ImageViewer { ui })
+        scale.resync(ui.window(), true);
+        Ok(ImageViewer { ui, _scale: scale })
+    }
+
+    /// How many screen px one logical px covers: the monitor's scale times the UI size.
+    pub fn scale_factor(&self) -> f32 {
+        self.ui.window().scale_factor()
     }
 
     /// The native window handle, once the window exists.

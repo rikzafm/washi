@@ -1122,6 +1122,11 @@ impl App {
         })
     }
 
+    /// How many screen px one logical px of each open picture viewer covers, oldest first.
+    pub fn viewer_scale_factors(&self) -> Vec<f32> {
+        self.0.viewers.borrow().iter().map(|(_, v)| v.scale_factor()).collect()
+    }
+
     /// Dispatch a window event to the active dropdown window (for testing).
     pub fn dispatch_dropdown_event(&self, event: slint::platform::WindowEvent) {
         if let Some(d) = self.dropdown() {

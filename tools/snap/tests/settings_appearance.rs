@@ -316,6 +316,86 @@ fn the_saved_ui_size_is_applied_at_startup() {
     assert_eq!(h.window_position(0), at);
 }
 
+// ---- UI size on a monitor with another DPI: the monitor's scale times the UI size ----
+
+#[test]
+fn a_note_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dpi() {
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    let (w, hh) = h.note_screen_size(0);
+    h.move_note_to_monitor(0, 1.5);
+    assert!(close_to(h.note_drawing_scale(0), 1.5 * 0.75, 1e-4), "drawn at {}", h.note_drawing_scale(0));
+    let (mw, mh) = h.note_screen_size(0);
+    assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0), "{mw}x{mh}");
+}
+
+#[test]
+fn settings_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dpi() {
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    open_on(&mut h, tab::APPEARANCE);
+    assert_eq!(h.settings_drawing_scale(), Some(0.75));
+    let (w, hh) = h.settings_screen_size().unwrap();
+    h.move_settings_to_monitor(1.5);
+    let scale = h.settings_drawing_scale().unwrap();
+    assert!(close_to(scale, 1.5 * 0.75, 1e-4), "drawn at {scale}, want the monitor's 1.5 times Small");
+    let (mw, mh) = h.settings_screen_size().unwrap();
+    assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0),
+        "the same page at the new DPI: {mw}x{mh}, want 1.5 times {w}x{hh}");
+
+    // the page still answers where it draws its controls, and stays at the new scale
+    h.settings_appearance_click(UI_SIZE_BUTTON);
+    assert_eq!(h.settings_appearance_open_list(), 0);
+    h.settings_press_escape();
+    h.settings_click_tab(tab::GENERAL);
+    h.advance_frames(ms(600));
+    assert_eq!(h.settings_shown_tab(), tab::GENERAL);
+    let after = h.settings_drawing_scale().unwrap();
+    assert!(close_to(after, 1.5 * 0.75, 1e-4), "after a Tab switch: {after}");
+}
+
+#[test]
+fn the_delete_dialog_keeps_its_ui_size_after_moving_to_a_monitor_with_another_dpi() {
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    h.press_ctrl(0, 'd');
+    let ((w, hh), scale) = h.delete_dialog_screen().unwrap();
+    assert_eq!(scale, 0.75);
+    h.move_delete_dialog_to_monitor(1.5);
+    let ((mw, mh), scale) = h.delete_dialog_screen().unwrap();
+    assert!(close_to(scale, 1.5 * 0.75, 1e-4), "drawn at {scale}");
+    assert!(close_to(mw as f32, w as f32 * 1.5, 2.0) && close_to(mh as f32, hh as f32 * 1.5, 2.0), "{mw}x{mh}");
+}
+
+#[test]
+fn the_picture_viewer_opens_at_the_ui_size() {
+    let red = [200u8, 30, 60];
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("red.png");
+    let picture = washi::images::Rgba { width: 300, height: 150, data: (0..300 * 150).flat_map(|_| [red[0], red[1], red[2], 255]).collect() };
+    std::fs::write(&path, washi::images::encode_png(&picture).unwrap()).unwrap();
+    let mut h = started();
+    choose_ui_size(&mut h, SMALL);
+    h.choose_picture(&path);
+    h.click_image_button(0);
+    h.wait_for_images();
+
+    // double click the middle of the picture (found on the render, screen px)
+    let (w, _, px) = h.render(0);
+    let spots: Vec<(u32, u32)> = px.iter().enumerate()
+        .filter(|(_, p)| (p.r as i32 - 200).abs() <= 12 && (p.g as i32 - 30).abs() <= 12 && (p.b as i32 - 60).abs() <= 12)
+        .map(|(i, _)| (i as u32 % w, i as u32 / w))
+        .collect();
+    assert!(!spots.is_empty(), "the picture is drawn");
+    let n = spots.len() as f32;
+    let scale = h.note_drawing_scale(0);
+    let x = spots.iter().map(|s| s.0 as f32).sum::<f32>() / n / scale;
+    let y = spots.iter().map(|s| s.1 as f32).sum::<f32>() / n / scale;
+    h.click(0, x, y);
+    h.click(0, x, y);
+    assert_eq!(h.viewer_drawing_scales(), [0.75], "the viewer is drawn at Small too");
+}
+
 // ---- Sidebar: Height and Anchor ----
 
 /// Whether two window-px positions agree to within the anti-aliased edge of a tilted panel.

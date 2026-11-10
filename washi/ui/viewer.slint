@@ -60,6 +60,11 @@ export struct CaptionPiece {
 }
 
 export component ImageViewerWindow inherits Window {
+    /// The window's scale factor (screen px per logical px). The platform resets it when the window
+    /// moves to a monitor with another DPI: Rust then puts the UI size back on top.
+    out property <float> scale-factor: 1px / 1phx;
+    callback scale-factor-changed();
+    changed scale-factor => { root.scale-factor-changed(); }
     in property <image> picture;
     in property <int> picture-w;
     in property <int> picture-h;

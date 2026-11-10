@@ -290,6 +290,11 @@ export component SettingsWindow inherits Window {
     /// The height the shown tab needs changed while the page was at rest (the preview note grew or
     /// shrank): Rust resizes the Paper to `paper-height-for(selected-tab)`.
     callback paper-height-changed();
+    /// The window's scale factor (screen px per logical px). The platform resets it when the window
+    /// moves to a monitor with another DPI: Rust then puts the UI size back on top.
+    out property <float> scale-factor: 1px / 1phx;
+    callback scale-factor-changed();
+    changed scale-factor => { root.scale-factor-changed(); }
 
     // General tab (see settings-general.slint)
     in property <bool> start-with-windows;
