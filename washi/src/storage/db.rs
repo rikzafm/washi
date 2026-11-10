@@ -227,6 +227,30 @@ impl Db {
         self.set_meta("ui_scale", &format!("{scale:.2}"))
     }
 
+    /// Whether one Height and Anchor drive both Sidebars (Settings › Appearance › Sidebar's "Same
+    /// for both sidebars"). On when never set.
+    pub fn sidebar_layout_shared(&self) -> bool {
+        self.meta("sidebar_layout_shared").map_or(true, |v| v.trim() != "0")
+    }
+
+    pub fn set_sidebar_layout_shared(&self, shared: bool) -> Result<(), DbError> {
+        self.set_meta("sidebar_layout_shared", if shared { "1" } else { "0" })
+    }
+
+    /// A Sidebar's Height and Anchor. Both Sidebars' values are stored even while they are shared.
+    /// Each falls back to its default (Match note, Middle) when never set or not one of the choices.
+    pub fn sidebar_layout(&self, sidebar: Sidebar) -> SidebarLayout {
+        let d = SidebarLayout::default();
+        let height = self.meta(&format!("sidebar_height.{}", sidebar.key())).and_then(|v| SidebarHeight::parse(&v));
+        let anchor = self.meta(&format!("sidebar_anchor.{}", sidebar.key())).and_then(|v| SidebarAnchor::parse(&v));
+        SidebarLayout { height: height.unwrap_or(d.height), anchor: anchor.unwrap_or(d.anchor) }
+    }
+
+    pub fn set_sidebar_layout(&self, sidebar: Sidebar, layout: SidebarLayout) -> Result<(), DbError> {
+        self.set_meta(&format!("sidebar_height.{}", sidebar.key()), layout.height.key())?;
+        self.set_meta(&format!("sidebar_anchor.{}", sidebar.key()), layout.anchor.key())
+    }
+
     /// Apply the new-note defaults to a note just created and return whether it starts Always on
     /// top. The preference write is best effort: a failure is logged and never stops a note opening.
     pub fn apply_new_note_defaults(&self, id: NoteId) -> bool {
@@ -390,6 +414,76 @@ pub struct AllNoteRow {
 /// The UI size choices (Settings › Appearance: Small, Medium, Large), as the scale each one saves.
 pub const UI_SCALES: [f32; 3] = [0.75, 0.80, 1.00];
 
+/// The two Sidebars whose Height and Anchor Settings › Appearance sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sidebar {
+    /// The Settings page's Sidebar.
+    Settings,
+    /// The All notes Sidebar.
+    Notes,
+}
+
+impl Sidebar {
+    fn key(self) -> &'static str {
+        match self {
+            Sidebar::Settings => "settings",
+            Sidebar::Notes => "notes",
+        }
+    }
+}
+
+/// How tall a Sidebar's panel is: as tall as its Paper, or as its content (never taller than the
+/// Paper). In the order the Appearance Tab lists them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarHeight {
+    #[default]
+    MatchNote,
+    FitContent,
+}
+
+/// Where a Fit-content panel sits against its Paper. In the order the Appearance Tab lists them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarAnchor {
+    Top,
+    #[default]
+    Middle,
+    Bottom,
+}
+
+impl SidebarHeight {
+    pub const ALL: [SidebarHeight; 2] = [SidebarHeight::MatchNote, SidebarHeight::FitContent];
+    fn key(self) -> &'static str {
+        match self {
+            SidebarHeight::MatchNote => "match",
+            SidebarHeight::FitContent => "fit",
+        }
+    }
+    fn parse(v: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|h| h.key() == v.trim())
+    }
+}
+
+impl SidebarAnchor {
+    pub const ALL: [SidebarAnchor; 3] = [SidebarAnchor::Top, SidebarAnchor::Middle, SidebarAnchor::Bottom];
+    fn key(self) -> &'static str {
+        match self {
+            SidebarAnchor::Top => "top",
+            SidebarAnchor::Middle => "middle",
+            SidebarAnchor::Bottom => "bottom",
+        }
+    }
+    fn parse(v: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.key() == v.trim())
+    }
+}
+
+/// A Sidebar's Height and Anchor (the defaults are today's look: Match note, Middle).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SidebarLayout {
+    pub height: SidebarHeight,
+    pub anchor: SidebarAnchor,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentNote {
     pub id: NoteId,
@@ -452,6 +546,24 @@ mod tests {
             db.set_meta("ui_scale", junk).unwrap();
             assert_eq!(db.ui_scale(), 1.0, "{junk:?} reads as Large");
         }
+    }
+
+    #[test]
+    fn sidebar_layout_is_shared_match_note_middle_until_set_and_falls_back_on_nonsense() {
+        let (dir, db) = test_db();
+        assert!(db.sidebar_layout_shared());
+        assert_eq!(db.sidebar_layout(Sidebar::Notes), SidebarLayout::default());
+        let fit_top = SidebarLayout { height: SidebarHeight::FitContent, anchor: SidebarAnchor::Top };
+        db.set_sidebar_layout(Sidebar::Notes, fit_top).unwrap();
+        db.set_sidebar_layout_shared(false).unwrap();
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert!(!db.sidebar_layout_shared(), "kept across a restart");
+        assert_eq!(db.sidebar_layout(Sidebar::Notes), fit_top);
+        assert_eq!(db.sidebar_layout(Sidebar::Settings), SidebarLayout::default(), "the other Sidebar's own values");
+        db.set_meta("sidebar_height.notes", "tall").unwrap();
+        db.set_meta("sidebar_anchor.notes", "").unwrap();
+        assert_eq!(db.sidebar_layout(Sidebar::Notes), SidebarLayout::default());
     }
 
     #[test]

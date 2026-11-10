@@ -51,6 +51,10 @@ export component NoteWindow inherits Window {
     in-out property <[AllNoteItem]> all-notes-open-list: [];
     in-out property <[AllNoteItem]> all-notes-closed-list: [];
     in-out property <bool> all-notes-confirming-delete: false;
+    /// The Notes Sidebar's Height (0 Match note, 1 Fit content) and Anchor (0 Top, 1 Middle,
+    /// 2 Bottom), from Settings › Appearance.
+    in property <int> all-notes-height-mode: 0;
+    in property <int> all-notes-anchor: 1;
 
     callback all-notes-close-view();
     callback all-notes-select-note(int);
@@ -288,6 +292,8 @@ export component NoteWindow inherits Window {
         closed-count: root.all-notes-closed-count;
         open-notes: root.all-notes-open-list;
         closed-notes: root.all-notes-closed-list;
+        height-mode: root.all-notes-height-mode;
+        anchor: root.all-notes-anchor;
         select-note(id) => {
             root.all-notes-confirming-delete = false;
             root.all-notes-select-note(id);

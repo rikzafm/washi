@@ -159,3 +159,230 @@ fn the_fresh_note_after_a_restart_with_nothing_open_uses_the_ui_size() {
     assert_eq!(h.open_note_count(), 1);
     assert_eq!(h.note_size(0), new_note_window(0.75));
 }
+
+// ---- Sidebar: Height and Anchor ----
+
+/// Whether two window-px positions agree to within the anti-aliased edge of a tilted panel.
+fn near(a: f32, b: f32) -> bool {
+    (a - b).abs() <= 2.0
+}
+
+#[test]
+fn match_note_makes_the_settings_sidebar_as_tall_as_its_paper() {
+    let mut h = started();
+    // Shortcuts is taller than the Paper's 600 minimum.
+    open_on(&mut h, tab::SHORTCUTS);
+    let (top, bottom) = h.settings_sidebar_span();
+    let (paper_top, paper_bottom) = h.settings_paper_span();
+    assert!(paper_bottom - paper_top > 700.0, "the Paper is {paper_top}..{paper_bottom}");
+    assert!(near(top, paper_top) && near(bottom, paper_bottom), "panel {top}..{bottom}, Paper {paper_top}..{paper_bottom}");
+}
+
+// Sidebar group control ids, as `hit-x` in appearance-tab.slint defines them.
+const SAME_SWITCH: i32 = 4;
+/// The Height button and its options, then the Anchor button and its options, of the Settings
+/// sidebar (or both while shared) and of the Notes sidebar.
+const HEIGHT: [i32; 2] = [5, 12];
+const ANCHOR: [i32; 2] = [8, 15];
+const MATCH_NOTE: i32 = 1;
+const FIT_CONTENT: i32 = 2;
+const TOP: i32 = 1;
+const MIDDLE: i32 = 2;
+const BOTTOM: i32 = 3;
+
+/// Pick option `n` (1-based) of the Height or Anchor dropdown `button` on the open Appearance Tab.
+fn pick(h: &mut Harness, button: i32, n: i32) {
+    h.settings_appearance_click(button);
+    h.settings_appearance_click(button + n);
+}
+
+/// The Settings sidebar's Fit-content panel: the header and five Tabs (the last one ends 337 down)
+/// and the Paper's 44px bottom padding.
+const SETTINGS_FIT_H: f32 = 381.0;
+/// The All notes Fit-content panel with `rows` notes listed: the 104 header, the two 30px labels and
+/// 14 between the groups, 54 a row, then the button (14 under the last row, 44 tall, 16 of padding).
+fn notes_fit_h(rows: usize) -> f32 {
+    104.0 + 30.0 + 14.0 + 30.0 + 54.0 * rows as f32 + 14.0 + 44.0 + 16.0
+}
+
+/// All notes open from note 0 and Settings from note 1 (a second note), both settled, Settings on
+/// the Appearance Tab.
+fn both_sidebars() -> Harness {
+    let mut h = started();
+    // A tall note, so a Fit-content All notes panel leaves room above and below it.
+    h.resize_note(0, 447, 700);
+    new_note(&mut h);
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    h.advance_frames(ms(600));
+    assert!(h.is_all_notes_open());
+    h.toggle_dropdown(1);
+    h.invoke_dropdown_settings();
+    h.advance_frames(ms(600));
+    h.settings_click_tab(tab::APPEARANCE);
+    h.advance_frames(ms(600));
+    assert!(h.is_settings_open());
+    h
+}
+
+/// Where a panel sits against its Paper: its height and its top's and bottom's offsets from the
+/// Paper's top and bottom.
+fn against((top, bottom): (f32, f32), (paper_top, paper_bottom): (f32, f32)) -> (f32, f32, f32) {
+    (bottom - top, top - paper_top, paper_bottom - bottom)
+}
+
+fn settings_place(h: &Harness) -> (f32, f32, f32) {
+    against(h.settings_sidebar_span(), h.settings_paper_span())
+}
+
+fn notes_place(h: &Harness) -> (f32, f32, f32) {
+    against(h.all_notes_sidebar_span(), h.all_notes_paper_span())
+}
+
+#[test]
+fn match_note_is_the_default_and_makes_both_sidebars_as_tall_as_their_paper() {
+    let h = both_sidebars();
+    for (name, (_, above, below)) in [("Settings", settings_place(&h)), ("Notes", notes_place(&h))] {
+        assert!(near(above, 0.0) && near(below, 0.0), "{name}: {above} above and {below} below the panel");
+    }
+}
+
+#[test]
+fn fit_content_makes_the_settings_sidebar_header_and_tabs_tall_and_centres_it() {
+    let mut h = both_sidebars();
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    let (height, above, below) = settings_place(&h);
+    assert!(near(height, SETTINGS_FIT_H), "panel {height} tall");
+    assert!(near(above, below), "Middle: {above} above, {below} below");
+}
+
+#[test]
+fn fit_content_makes_the_all_notes_sidebar_grow_with_its_rows_up_to_its_paper_then_scroll() {
+    let mut h = both_sidebars();
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    // Two notes are listed.
+    let (height, above, below) = notes_place(&h);
+    assert!(near(height, notes_fit_h(2)), "panel {height} tall, wanted {}", notes_fit_h(2));
+    assert!(near(above, below), "Middle: {above} above, {below} below");
+
+    // More rows than the Paper holds: the panel stops at the Paper and the list scrolls.
+    for _ in 0..8 {
+        h.invoke_all_notes_new_note();
+    }
+    let (height, above, below) = notes_place(&h);
+    assert!(near(above, 0.0) && near(below, 0.0), "capped at the Paper: {height} tall, {above} above, {below} below");
+    let before = h.render_all_notes().unwrap().2;
+    h.scroll_all_notes(100.0, 250.0, -60.0);
+    assert!(h.render_all_notes().unwrap().2 != before, "the list scrolled");
+}
+
+#[test]
+fn the_anchor_puts_a_fit_content_panel_at_the_papers_top_middle_or_bottom() {
+    let mut h = both_sidebars();
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    for (anchor, name) in [(TOP, "Top"), (MIDDLE, "Middle"), (BOTTOM, "Bottom")] {
+        pick(&mut h, ANCHOR[0], anchor);
+        for (sidebar, (_, above, below)) in [("Settings", settings_place(&h)), ("Notes", notes_place(&h))] {
+            let ok = match anchor {
+                TOP => near(above, 0.0) && below > 100.0,
+                BOTTOM => near(below, 0.0) && above > 100.0,
+                _ => near(above, below) && above > 50.0,
+            };
+            assert!(ok, "{name}, {sidebar}: {above} above, {below} below the panel");
+        }
+    }
+}
+
+#[test]
+fn the_anchor_is_disabled_while_the_height_is_match_note() {
+    let mut h = both_sidebars();
+    h.settings_appearance_click(ANCHOR[0]);
+    assert_eq!(h.settings_appearance_open_list(), -1, "Match note: the Anchor list does not open");
+    let before = settings_place(&h);
+
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    h.settings_appearance_click(ANCHOR[0]);
+    assert_eq!(h.settings_appearance_open_list(), 2, "Fit content: it opens");
+    h.settings_appearance_click(ANCHOR[0] + TOP);
+
+    // Back to Match note: the Top anchor no longer moves the panel.
+    pick(&mut h, HEIGHT[0], MATCH_NOTE);
+    assert_eq!(settings_place(&h), before);
+}
+
+#[test]
+fn turning_same_for_both_off_lets_each_sidebar_follow_its_own_values_from_the_shared_ones() {
+    let mut h = both_sidebars();
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    pick(&mut h, ANCHOR[0], TOP);
+
+    h.settings_appearance_click(SAME_SWITCH);
+    // Nothing moved: both start from the shared values.
+    let (_, s_above, _) = settings_place(&h);
+    let (_, n_above, n_below) = notes_place(&h);
+    assert!(near(s_above, 0.0) && near(n_above, 0.0) && n_below > 50.0, "both still Fit content at the Top");
+
+    // The Notes sidebar's own controls change only it.
+    pick(&mut h, ANCHOR[1], BOTTOM);
+    let (_, n_above, n_below) = notes_place(&h);
+    assert!(near(n_below, 0.0) && n_above > 50.0, "Notes at the Bottom: {n_above} above, {n_below} below");
+    assert!(near(settings_place(&h).1, 0.0), "Settings still at the Top");
+    pick(&mut h, HEIGHT[1], MATCH_NOTE);
+    let (_, n_above, n_below) = notes_place(&h);
+    assert!(near(n_above, 0.0) && near(n_below, 0.0), "Notes as tall as its Paper");
+    let (s_h, ..) = settings_place(&h);
+    assert!(near(s_h, SETTINGS_FIT_H), "Settings still Fit content: {s_h}");
+
+    // The Settings sidebar's controls change only it.
+    pick(&mut h, ANCHOR[0], BOTTOM);
+    assert!(near(settings_place(&h).2, 0.0), "Settings at the Bottom");
+    let (_, n_above, n_below) = notes_place(&h);
+    assert!(near(n_above, 0.0) && near(n_below, 0.0), "Notes still Match note");
+}
+
+#[test]
+fn turning_same_for_both_back_on_gives_both_sidebars_the_settings_sidebars_values() {
+    let mut h = both_sidebars();
+    h.settings_appearance_click(SAME_SWITCH);
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    pick(&mut h, ANCHOR[0], BOTTOM);
+    // The Notes sidebar stays Match note.
+    let (_, n_above, _) = notes_place(&h);
+    assert!(near(n_above, 0.0));
+
+    h.settings_appearance_click(SAME_SWITCH);
+    let (n_h, n_above, n_below) = notes_place(&h);
+    assert!(near(n_h, notes_fit_h(2)) && near(n_below, 0.0) && n_above > 50.0, "Notes took Fit content, Bottom");
+
+    // One value drives both again.
+    pick(&mut h, ANCHOR[0], TOP);
+    assert!(near(settings_place(&h).1, 0.0) && near(notes_place(&h).1, 0.0), "both at the Top");
+}
+
+#[test]
+fn the_sidebar_layout_survives_a_restart() {
+    let mut h = both_sidebars();
+    h.settings_appearance_click(SAME_SWITCH);
+    pick(&mut h, HEIGHT[0], FIT_CONTENT);
+    pick(&mut h, ANCHOR[0], BOTTOM);
+    pick(&mut h, HEIGHT[1], FIT_CONTENT);
+    pick(&mut h, ANCHOR[1], TOP);
+    close_settings(&mut h);
+    h.press_all_notes_escape();
+    h.advance_frames(ms(600));
+    assert!(!h.is_all_notes_open());
+
+    h.restart().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_all_notes();
+    h.advance_frames(ms(600));
+    let (n_h, n_above, n_below) = notes_place(&h);
+    assert!(near(n_above, 0.0) && n_below > 50.0 && n_h < 400.0, "Notes: Fit content at the Top ({n_h}, {n_above}, {n_below})");
+
+    h.toggle_dropdown(1);
+    h.invoke_dropdown_settings();
+    h.advance_frames(ms(600));
+    let (s_h, s_above, s_below) = settings_place(&h);
+    assert!(near(s_h, SETTINGS_FIT_H) && near(s_below, 0.0) && s_above > 50.0, "Settings: Fit content at the Bottom");
+}

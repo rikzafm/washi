@@ -110,11 +110,12 @@ fn either_tape_drags_the_settings_window() {
 fn the_sidebars_tabs_and_close_are_clicked_where_the_panel_puts_them() {
     let mut h = Harness::new();
     open_at_rest(&mut h);
-    // The panel's top-left corner in the window: the 600-tall panel is centred on the page.
+    // The panel's top-left corner in the window: by default (Match note) the panel is as tall as
+    // the Paper, so its top is the Paper's, a margin down the page.
     let panel = |h: &Harness| {
-        let (x, y, _, hh) = window_at(h);
+        let (x, y, _, _) = window_at(h);
         let (wx, wy, _, _) = h.settings_native_window_geometry().unwrap();
-        ((x - wx) as f32, (y - wy) as f32 + hh as f32 / 2.0 - 300.0)
+        ((x - wx) as f32, (y - wy) as f32 + MARGIN as f32)
     };
     // The third Tab is 189..237 down the panel, 12..258 across.
     let (px, top) = panel(&h);

@@ -435,14 +435,18 @@ export component PickerButton inherits Rectangle {
     in property <color> chip-a-stripe;
     in property <color> chip-b-base;
     in property <color> chip-b-stripe;
+    /// Greyed out and deaf to clicks when false.
+    in property <bool> enabled: true;
     callback clicked();
     width: 236px;
     height: 44px;
     border-radius: 10.8px;
     background: hit.has-hover ? #E6E6E3 : #F0F0EE;
+    opacity: root.enabled ? 1.0 : 0.45;
     accessible-role: button;
     accessible-label: root.text;
     accessible-expanded: root.open;
+    accessible-enabled: root.enabled;
 
     if root.chips : StripedShape {
         x: 12px;
@@ -490,7 +494,8 @@ export component PickerButton inherits Rectangle {
     }
 
     hit := TouchArea {
-        mouse-cursor: pointer;
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.clicked(); }
     }
 }

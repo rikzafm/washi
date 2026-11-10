@@ -11,4 +11,20 @@ export global SidebarPanel {
     out property <float> radius: 22.0;
     out property <angle> tilt: -1.0deg;
     out property <color> fill: #D6DBE2;
+
+    // The Sidebar layout rule (Settings › Appearance › Sidebar), one for both Sidebars.
+    // Height mode: 0 Match note, 1 Fit content. Anchor: 0 Top, 1 Middle, 2 Bottom.
+
+    /// The panel's height: the Paper's (Match note), or its content's but never taller than the
+    /// Paper (Fit content).
+    public pure function panel-h(paper-h: float, content-h: float, height-mode: int) -> float {
+        return height-mode == 1 ? min(content-h, paper-h) : paper-h;
+    }
+    /// The panel's top edge, given the Paper's top and height: against the Paper's top, centred on
+    /// it, or against its bottom. (In Match note every anchor gives the Paper's top.)
+    public pure function panel-top(paper-top: float, paper-h: float, panel-h: float, anchor: int) -> float {
+        return anchor == 0 ? paper-top
+            : anchor == 2 ? paper-top + paper-h - panel-h
+            : paper-top + (paper-h - panel-h) / 2.0;
+    }
 }

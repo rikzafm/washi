@@ -559,6 +559,14 @@ impl App {
                     }
                 }
             }),
+            sidebar_layout_changed: Rc::new({
+                let app = app.clone();
+                move || {
+                    if let Some(a) = app() {
+                        a.apply_notes_sidebar_layout();
+                    }
+                }
+            }),
             work_areas: Rc::new({
                 let app = app.clone();
                 move || app().map(|a| a.0.env.window_control.work_areas()).unwrap_or_default()
@@ -906,9 +914,21 @@ impl App {
         };
         let hooks = crate::all_notes::Hooks { park, make_editor, wire, desktop_visible };
         match AllNotesView::open(initial_selected_id, host, &rows, now_ms, &self.0.env.window_control.work_areas(), hooks) {
-            Ok(view) => *self.0.all_notes.borrow_mut() = Some(Rc::new(view)),
+            Ok(view) => {
+                *self.0.all_notes.borrow_mut() = Some(Rc::new(view));
+                self.apply_notes_sidebar_layout();
+            }
             Err(e) => eprintln!("washi: could not open All Notes: {e}"),
         }
+    }
+
+    /// Give the open All notes Sidebar the Height and Anchor Settings › Appearance stores for it.
+    fn apply_notes_sidebar_layout(&self) {
+        let Some(v) = self.all_notes() else { return };
+        let layout = self.0.db.sidebar_layout(crate::storage::db::Sidebar::Notes);
+        let ui = v.ui();
+        ui.set_all_notes_height_mode(crate::settings::appearance::height_index(layout.height));
+        ui.set_all_notes_anchor(crate::settings::appearance::anchor_index(layout.anchor));
     }
 
     /// All Notes stopped standing in for note `id`: show its desktop window again, without the focus
