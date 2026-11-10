@@ -19,6 +19,7 @@ desktop.ini
 *.db-shm
 snap-out/
 out/
+.worktrees/
 
 # AI agent files and tooling
 .agents/
