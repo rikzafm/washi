@@ -30,6 +30,10 @@ export component ScrollBar inherits Rectangle {
     in property <length> content;
     in-out property <length> offset;
     in property <bool> scrolling: false;
+    /// Where the track starts below the paper's top edge and ends above its bottom edge (a note's
+    /// ends above its toolbar band).
+    in property <length> top-gap: ScrollMetrics.bar-top;
+    in property <length> bottom-gap: ToolbarMetrics.band-height + Theme.text-bottom-gap;
     out property <bool> has-hover: hit.has-hover;
     out property <bool> dragging: false;
     callback pressed();
@@ -43,8 +47,8 @@ export component ScrollBar inherits Rectangle {
     property <length> r: ScrollMetrics.bar-width / 2;
     // Paper-frame coordinates (from the paper's center, along its own axes).
     property <length> lx: root.paper-w / 2 - ScrollMetrics.bar-edge - root.r;
-    property <length> track-top: -root.paper-h / 2 + ScrollMetrics.bar-top + ScrollMetrics.bar-pad;
-    property <length> track-bottom: root.paper-h / 2 - ToolbarMetrics.band-height - Theme.text-bottom-gap - ScrollMetrics.bar-pad;
+    property <length> track-top: -root.paper-h / 2 + root.top-gap + ScrollMetrics.bar-pad;
+    property <length> track-bottom: root.paper-h / 2 - root.bottom-gap - ScrollMetrics.bar-pad;
     property <length> track: max(0px, root.track-bottom - root.track-top);
     property <length> thumb: root.content > 0px ? min(root.track, max(ScrollMetrics.min-thumb, root.track * root.view / root.content)) : 0px;
     property <length> travel: max(0px, root.track - root.thumb);

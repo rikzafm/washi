@@ -11,6 +11,7 @@ import { ShortcutRow, ShortcutsPage, PrivacyPage } from "settings-pages.slint";
 import { GeneralTab } from "settings-general.slint";
 import { StyleTab } from "style-tab.slint";
 import { AppearanceTab } from "appearance-tab.slint";
+import { ScrollBar } from "scroll.slint";
 import { PX, PaperFrame, TapeShape, TapePalette, PText, PRect, PShadow, VTape } from "settings-widgets.slint";
 export { TapeShape }
 
@@ -24,6 +25,8 @@ export global SettingsMetrics {
     /// The Paper's padding is 38 / 36 / 44 and the title is a 52.8px line; blocks start 18px under it.
     out property <length> pad-bottom: 44px;
     out property <float> content-top: 38.0 + 52.8 + 18.0;
+    /// Where the title's line ends: a Tab's content scrolls under it, never over it.
+    out property <float> title-bottom: 38.0 + 52.8;
 }
 
 /// One tab label in the Sidebar (the mockup's `.tab`: 48px tall, 24px text, 16px left padding),
@@ -297,11 +300,16 @@ export component SettingsWindow inherits Window {
     in-out property <int> appearance-open-list <=> appearance.open-list;
     out property <length> appearance-lists-bottom: appearance.lists-bottom * 1px;
     public pure function appearance-hit-x(id: int) -> length {
-        return root.page-x + root.strip + appearance.hit-x(id);
+        return root.page-x + root.strip + viewport.x + appearance.hit-x(id);
     }
     public pure function appearance-hit-y(id: int) -> length {
-        return root.page-y + appearance.hit-y(id);
+        return root.page-y + viewport.y + appearance.hit-y(id);
     }
+    /// The Settings height option (Appearance): 0 Tallest tab, 1 Screen limit. Rust owns it.
+    in property <int> settings-height: 0;
+    callback set-settings-height(int);
+    out property <string> settings-height-label: appearance.page-height-label;
+    out property <string> settings-height-hint: appearance.page-height-hint;
     // Font & Style choices: UI only. They live here, so they reset whenever Settings opens, and
     // nothing reads them (see style-tab.slint).
     in-out property <int> style-font <=> style.font;
@@ -315,16 +323,27 @@ export component SettingsWindow inherits Window {
     /// 1 the preview's, 2 a chip, 3 the dotted rule.
     in property <[TapeShape]> preview-tapes;
     public pure function style-hit-x(id: int) -> length {
-        return root.page-x + root.strip + style.hit-x(id);
+        return root.page-x + root.strip + viewport.x + style.hit-x(id);
     }
     public pure function style-hit-y(id: int) -> length {
-        return root.page-y + style.hit-y(id);
+        return root.page-y + viewport.y + style.hit-y(id);
     }
 
     /// Where each tab's content ends, measured from the laid-out rows (paper coordinates), and the
     /// Paper height that gives (the mockup's `min-height: 600` and 44px bottom padding). Every tab is
     /// laid out all the time (only the shown one is drawn), so a tab's height is known before it shows.
-    out property <[float]> content-bottoms: [general.bottom, appearance.bottom, style.bottom, shortcuts.bottom, privacy.bottom];
+    out property <[float]> content-bottoms: [
+        general.bottom + root.test-extra(0),
+        appearance.bottom + root.test-extra(1),
+        style.bottom + root.test-extra(2),
+        shortcuts.bottom + root.test-extra(3),
+        privacy.bottom + root.test-extra(4)];
+    /// For tests: Tab `test-tall-tab` lays out `test-tall-extra` px taller than its rows.
+    in property <int> test-tall-tab: -1;
+    in property <float> test-tall-extra: 0;
+    pure function test-extra(tab: int) -> float {
+        return tab == root.test-tall-tab ? root.test-tall-extra : 0.0;
+    }
     /// The lowest point each tab's dropdown lists can reach (paper coordinates; 0 for a tab without
     /// one). An open list may hang into the Paper's bottom padding and margin, but must end at least
     /// 14px inside the window (16 here, a pixel of slack each way for rounding).
@@ -335,8 +354,53 @@ export component SettingsWindow inherits Window {
             root.content-bottoms[tab] * 1px + SettingsMetrics.pad-bottom,
             root.list-bottoms[tab] * 1px + 16px - PaperTheme.margin);
     }
-    /// The Paper height the Sidebar's lit tab needs.
-    out property <length> wanted-height: root.paper-height-for(root.selected-tab);
+    /// The tallest Paper the work area allows (its height less the window margins); Rust sets it
+    /// from the screen the page is on.
+    in property <length> screen-limit: 100000px;
+    /// The tallest built-in Tab's natural Paper. Appearance is left out: its rows come and go with
+    /// its switches, and Screen limit is what lets it grow past the others.
+    out property <length> tallest-tab: max(root.paper-height-for(0), root.paper-height-for(2), root.paper-height-for(3), root.paper-height-for(4));
+    /// The Paper never grows past this (Settings height): the tallest Tab or the screen, whichever
+    /// is lower, or the screen alone; never under the 600 minimum.
+    out property <length> paper-cap: max(
+        SettingsMetrics.paper-min-h,
+        root.settings-height == 0 ? min(root.tallest-tab, root.screen-limit) : root.screen-limit);
+    /// The Paper height a tab gets: its natural height, stopped at the cap (the rest scrolls).
+    public pure function fitted-height-for(tab: int) -> length {
+        return min(root.paper-height-for(tab), root.paper-cap);
+    }
+    /// The Paper height the Sidebar's lit tab gets.
+    out property <length> wanted-height: root.fitted-height-for(root.selected-tab);
+
+    // ---- scrolling the shown Tab past the cap ----
+    /// How far the shown Tab's content is scrolled up (Rust puts it back to 0 on a Tab switch).
+    in-out property <length> content-scroll: 0px;
+    in-out property <bool> content-scrolling: false;
+    /// The wheel or the bar moved the content: Rust hides the bar again a moment after the last one.
+    callback scroll-activity();
+    /// The shown Tab is taller than the Paper drawn now: its content is clipped and scrolls.
+    property <bool> overflowing: root.paper-height-for(root.shown-tab) > root.paper-h + 0.5px;
+    /// Scrolled to the end, the last row keeps its bottom padding and an open list ends 16px inside
+    /// the Paper (it cannot hang into the margin past the clip).
+    property <length> scroll-height: max(
+        root.content-bottoms[root.shown-tab] * 1px + SettingsMetrics.pad-bottom,
+        root.list-bottoms[root.shown-tab] * 1px + 16px);
+    out property <length> max-content-scroll: root.overflowing ? max(0px, root.scroll-height - root.paper-h) : 0px;
+    changed max-content-scroll => {
+        if (root.content-scroll > root.max-content-scroll) { root.content-scroll = root.max-content-scroll; }
+    }
+    changed content-scroll => {
+        if (root.max-content-scroll > 0px && !scrollbar.dragging) {
+            root.content-scrolling = true;
+            root.scroll-activity();
+        }
+    }
+    /// The band the Tab content shows in, window px (the whole window while nothing overflows).
+    out property <length> view-top: root.page-y + viewport.y;
+    out property <length> view-bottom: root.page-y + viewport.y + viewport.height;
+    out property <float> scrollbar-opacity: scrollbar.bar-opacity;
+    out property <length> scrollbar-thumb-x: root.page-x + root.strip + scrollbar.thumb-x;
+    out property <length> scrollbar-thumb-y: root.page-y + scrollbar.thumb-y;
     changed wanted-height => { root.paper-height-changed(); }
 
     property <length> margin: PaperTheme.margin;
@@ -355,6 +419,24 @@ export component SettingsWindow inherits Window {
         },
         pw: root.paper-w / 1px,
         ph: root.paper-h / 1px,
+    };
+    // The level band the Tab content shows through while it overflows: from under the title to the
+    // Paper's bottom edge, taking the tilted edges' inner ends so nothing shows past either.
+    property <length> clip-top: max(PX.y(root.pf, 0.0, SettingsMetrics.title-bottom), PX.y(root.pf, root.pf.pw, SettingsMetrics.title-bottom));
+    property <length> clip-bottom: min(PX.y(root.pf, 0.0, root.pf.ph), PX.y(root.pf, root.pf.pw, root.pf.ph));
+    // The Paper's frame in the viewport's coordinates, moved up the Paper's own vertical by the scroll.
+    property <float> scroll-v: root.content-scroll / 1px;
+    property <PaperFrame> content-pf: {
+        f: {
+            w: root.pf.f.w,
+            h: viewport.height / 1px,
+            cx: root.pf.f.cx + root.scroll-v * root.pf.f.sn,
+            cy: root.pf.f.cy - viewport.y / 1px - root.scroll-v * root.pf.f.cs,
+            cs: root.pf.f.cs,
+            sn: root.pf.f.sn,
+        },
+        pw: root.pf.pw,
+        ph: root.pf.ph,
     };
 
     forward-focus: fs;
@@ -442,76 +524,115 @@ export component SettingsWindow inherits Window {
             line-height-factor: 1.1 / 1.6064;
         }
 
-        general := GeneralTab {
-            visible: root.shown-tab == 0;
-            opacity: root.content-opacity;
-            pf: root.pf;
-            dots: root.preview-tapes[3];
-            top: SettingsMetrics.content-top + root.content-dy;
-            start-with-windows: root.start-with-windows;
-            new-notes-on-top: root.new-notes-on-top;
-            park-beside: root.park-beside;
-            set-park-beside(b) => { root.set-park-beside(b); }
-            install-dir: root.install-dir;
-            data-dir: root.data-dir;
-            stat-memory: root.stat-memory;
-            stat-cpu: root.stat-cpu;
-            stat-db: root.stat-db;
-            stat-notes: root.stat-notes;
-            toggle-startup => { root.toggle-startup(); }
-            toggle-on-top => { root.toggle-on-top(); }
-            open-install-dir => { root.open-install-dir(); }
-            open-data-dir => { root.open-data-dir(); }
-            uninstall-available: root.uninstall-available;
-            uninstall-confirming: root.uninstall-confirming;
-            uninstall-clicked => { root.uninstall-clicked(); }
-            uninstall-cancel => { root.uninstall-cancel(); }
-            uninstall-confirm => { root.uninstall-confirm(); }
+        // The Tabs' content. While the shown Tab is taller than the Paper it is clipped to the band
+        // under the title and scrolls (the wheel here, or the bar); otherwise it is drawn unclipped,
+        // so an open list can hang into the bottom margin. Every Tab lays out in `content-pf`.
+        viewport := Rectangle {
+            x: 0px;
+            y: root.overflowing ? root.clip-top : 0px;
+            width: root.note-w;
+            height: root.overflowing ? root.clip-bottom - root.clip-top : root.body-h;
+            clip: root.overflowing;
+
+            wheel := TouchArea {
+                scroll-event(e) => {
+                    if (root.max-content-scroll <= 0px) { return reject; }
+                    root.content-scroll = max(0px, min(root.max-content-scroll, root.content-scroll - e.delta-y));
+                    root.content-scrolling = true;
+                    root.scroll-activity();
+                    accept
+                }
+
+                general := GeneralTab {
+                    visible: root.shown-tab == 0;
+                    opacity: root.content-opacity;
+                    pf: root.content-pf;
+                    dots: root.preview-tapes[3];
+                    top: SettingsMetrics.content-top + root.content-dy;
+                    start-with-windows: root.start-with-windows;
+                    new-notes-on-top: root.new-notes-on-top;
+                    park-beside: root.park-beside;
+                    set-park-beside(b) => { root.set-park-beside(b); }
+                    install-dir: root.install-dir;
+                    data-dir: root.data-dir;
+                    stat-memory: root.stat-memory;
+                    stat-cpu: root.stat-cpu;
+                    stat-db: root.stat-db;
+                    stat-notes: root.stat-notes;
+                    toggle-startup => { root.toggle-startup(); }
+                    toggle-on-top => { root.toggle-on-top(); }
+                    open-install-dir => { root.open-install-dir(); }
+                    open-data-dir => { root.open-data-dir(); }
+                    uninstall-available: root.uninstall-available;
+                    uninstall-confirming: root.uninstall-confirming;
+                    uninstall-clicked => { root.uninstall-clicked(); }
+                    uninstall-cancel => { root.uninstall-cancel(); }
+                    uninstall-confirm => { root.uninstall-confirm(); }
+                }
+
+                appearance := AppearanceTab {
+                    visible: root.shown-tab == 1;
+                    opacity: root.content-opacity;
+                    pf: root.content-pf;
+                    dots: root.preview-tapes[3];
+                    top: SettingsMetrics.content-top + root.content-dy;
+                    ui-size: root.ui-size;
+                    set-ui-size(i) => { root.set-ui-size(i); }
+                    page-height: root.settings-height;
+                    set-page-height(i) => { root.set-settings-height(i); }
+                    layout-shared: root.sidebar-layout-shared;
+                    settings-height: root.settings-sidebar-height;
+                    settings-anchor: root.settings-sidebar-anchor;
+                    notes-height: root.notes-sidebar-height;
+                    notes-anchor: root.notes-sidebar-anchor;
+                    toggle-layout-shared => { root.toggle-sidebar-layout-shared(); }
+                    set-height(s, v) => { root.set-sidebar-height(s, v); }
+                    set-anchor(s, v) => { root.set-sidebar-anchor(s, v); }
+                }
+
+                // Font & Style (UI only). Kept alive on every tab so the choices last until Settings closes;
+                // it only draws on its own tab.
+                style := StyleTab {
+                    visible: root.shown-tab == 2;
+                    opacity: root.content-opacity;
+                    pf: root.content-pf;
+                    top: SettingsMetrics.content-top + root.content-dy;
+                    tapes: root.preview-tapes;
+                }
+
+                shortcuts := ShortcutsPage {
+                    visible: root.shown-tab == 3;
+                    opacity: root.content-opacity;
+                    pf: root.content-pf;
+                    dots: root.preview-tapes[3];
+                    top: SettingsMetrics.content-top + root.content-dy;
+                    rows: root.shortcuts;
+                }
+
+                privacy := PrivacyPage {
+                    visible: root.shown-tab == 4;
+                    opacity: root.content-opacity;
+                    pf: root.content-pf;
+                    dots: root.preview-tapes[3];
+                    top: SettingsMetrics.content-top + root.content-dy;
+                }
+            }
         }
 
-        appearance := AppearanceTab {
-            visible: root.shown-tab == 1;
+        // The bar runs down the Paper's right edge, from near its top to above the bottom tape.
+        scrollbar := ScrollBar {
             opacity: root.content-opacity;
-            pf: root.pf;
-            dots: root.preview-tapes[3];
-            top: SettingsMetrics.content-top + root.content-dy;
-            ui-size: root.ui-size;
-            set-ui-size(i) => { root.set-ui-size(i); }
-            layout-shared: root.sidebar-layout-shared;
-            settings-height: root.settings-sidebar-height;
-            settings-anchor: root.settings-sidebar-anchor;
-            notes-height: root.notes-sidebar-height;
-            notes-anchor: root.notes-sidebar-anchor;
-            toggle-layout-shared => { root.toggle-sidebar-layout-shared(); }
-            set-height(s, v) => { root.set-sidebar-height(s, v); }
-            set-anchor(s, v) => { root.set-sidebar-anchor(s, v); }
-        }
-
-        // Font & Style (UI only). Kept alive on every tab so the choices last until Settings closes;
-        // it only draws on its own tab.
-        style := StyleTab {
-            visible: root.shown-tab == 2;
-            opacity: root.content-opacity;
-            pf: root.pf;
-            top: SettingsMetrics.content-top + root.content-dy;
-            tapes: root.preview-tapes;
-        }
-
-        shortcuts := ShortcutsPage {
-            visible: root.shown-tab == 3;
-            opacity: root.content-opacity;
-            pf: root.pf;
-            dots: root.preview-tapes[3];
-            top: SettingsMetrics.content-top + root.content-dy;
-            rows: root.shortcuts;
-        }
-
-        privacy := PrivacyPage {
-            visible: root.shown-tab == 4;
-            opacity: root.content-opacity;
-            pf: root.pf;
-            dots: root.preview-tapes[3];
-            top: SettingsMetrics.content-top + root.content-dy;
+            x: 0px;
+            y: 0px;
+            width: root.note-w;
+            height: root.body-h;
+            paper-w: root.paper-w;
+            paper-h: root.paper-h;
+            bottom-gap: 28px;
+            view: root.paper-h;
+            content: root.paper-h + root.max-content-scroll;
+            offset <=> root.content-scroll;
+            scrolling: root.content-scrolling;
         }
 
         // The Paper's two tapes follow the chosen Tape color (the mockup's 113 by 33 strips, pinned

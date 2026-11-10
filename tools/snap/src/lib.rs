@@ -8,6 +8,7 @@ mod harness;
 mod images;
 mod settings_appearance;
 mod settings_general;
+mod settings_height;
 mod settings_shots;
 mod sidebar_layout;
 pub mod platform;

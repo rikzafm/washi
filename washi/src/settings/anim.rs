@@ -52,15 +52,25 @@ pub fn logical_areas(areas: &[ScreenRect], scale: f32) -> Vec<RectF> {
         .collect()
 }
 
-/// Shift `paper` (never resize it) so the window around it, with `strip` out, fits the work area
-/// that holds the Paper's center. Left and top win when it cannot fit at all.
-pub fn fit_on_screen(paper: RectF, strip: f32, areas: &[RectF]) -> RectF {
+/// The work area that holds the Paper's center (the first one if none does).
+pub fn area_of(paper: RectF, areas: &[RectF]) -> Option<RectF> {
     let (cx, cy) = (paper.x + paper.w / 2.0, paper.y + paper.h / 2.0);
-    let Some(a) = areas
+    areas
         .iter()
         .find(|a| cx >= a.x && cx < a.right() && cy >= a.y && cy < a.bottom())
         .or(areas.first())
-    else {
+        .copied()
+}
+
+/// The tallest Paper whose window (with its margins) fits the work area that holds `paper`.
+pub fn screen_limit(paper: RectF, areas: &[RectF]) -> Option<f32> {
+    area_of(paper, areas).map(|a| a.h - 2.0 * MARGIN)
+}
+
+/// Shift `paper` (never resize it) so the window around it, with `strip` out, fits the work area
+/// that holds the Paper's center. Left and top win when it cannot fit at all.
+pub fn fit_on_screen(paper: RectF, strip: f32, areas: &[RectF]) -> RectF {
+    let Some(a) = area_of(paper, areas) else {
         return paper;
     };
     let min_x = a.x + MARGIN + strip;

@@ -1,5 +1,6 @@
 // Settings > Appearance: how big Washi draws (UI size), and the Sidebar group (how tall each Sidebar
-// is and where it sits beside the Paper). Laid out like the other tabs in the Paper's tilted frame
+// is and where it sits beside the Paper), and how tall the Settings page may grow (Settings height,
+// always the last row). Laid out like the other tabs in the Paper's tilted frame
 // `pf`, rows stacked from `top`; `bottom` (paper coordinates) is where the last row ends.
 //
 // Rust owns every value here (they are app-wide preferences in the database): the tab shows what it
@@ -61,8 +62,12 @@ export component AppearanceTab inherits Rectangle {
     callback set-height(int, int);
     callback set-anchor(int, int);
 
+    /// The Settings height option: 0 Tallest tab, 1 Screen limit.
+    in property <int> page-height: 0;
+    callback set-page-height(int);
+
     /// -1 none, 0 the UI size list, 1 the (Settings) Height list, 2 the (Settings) Anchor list,
-    /// 3 the Notes Height list, 4 the Notes Anchor list.
+    /// 3 the Notes Height list, 4 the Notes Anchor list, 5 the Settings height list.
     in-out property <int> open-list: -1;
 
     out property <[string]> ui-sizes: ["Small 75%", "Medium 80%", "Large 100%"];
@@ -71,6 +76,9 @@ export component AppearanceTab inherits Rectangle {
     out property <string> ui-size-label: root.ui-sizes[root.ui-size];
     out property <[string]> heights: ["Match note", "Fit content"];
     out property <[string]> anchors: ["Top", "Middle", "Bottom"];
+    out property <[string]> page-heights: ["Tallest tab", "Screen limit"];
+    out property <string> page-height-label: root.page-heights[root.page-height];
+    out property <string> page-height-hint: "The screen always limits it";
 
     out property <float> ui-row-y: root.top;
     // The Sidebar group, 18px under the UI size row: its heading, the switch, then Height and Anchor
@@ -84,12 +92,16 @@ export component AppearanceTab inherits Rectangle {
     property <float> notes-head-y: root.a0-y + a0.total + 10.0;
     property <float> h1-y: root.notes-head-y + 32.0;
     property <float> a1-y: root.h1-y + h1.total;
-    out property <float> bottom: root.split ? root.a1-y + a1.total : root.a0-y + a0.total;
+    property <float> sidebar-bottom: root.split ? root.a1-y + a1.total : root.a0-y + a0.total;
+    // Settings height: the last row, 18px under the Sidebar group.
+    property <float> page-y: root.sidebar-bottom + 18.0;
+    out property <float> bottom: root.page-y + page-row.total;
     /// The lowest point an open list reaches (paper coordinates): each hangs 26px under its button's
-    /// centre, 6px of padding around its 42px entries. The last Anchor list is the lowest.
+    /// centre, 6px of padding around its 42px entries. The Settings height list is the lowest.
     out property <float> lists-bottom: max(
         root.list-top(root.ui-row-y, ui-row.content-h) + 12.0 + 3 * 42.0,
-        root.list-top(root.split ? root.a1-y : root.a0-y, root.split ? a1.content-h : a0.content-h) + 12.0 + 3 * 42.0);
+        root.list-top(root.split ? root.a1-y : root.a0-y, root.split ? a1.content-h : a0.content-h) + 12.0 + 3 * 42.0,
+        root.list-top(root.page-y, page-row.content-h) + 12.0 + 2 * 42.0);
 
     x: 0px;
     y: 0px;
@@ -104,7 +116,8 @@ export component AppearanceTab inherits Rectangle {
     /// options (Small, Medium, Large), 4 the "Same for both sidebars" switch, 5 the (Settings) Height
     /// button and 6, 7 its options, 8 the (Settings) Anchor button and 9 to 11 its options, 12 the
     /// Notes Height button and 13, 14 its options, 15 the Notes Anchor button and 16 to 18 its
-    /// options, 20 a blank part of the paper.
+    /// options, 20 a blank part of the paper, 21 the Settings height button and 22, 23 its options
+    /// (Tallest tab, Screen limit).
     public pure function hit-x(id: int) -> length {
         return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
     }
@@ -118,21 +131,21 @@ export component AppearanceTab inherits Rectangle {
         if (id == 4) {
             return 484.0 - 26.0;
         }
-        if (id == 0 || id == 5 || id == 8 || id == 12 || id == 15) {
+        if (id == 0 || id == 5 || id == 8 || id == 12 || id == 15 || id == 21) {
             return 484.0 - 118.0;
         }
         return 484.0 - 130.0;
     }
     /// The row a control sits on: its top and content height.
     pure function hit-row-y(id: int) -> float {
-        return id <= 3 ? root.ui-row-y : id == 4 ? root.same-y : id <= 7 ? root.h0-y : id <= 11 ? root.a0-y : id <= 14 ? root.h1-y : root.a1-y;
+        return id >= 21 ? root.page-y : id <= 3 ? root.ui-row-y : id == 4 ? root.same-y : id <= 7 ? root.h0-y : id <= 11 ? root.a0-y : id <= 14 ? root.h1-y : root.a1-y;
     }
     pure function hit-row-h(id: int) -> float {
-        return id <= 3 ? ui-row.content-h : id == 4 ? same-row.content-h : id <= 7 ? h0.content-h : id <= 11 ? a0.content-h : id <= 14 ? h1.content-h : a1.content-h;
+        return id >= 21 ? page-row.content-h : id <= 3 ? ui-row.content-h : id == 4 ? same-row.content-h : id <= 7 ? h0.content-h : id <= 11 ? a0.content-h : id <= 14 ? h1.content-h : a1.content-h;
     }
     /// The first option's id of the list a control belongs to (-1 for a button or the switch).
     pure function first-option(id: int) -> int {
-        return (id >= 1 && id <= 3) ? 1 : (id == 6 || id == 7) ? 6 : (id >= 9 && id <= 11) ? 9 : (id == 13 || id == 14) ? 13 : id >= 16 ? 16 : -1;
+        return (id == 22 || id == 23) ? 22 : id == 21 ? -1 : (id >= 1 && id <= 3) ? 1 : (id == 6 || id == 7) ? 6 : (id >= 9 && id <= 11) ? 9 : (id == 13 || id == 14) ? 13 : id >= 16 ? 16 : -1;
     }
     pure function hit-b(id: int) -> float {
         if (id == 20) {
@@ -260,6 +273,20 @@ export component AppearanceTab inherits Rectangle {
         }
     }
 
+    page-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.page-y;
+        rule: false;
+        label: "Settings height";
+        hint: root.page-height-hint;
+        PickerButton {
+            text: root.page-height-label;
+            open: root.open-list == 5;
+            clicked => { root.open-list = root.open-list == 5 ? -1 : 5; }
+        }
+    }
+
     // ---- the lists, last so they sit above the rows under them ----
     if root.open-list == 0 : AppearanceList {
         pf: root.pf;
@@ -312,6 +339,17 @@ export component AppearanceTab inherits Rectangle {
         chosen: root.notes-anchor;
         picked(i) => {
             root.set-anchor(1, i);
+            root.open-list = -1;
+        }
+    }
+
+    if root.open-list == 5 : AppearanceList {
+        pf: root.pf;
+        b: root.list-top(root.page-y, page-row.content-h);
+        names: root.page-heights;
+        chosen: root.page-height;
+        picked(i) => {
+            root.set-page-height(i);
             root.open-list = -1;
         }
     }
