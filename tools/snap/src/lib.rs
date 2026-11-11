@@ -3,6 +3,7 @@
 //! Tests act from the outside (type, advance the fake clock, close, restart on the same data
 //! folder) and check from the outside (note text, rendered pixels, raw database bytes).
 
+pub mod caret;
 pub mod fakes;
 mod harness;
 mod images;

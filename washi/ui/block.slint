@@ -101,6 +101,8 @@ export component BlockView inherits Rectangle {
     /// A key while the note's selection spans blocks (`wash` is off): true when the note took it.
     callback range-key(KeyEvent) -> bool;
     in property <bool> italic: false;
+    /// Tilted editing: the note washes the selection itself, tilted, so the field's own wash is off.
+    in property <bool> tilted: false;
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
     in property <length> gap-before: 0px;
@@ -134,13 +136,34 @@ export component BlockView inherits Rectangle {
 
     property <length> size: kind == BlockKind.title ? Theme.title-size
         : kind == BlockKind.heading ? Theme.heading-size : Theme.body-size;
-    /// The window's scale factor. The field's lines step by whole physical pixels (the text engine
-    /// rounds them), so the pitch is snapped the same way here and in src/textflow.rs; else the
-    /// field's caret and selection drift off the words by a fraction of a pixel per line.
+    /// The caret (the note's layout: x and line box in the text layer, where its text starts at
+    /// `Theme.text-inset-left`), whether this block is the note's focused one and holds it, and a
+    /// counter that changes whenever it moves. It is drawn here, not by the field (see TextLayer),
+    /// and kept while the note is suspended, like the rest of its look.
+    in property <SelRect> caret;
+    in property <bool> caret-here: false;
+    in property <int> caret-serial: 0;
+    /// The blink: lit for half a second, dark for half a second, lit anew whenever the caret moves.
+    /// It flips only while the field has the focus right now: the window going inactive stops it at
+    /// once, before the note hears of the focus loss, so a note about to be suspended stays as drawn.
+    property <bool> caret-lit: true;
+    caret-blink := Timer {
+        interval: 500ms;
+        running: root.caret-here && input.has-focus && root.show-input && !root.composing;
+        triggered => { if (input.has-focus) { root.caret-lit = !root.caret-lit; } }
+    }
+    changed caret-serial => { root.caret-lit = true; caret-blink.restart(); }
+    /// The window's scale factor. The lines step by whole physical pixels: the pitch is snapped to
+    /// them here and in src/textflow.rs, so the field's caret and selection stay on the words.
     in property <float> pitch-scale: 1;
     property <length> pitch: Math.round((kind == BlockKind.title ? Theme.title-pitch
-        : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch) / 1px * root.pitch-scale) / root.pitch-scale * 1px - 0.001px;
-    // (a hair under: the field rounds its height up, so an exact pitch would add a pixel per block)
+        : kind == BlockKind.heading ? Theme.heading-pitch : Theme.body-pitch) / 1px * root.pitch-scale) / root.pitch-scale * 1px;
+    /// The field's lines. The field itself reports its height rounded up to a whole logical px,
+    /// which at a fractional scale is more than its lines take (a 28.8 px line counts as 29): with
+    /// that height every block would start a fraction of a pixel lower than the words the app lays
+    /// out, and the caret would sink further below its line with every paragraph. So the block's
+    /// height is counted in lines.
+    property <int> lines: max(1, Math.round(input.preferred-height / root.pitch));
 
     property <bool> focused: input.has-focus || image-focus.has-focus;
     property <bool> reported: false;
@@ -153,7 +176,7 @@ export component BlockView inherits Rectangle {
             if (root.reported) { root.caret-moved(root.kind == BlockKind.image ? 0 : input.cursor-position-byte-offset, root.kind == BlockKind.image ? 0 : input.anchor-position-byte-offset); }
         }
     }
-    changed focused => { root.report(); root.drop-selection(); }
+    changed focused => { root.report(); root.drop-selection(); if (input.has-focus) { root.caret-lit = true; } }
     changed wanted => { root.drop-selection(); }
     // Slint keeps a field's selection when the focus moves to another field from code; the note's
     // selection is somewhere else now, so nothing may stay selected here (it would be washed twice).
@@ -165,7 +188,7 @@ export component BlockView inherits Rectangle {
 
     property <length> image-width: root.width * root.img-pct / 100;
     property <length> image-height: root.img-w > 0 ? root.image-width * root.img-h / root.img-w : 0px;
-    preferred-height: root.gap-before + (root.kind == BlockKind.image ? root.image-height : input.preferred-height);
+    preferred-height: root.gap-before + (root.kind == BlockKind.image ? root.image-height : root.lines * root.pitch);
 
     // A selected picture has no text field: this takes the keyboard focus instead, so Backspace and
     // Delete remove the picture, Ctrl+C / Ctrl+X copy/cut it, and the arrows leave it.
@@ -319,6 +342,7 @@ export component BlockView inherits Rectangle {
         x: 0;
         y: root.gap-before;
         width: parent.width;
+        height: root.lines * root.pitch;
         wrap: word-wrap;
         single-line: false;
         text: root.text;
@@ -329,10 +353,14 @@ export component BlockView inherits Rectangle {
         font-size: root.size;
         font-weight: root.composing && root.bold ? 700 : 400;
         font-italic: root.composing && root.italic;
-        line-height-factor: root.pitch / (root.size * Theme.handwriting-line-em);
+        // the factor is of the face's own line height, and the two faces differ in it
+        line-height-factor: root.pitch / (root.size * (root.composing ? Theme.handwriting-line-em : Theme.caret-line-em));
         color: Theme.ink;
+        // the note draws the caret (see TextLayer); the field's own shows only inside the text an
+        // input method is composing
+        text-cursor-width: root.composing ? Theme.caret-width : 0px;
         // see-through: the words under it stay readable
-        selection-background-color: root.wash ? Theme.selection-over : transparent;
+        selection-background-color: root.wash && !root.tilted ? Theme.selection-over : transparent;
         selection-foreground-color: Theme.ink;
         // hidden, not removed: a click still lands in the field and starts editing
         opacity: root.show-input ? 1 : 0;
@@ -381,11 +409,31 @@ export component BlockView inherits Rectangle {
             if (e.text == Key.Return || e.text == Key.Backspace || e.text == Key.Delete
                 || (!e.modifiers.shift && (e.text == Key.UpArrow || e.text == Key.DownArrow
                     || (e.text == Key.LeftArrow && self.cursor-position-byte-offset == 0)
-                    || e.text == Key.RightArrow))) {
+                    || e.text == Key.RightArrow || e.text == Key.Home || e.text == Key.End))) {
                 return root.key(e.text, self.cursor-position-byte-offset) ? accept : reject;
             }
             reject
         }
+    }
+
+    // the caret: the box of its line, over the field, cut along the paper's tilted top edge like the
+    // wash. Nothing is drawn while an input method composes (the field shows its own caret then).
+    // The tilt moves the caret like the words (by `tilt-scale`, the offset of the caret's center): it
+    // stays an upright bar, a 1.45 degree lean over a line is under a pixel.
+    property <length> caret-cx: root.caret.x - root.paper-w / 2;
+    property <length> caret-cy: root.caret.y + root.caret.height / 2 - root.paper-h / 2;
+    property <length> caret-dx: (root.caret-cx * (Theme.text-tilt.cos() - 1) - root.caret-cy * Theme.text-tilt.sin() + root.shift-x) * root.tilt-scale;
+    property <length> caret-dy: (root.caret-cx * Theme.text-tilt.sin() + root.caret-cy * (Theme.text-tilt.cos() - 1) + root.shift-y) * root.tilt-scale;
+
+    if root.caret-here && root.show-input && !root.composing && root.caret-lit: Rectangle {
+        property <length> x0: root.caret.x + root.caret-dx - Theme.text-inset-left;
+        property <length> y0: root.caret.y + root.caret-dy - Theme.text-inset-top - root.y;
+        property <length> cut: max(self.y0, root.edge-y(Theme.text-inset-left + self.x0) - Theme.text-inset-top - root.y);
+        x: self.x0;
+        y: self.cut;
+        width: Theme.caret-width;
+        height: max(0px, self.y0 + root.caret.height - self.cut);
+        background: Theme.ink;
     }
 
     // Rust changed the text (a merge, a paste): the field shows it.

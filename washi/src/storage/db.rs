@@ -213,6 +213,16 @@ impl Db {
         Ok(())
     }
 
+    /// Whether a note's text stays on the paper's tilted baseline while it is edited (Settings ›
+    /// General). On when never set; off means the text settles flat for editing.
+    pub fn tilted_editing(&self) -> bool {
+        self.meta("tilted_editing").map_or(true, |v| v != "0")
+    }
+
+    pub fn set_tilted_editing(&self, on: bool) -> Result<(), DbError> {
+        self.set_meta("tilted_editing", if on { "1" } else { "0" })
+    }
+
     /// A stored app-wide preference (`meta` table), if it was ever set.
     fn meta(&self, key: &str) -> Option<String> {
         self.conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get::<_, String>(0)).ok()
@@ -655,6 +665,19 @@ mod tests {
         assert!(db.new_notes_on_top());
         db.set_new_notes_on_top(false).unwrap();
         assert!(!db.new_notes_on_top());
+    }
+
+    #[test]
+    fn tilted_editing_is_on_until_set_and_survives_reopening() {
+        let (dir, db) = test_db();
+        assert!(db.tilted_editing(), "never set: the text stays tilted");
+        db.set_tilted_editing(false).unwrap();
+        assert!(!db.tilted_editing());
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert!(!db.tilted_editing());
+        db.set_tilted_editing(true).unwrap();
+        assert!(db.tilted_editing());
     }
 
     #[test]

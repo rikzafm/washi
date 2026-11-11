@@ -490,6 +490,10 @@ impl Note {
         }
     }
 
+    pub fn set_tilted_editing(&self, on: bool) {
+        self.editor.set_tilted(&self.ui, on);
+    }
+
     pub fn geometry(&self) -> Geometry {
         self.geometry.current().unwrap_or(Geometry { x: 0, y: 0, w: 0, h: 0 })
     }

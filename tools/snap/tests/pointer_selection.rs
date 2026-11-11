@@ -61,6 +61,7 @@ fn dragging_from_paragraph_1_into_paragraph_3_selects_across_all_three() {
 #[test]
 fn a_press_while_at_rest_settles_the_note_to_level() {
     let mut h = note(TEXT);
+    h.set_tilted_editing(false);
     // the window loses the system focus: no field has the keyboard focus, the note lies at rest
     h.set_window_active(0, false);
     h.advance(ms(1));
@@ -82,6 +83,8 @@ fn a_press_while_at_rest_settles_the_note_to_level() {
 #[test]
 fn a_range_across_blocks_is_washed_by_the_note_and_a_range_inside_one_block_by_its_field() {
     let mut h = note(TEXT);
+    // (with tilted editing the note washes both: see tilted_editing.rs)
+    h.set_tilted_editing(false);
     let (from, to) = (word(&h, "paragraph", 0, false), word(&h, "words", 0, true));
     drag(&mut h, from, to);
     assert!(h.sel_rects(0).len() >= 3, "{:?}", h.sel_rects(0));

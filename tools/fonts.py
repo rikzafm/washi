@@ -209,9 +209,17 @@ def slant(src, dst, skew, family, bold):
     print("wrote", dst, os.path.getsize(dst), "bytes")
 
 
+# Ascent and descent of the blank face, in font units (of 1024). A field's caret and selection are
+# as tall as the larger of the line pitch and ascent + descent, so the sum stays under every line
+# pitch of the note (the lowest is 1.22 em) and the caret is the line box on every line.
+# `caret-line-em` in washi/ui/theme.slint is (ascent + descent) / units per em: keep them together.
+BLANK_ASCENT, BLANK_DESCENT = 861, 100
+
+
 def blank(src, dst, family):
     """A face with the advances of `src` and no ink: the edit fields lay their text out (caret,
-    selection, line breaks) in it while the app draws the styled words itself. Needs fonttools."""
+    selection, line breaks) in it while the app draws the styled words itself. Its ascent and
+    descent are cut down (see BLANK_ASCENT). Needs fonttools."""
     from fontTools.pens.ttGlyphPen import TTGlyphPen
     from fontTools.ttLib import TTFont
 
@@ -219,6 +227,10 @@ def blank(src, dst, family):
     glyf = font["glyf"]
     for name in font.getGlyphOrder():
         glyf[name] = TTGlyphPen(None).glyph()
+    hhea, os2 = font["hhea"], font["OS/2"]
+    hhea.ascent, hhea.descent, hhea.lineGap = BLANK_ASCENT, -BLANK_DESCENT, 0
+    os2.sTypoAscender, os2.sTypoDescender, os2.sTypoLineGap = BLANK_ASCENT, -BLANK_DESCENT, 0
+    os2.usWinAscent, os2.usWinDescent = BLANK_ASCENT, BLANK_DESCENT
     for rec in font["name"].names:
         if rec.nameID in (1, 16):
             rec.string = family

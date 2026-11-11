@@ -28,6 +28,23 @@ impl Harness {
         self.settle();
     }
 
+    /// The Keep text tilted while editing switch as drawn.
+    pub fn settings_tilted_editing(&self) -> bool {
+        self.general_ui().get_tilted_editing()
+    }
+
+    pub fn settings_press_tilted_editing(&mut self) {
+        self.general_ui().invoke_toggle_tilted_editing();
+        self.settle();
+    }
+
+    /// Make every open note keep its text tilted while editing (true) or settle it flat (false),
+    /// without going through Settings or the database.
+    pub fn set_tilted_editing(&mut self, on: bool) {
+        self.app().set_tilted_editing(on);
+        self.settle();
+    }
+
     pub fn settings_press_open_install(&mut self) {
         self.general_ui().invoke_open_install_dir();
     }

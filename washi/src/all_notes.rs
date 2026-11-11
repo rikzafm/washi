@@ -751,6 +751,10 @@ impl AllNotesView {
         }
     }
 
+    pub fn set_tilted_editing(&self, on: bool) {
+        self.editor.set_tilted(&self.ui, on);
+    }
+
     pub fn apply_sidebar_layout(&self) {
         let layout = self.db.sidebar_layout(Sidebar::Notes);
         self.ui.set_all_notes_height_mode(layout.height.index());

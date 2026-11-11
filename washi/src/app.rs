@@ -469,6 +469,14 @@ impl App {
                         }
                     }
                 }),
+                tilted_editing_changed: Rc::new({
+                    let app = app.clone();
+                    move |on| {
+                        if let Some(a) = app() {
+                            a.set_tilted_editing(on);
+                        }
+                    }
+                }),
             },
             closed: Rc::new({
                 let app = app.clone();
@@ -554,6 +562,18 @@ impl App {
         }
         for v in self.0.viewers.borrow().iter() {
             v.set_ui_scale(scale);
+        }
+    }
+
+    /// The text of every note stays tilted while it is edited (true) or settles flat (false), from
+    /// now on (Settings › General; the value is already saved).
+    pub fn set_tilted_editing(&self, on: bool) {
+        let notes: Vec<Rc<Note>> = self.0.notes.borrow().clone();
+        for n in &notes {
+            n.set_tilted_editing(on);
+        }
+        if let Some(v) = self.all_notes() {
+            v.set_tilted_editing(on);
         }
     }
 

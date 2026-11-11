@@ -626,6 +626,8 @@ impl Harness {
             self.app().with_note(id, |n| n.ui().window().dispatch_event(WindowEvent::WindowActiveChanged(false)));
         }
         self.app().window_state_changed();
+        // the loop's turn that follows, in which a note's caret blink timer sees its field lost the focus
+        self.settle();
     }
 
     /// Back to Washi (Alt-Tab back): the first note takes focus.

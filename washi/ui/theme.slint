@@ -4,7 +4,8 @@
 export global Theme {
     // The text lies tilted with the paper (PaperTheme.paper-tilt) at rest, clockwise.
     out property <angle> text-tilt: 1.45deg;
-    // The text settles flat over this long when editing starts, and back when it ends.
+    // Without tilted editing (Settings › General) the text settles flat over this long when editing
+    // starts, and back when it ends.
     out property <duration> settle: 120ms;
     out property <duration> settle-in: 90ms;
     // Another note shown in the same window (All Notes): its text settles in from a little lower
@@ -27,9 +28,12 @@ export global Theme {
     // The "Note Something...." hint of an empty note: light, subtle gray.
     out property <color> ink-hint: #B4B9C0;
     out property <string> handwriting: "Shadows Into Light";
-    // The edit fields' face: the handwriting's advances and metrics, no outlines (made with
-    // `tools/fonts.py blank`). The fields only place the caret and the selection.
+    // The edit fields' face: the handwriting's advances, no outlines, a lower ascent and descent
+    // (made with `tools/fonts.py blank`; see `caret-line-em`). The fields only place the caret and the selection.
     out property <string> caret-font: "Washi Caret";
+
+    // The caret the note draws (the fields' own is hidden, see TextLayer).
+    out property <length> caret-width: 1px;
 
     // Text block: inset from the paper edges (paper's own frame).
     out property <length> text-inset-left: 32px;
@@ -40,6 +44,13 @@ export global Theme {
 
     // Natural line height of the handwriting font in em: (ascent + descent) / units per em.
     out property <float> handwriting-line-em: 1.6064;
+    // The same for the edit fields' face: its ascent and descent are cut down to 961 / 1024 em
+    // (`tools/fonts.py blank`). A field's caret and selection are as tall as the larger of the line
+    // pitch and the face's ascent + descent; the handwriting's own (1.6064 em) is taller than the
+    // body and heading pitch, so the caret stuck out of its line and was cut at the field's top and
+    // bottom edge, off-center on a paragraph's first and last line. Under every pitch, the caret
+    // is the line box itself on every line.
+    out property <float> caret-line-em: 0.938477;
 
     // Title
     out property <length> title-size: 37.3px;

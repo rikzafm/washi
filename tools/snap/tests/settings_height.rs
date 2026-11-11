@@ -10,8 +10,11 @@ fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
-/// The tallest built-in Tab's Paper (Shortcuts, about 767), in whole px as the window has it.
-const TALLEST: u32 = 768;
+/// The tallest built-in Tab's Paper (General, since it gained its rows: about 798), in whole px as the
+/// window has it.
+const TALLEST: u32 = 798;
+/// Shortcuts' Paper, no longer the tallest, in whole px as the window has it.
+const SHORTCUTS_H: u32 = 768;
 
 // Appearance control ids, as `hit-x` in appearance-tab.slint defines them.
 const SETTINGS_HEIGHT_BUTTON: i32 = 21;
@@ -67,7 +70,7 @@ fn settings_height_is_tallest_tab_until_chosen_and_says_the_screen_limits_it() {
 fn with_tallest_tab_no_tabs_paper_is_taller_than_the_tallest_built_in_tab() {
     let mut h = started();
     open_on(&mut h, tab::SHORTCUTS);
-    assert_eq!(h.settings_paper_height(), TALLEST, "Shortcuts at its own height");
+    assert_eq!(h.settings_paper_height(), SHORTCUTS_H, "Shortcuts at its own height");
     switch_to(&mut h, tab::APPEARANCE);
     // each Sidebar its own rows: Appearance is the one Tab that grows past the others
     h.settings_split_appearance();

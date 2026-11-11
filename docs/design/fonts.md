@@ -47,9 +47,15 @@ its characters.
 
 Bold, italic, underline and strike apply to any stretch of text, but a Slint `TextInput` draws its whole text in
 one face. So the note draws the words itself while editing too (from its own layout, each piece in its face), and
-the fields lay their text out in **Washi Caret**: Shadows Into Light with every outline removed and every metric
-kept. The field still places and draws the caret, the selection and the line breaks (and blinks and handles the
-input method) exactly over the drawn words, but shows no ink of its own. While an input method composes, the
+the fields lay their text out in **Washi Caret**: Shadows Into Light with every outline removed and every advance
+kept. Its ascent and descent are cut down to 861 and 100 units (0.94 em together, under every line pitch of the
+note), because a field draws its caret as tall as the larger of the line pitch and ascent + descent: with the
+handwriting's own 1.61 em the caret stuck out of the body lines and was cut at the field's edges, off-center on
+a paragraph's first and last line. `caret-line-em` in `washi/ui/theme.slint` is that sum over the units per em. The field still places the caret, draws the selection and breaks the lines (and handles the
+input method) exactly over the drawn words, but shows no ink of its own. The caret itself is drawn by the note,
+as the box of its line in the note's own layout (`caret_box` in `washi/src/textflow.rs`, the blink in
+`washi/ui/text.slint`): a field cuts its caret off at its own right edge, where a line that fills the field
+ends, and it takes only a byte offset, which where a line wraps without a space is the start of the next line. While an input method composes, the
 field switches to the real face for the moment. Made with
 `python tools/fonts.py blank fonts/ShadowsIntoLight.ttf fonts/WashiCaret.ttf "Washi Caret"` (OFL 1.1, renamed as
 a derivative).

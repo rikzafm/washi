@@ -214,13 +214,15 @@ fn going_back_to_large_draws_the_note_exactly_as_before() {
     h.type_text(0, "hello world");
     // the Settings round trip itself, at Large
     choose_ui_size(&mut h, LARGE);
-    // (an inactive window draws no blinking caret)
+    // (an inactive window draws no blinking caret; both are drawn once the note has settled to rest)
     h.set_window_active(0, false);
+    h.advance_frames(ms(600));
     let before = h.render(0);
     choose_ui_size(&mut h, SMALL);
     choose_ui_size(&mut h, LARGE);
     assert_eq!(h.note_drawing_scale(0), 1.0);
     h.set_window_active(0, false);
+    h.advance_frames(ms(600));
     let after = h.render(0);
     assert_eq!((after.0, after.1), (before.0, before.1));
     let diff: Vec<usize> = (0..after.2.len()).filter(|&i| after.2[i] != before.2[i]).collect();

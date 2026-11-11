@@ -116,6 +116,13 @@ export component NoteWindow inherits Window {
     in property <[SelRect]> sel-rects;
     /// A selected picture's frame and its resize grip (Rust): two level boxes, or none.
     in property <[SelRect]> image-handles;
+    /// The caret (Rust): its x and line box, the block it is in (-1: none, nothing is selected or a
+    /// picture is), and a counter that changes whenever it moves.
+    in property <SelRect> caret;
+    in property <int> caret-block: -1;
+    in property <int> caret-serial: 0;
+    /// The text stays tilted while it is edited (Settings › General; Rust sets it from the stored choice).
+    in property <bool> tilted-editing: false;
     /// A right click on the text, in the text layer's frame (sent just before `context-menu`).
     callback text-right-click(length, length);
     /// The markers behind colored text, and where the selection's wash meets them (Rust).
@@ -452,6 +459,10 @@ export component NoteWindow inherits Window {
                         runs: root.runs;
                         rules: root.rules;
                         sel-rects: root.sel-rects;
+                        caret: root.caret;
+                        caret-block: root.caret-block;
+                        caret-serial: root.caret-serial;
+                        tilted-editing: root.tilted-editing;
                         image-handles: root.image-handles;
                         layer-right-click(x, y) => { root.text-right-click(x, y); }
                         markers: root.markers;

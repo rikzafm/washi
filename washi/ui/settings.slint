@@ -273,6 +273,9 @@ export component SettingsWindow inherits Window {
     // General tab (see settings-general.slint)
     in property <bool> start-with-windows;
     in property <bool> new-notes-on-top;
+    /// The text of a note stays tilted while it is edited (false: it settles flat).
+    in property <bool> tilted-editing;
+    callback toggle-tilted-editing();
     /// Notes left in All Notes go beside it (true) or behind it (false).
     in property <bool> park-beside: true;
     callback set-park-beside(bool);
@@ -558,6 +561,8 @@ export component SettingsWindow inherits Window {
                     top: SettingsMetrics.content-top + root.content-dy;
                     start-with-windows: root.start-with-windows;
                     new-notes-on-top: root.new-notes-on-top;
+                    tilted-editing: root.tilted-editing;
+                    toggle-tilted-editing => { root.toggle-tilted-editing(); }
                     park-beside: root.park-beside;
                     set-park-beside(b) => { root.set-park-beside(b); }
                     install-dir: root.install-dir;

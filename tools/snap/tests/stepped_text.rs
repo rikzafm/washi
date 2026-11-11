@@ -52,6 +52,7 @@ fn at_rest_each_word_sits_on_the_tilted_baseline() {
 #[test]
 fn editing_settles_the_text_flat_in_about_120_ms_and_rest_brings_the_tilt_back() {
     let mut h = at_rest();
+    h.set_tilted_editing(false);
     h.set_window_active(0, true);
     let mut seen = vec![begin(&mut h)];
     for _ in 0..14 {

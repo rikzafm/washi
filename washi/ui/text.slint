@@ -156,9 +156,12 @@ component HandleShape inherits Path {
 //
 // The mockup text is tilted with the paper but the software renderer cannot rotate text
 // (slint#6068). At rest every word is therefore its own upright Text on the tilted baseline
-// (`runs`, laid out by src/textflow.rs). While a field has the focus the words' offsets settle to
-// 0 and the stock level TextInputs lie over them: their text is in a blank face with the same
-// advances, so they only show the caret and the selection (caret, selection and IME stay Slint's),
+// (`runs`, laid out by src/textflow.rs). By default (`tilted-editing`) they stay there while a field
+// has the focus: the caret and the selection's wash are drawn tilted too, and the pointer is mapped
+// back through the tilt (`level-x`, `level-y`) for Rust. With the option off the words' offsets settle
+// to 0 for editing. Either way the stock level TextInputs lie over them: their text is in a blank face with the same
+// advances, so they only place the caret and show the selection (selection and IME stay Slint's;
+// the caret is drawn by the block, where the note's own layout puts it),
 // and every word keeps its own style (bold, italic...) while editing too.
 export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
@@ -212,6 +215,14 @@ export component TextLayer inherits Rectangle {
     callback paste-image() -> bool;
     /// The wash of the note's selection (Rust): one level box per line the selection touches.
     in property <[SelRect]> sel-rects;
+    /// The caret (Rust lays it out like the words, src/textflow.rs): its x and line box in this
+    /// layer, the block it is in (-1: none), and a counter that changes whenever it moves. The
+    /// block draws the caret, not its field: a field cuts its caret off at its own right edge (a
+    /// line that fills the field has its end there), and can only be given a byte offset, which
+    /// where a line wraps without a space is the start of the next line.
+    in property <SelRect> caret;
+    in property <int> caret-block: -1;
+    in property <int> caret-serial: 0;
     /// The selected picture's frame (first) and resize grip (second), level.
     in property <[SelRect]> image-handles;
     /// A right click, in this layer's frame (sent just before `right-click`).
@@ -245,8 +256,12 @@ export component TextLayer inherits Rectangle {
     // The block whose field has the focus, -1 for none. (Not a count: blocks that vanish with the
     // model never report losing the focus.)
     in-out property <int> focused-block: -1;
-    // 0 at rest, 1 while editing
-    property <float> flat: focused-block >= 0 ? 1 : 0;
+    /// The text stays on the paper's tilted baseline while a field has the focus (Settings ›
+    /// General): the words, the caret and the selection are drawn tilted, and the pointer is
+    /// mapped back through the tilt. Off: everything settles flat for editing.
+    in property <bool> tilted-editing: false;
+    // 0 at rest (or tilted editing), 1 while editing flat
+    property <float> flat: focused-block >= 0 && !root.tilted-editing ? 1 : 0;
     // Into editing quickly (the caret shows once the text is flat), back to rest more gently.
     animate flat {
         duration: root.focused-block >= 0 ? Theme.settle-in : Theme.settle;
@@ -264,6 +279,18 @@ export component TextLayer inherits Rectangle {
     property <length> shift-x: root.scroll-y * Theme.text-tilt.sin();
     property <length> shift-y: root.scroll-y * (1 - Theme.text-tilt.cos());
 
+    // A point as drawn (tilted by `tilt-scale`) back in the level layout Rust works in: the first
+    // order inverse of the offset the words carry (the error is about tilt^2 times the distance
+    // from the paper's center, 0.2 px at 300 px). It is the identity once the text is flat.
+    property <float> sn: Theme.text-tilt.sin();
+    property <float> cs: Theme.text-tilt.cos();
+    pure function level-x(x: length, y: length) -> length {
+        return x - ((x - root.paper-w / 2) * (root.cs - 1) - (y - root.paper-h / 2) * root.sn + root.shift-x) * root.tilt-scale;
+    }
+    pure function level-y(x: length, y: length) -> length {
+        return y - ((x - root.paper-w / 2) * root.sn + (y - root.paper-h / 2) * (root.cs - 1) + root.shift-y) * root.tilt-scale;
+    }
+
     // The paper's tilted top edge (the paper turns clockwise around its center), as a y in this
     // layer at the given x. The level clip of the note's text view cannot follow it.
     pure function edge-y(x: length) -> length {
@@ -271,13 +298,37 @@ export component TextLayer inherits Rectangle {
             + root.paper-h / 2 * (1 - root.tilt.cos()) + root.scroll-y;
     }
 
+    // Where a level box starting at `y` and spanning `x0..x1` may start so that none of it lies
+    // above the paper's tilted top edge (the level clip of the text view reaches the edge's highest
+    // point, so a wash scrolled under the top would show past the paper where the edge is lower).
+    pure function below-edge(y: length, x0: length, x1: length) -> length {
+        return max(y, max(root.edge-y(x0), root.edge-y(x1)));
+    }
+
     // the selection wash, level (a selection can only be made while editing), under the words
     for s in root.sel-rects: Rectangle {
+        property <length> cut: root.below-edge(s.y, s.x, s.x + s.width);
+        visible: !root.tilted-editing;
         x: s.x;
-        y: s.y;
+        y: self.cut;
         width: s.width;
-        height: s.height;
+        height: max(0px, s.y + s.height - self.cut);
         background: Theme.selection;
+    }
+
+    // tilted editing: the same wash as one quadrilateral per line on the tilted baseline. It is cut
+    // at the paper's top in the level layout (`scroll-y`), which the tilt carries onto the tilted edge.
+    for s in root.sel-rects: HandleShape {
+        property <length> top: max(s.y, root.scroll-y);
+        visible: root.tilted-editing && s.y + s.height > self.top;
+        r: { x: s.x, y: self.top, width: s.width, height: max(0px, s.y + s.height - self.top) };
+        ts: root.tilt-scale;
+        shift-x: root.shift-x;
+        shift-y: root.shift-y;
+        paper-w: root.paper-w;
+        paper-h: root.paper-h;
+        outline: false;
+        ink: Theme.selection;
     }
 
     // the markers: over the paper (and the opaque wash of a selection across blocks), under the words
@@ -294,11 +345,26 @@ export component TextLayer inherits Rectangle {
     // where the selection across blocks meets a marker: the wash again, see-through, so the marker
     // shows tinted (a selection inside one field is washed by the field over the marker anyway)
     for s in root.marker-wash: Rectangle {
+        property <length> cut: root.below-edge(s.y, s.x, s.x + s.width);
+        visible: !root.tilted-editing;
         x: s.x;
-        y: s.y;
+        y: self.cut;
         width: s.width;
-        height: s.height;
+        height: max(0px, s.y + s.height - self.cut);
         background: Theme.selection-over;
+    }
+
+    for s in root.marker-wash: HandleShape {
+        property <length> top: max(s.y, root.scroll-y);
+        visible: root.tilted-editing && s.y + s.height > self.top;
+        r: { x: s.x, y: self.top, width: s.width, height: max(0px, s.y + s.height - self.top) };
+        ts: root.tilt-scale;
+        shift-x: root.shift-x;
+        shift-y: root.shift-y;
+        paper-w: root.paper-w;
+        paper-h: root.paper-h;
+        outline: false;
+        ink: Theme.selection-over;
     }
 
     // Each word sits in a box whose top follows the paper's tilted top edge, so a word that is
@@ -410,7 +476,8 @@ export component TextLayer inherits Rectangle {
             }
             italic: b.italic;
             autofocus: i == 0 && root.allow-autofocus;
-            show-input: !root.hide-inputs && root.flat >= 0.99;
+            tilted: root.tilted-editing;
+            show-input: !root.hide-inputs && (root.tilted-editing ? root.editing : root.flat >= 0.99);
             resync: root.resync;
             // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
             gap-before: i == 0 || root.blocks[i - 1].kind == b.kind || (root.blocks[i - 1].kind == BlockKind.list-item && b.kind == BlockKind.body) || (root.blocks[i - 1].kind == BlockKind.body && b.kind == BlockKind.list-item) ? 0px
@@ -420,6 +487,9 @@ export component TextLayer inherits Rectangle {
             focus-offset: root.focus-offset;
             focus-anchor: root.focus-anchor;
             wash: root.wash;
+            caret: root.caret;
+            caret-here: i == root.caret-block && i == root.focused-block;
+            caret-serial: root.caret-serial;
             edited(t, c) => { root.block-edited(i, t, c); }
             key(k, o) => { return root.block-key(i, k, o); }
             caret-moved(o, a) => { root.caret-moved(i, o, a); }
@@ -455,22 +525,22 @@ export component TextLayer inherits Rectangle {
         mouse-cursor: root.text-cursor-kind == 1 ? MouseCursor.default : (root.text-cursor-kind == 2 ? MouseCursor.nwse-resize : MouseCursor.text);
         pointer-event(e) => {
             if (e.kind == PointerEventKind.move) {
-                root.pointer-motion(self.mouse-x, self.mouse-y);
+                root.pointer-motion(root.level-x(self.mouse-x, self.mouse-y), root.level-y(self.mouse-x, self.mouse-y));
                 root.pointer-moved();
             }
             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                root.pointer-down(self.mouse-x, self.mouse-y, e.modifiers.shift);
+                root.pointer-down(root.level-x(self.mouse-x, self.mouse-y), root.level-y(self.mouse-x, self.mouse-y), e.modifiers.shift);
             }
             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up) {
                 root.pointer-up();
             }
             if (e.button == PointerEventButton.right && e.kind == PointerEventKind.up) {
-                root.layer-right-click(self.mouse-x, self.mouse-y);
+                root.layer-right-click(root.level-x(self.mouse-x, self.mouse-y), root.level-y(self.mouse-x, self.mouse-y));
                 root.right-click(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
             }
         }
         moved => {
-            if (self.pressed) { root.pointer-drag(self.mouse-x, self.mouse-y); }
+            if (self.pressed) { root.pointer-drag(root.level-x(self.mouse-x, self.mouse-y), root.level-y(self.mouse-x, self.mouse-y)); }
         }
     }
 }

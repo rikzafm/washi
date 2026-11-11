@@ -13,6 +13,8 @@ export component GeneralTab inherits Rectangle {
     in property <float> top;
     in property <bool> start-with-windows;
     in property <bool> new-notes-on-top;
+    in property <bool> tilted-editing;
+    callback toggle-tilted-editing();
     in property <bool> park-beside;
     callback set-park-beside(bool);
     in property <string> install-dir;
@@ -33,7 +35,7 @@ export component GeneralTab inherits Rectangle {
     callback uninstall-cancel();
     callback uninstall-confirm();
 
-    property <float> storage-y: root.top + toggle-1.total + toggle-2.total + park-row.total + 18.0;
+    property <float> storage-y: root.top + toggle-1.total + toggle-2.total + toggle-3.total + park-row.total + 18.0;
     property <float> resource-y: root.storage-y + 38.0 + folder-1.total + folder-2.total + 18.0;
     property <float> tiles-y: root.resource-y + 38.0 + 10.0;
     property <float> uninstall-y: root.tiles-y + 75.6 + 18.0;
@@ -70,10 +72,23 @@ export component GeneralTab inherits Rectangle {
         }
     }
 
-    park-row := SettingRow {
+    toggle-3 := SettingRow {
         pf: root.pf;
         dots: root.dots;
         row-y: root.top + toggle-1.total + toggle-2.total;
+        label: "Keep text tilted while editing";
+        hint: "Off: the text settles flat while you type. On by default";
+        Switch {
+            checked: root.tilted-editing;
+            accessible-name: "Keep text tilted while editing";
+            toggled => { root.toggle-tilted-editing(); }
+        }
+    }
+
+    park-row := SettingRow {
+        pf: root.pf;
+        dots: root.dots;
+        row-y: root.top + toggle-1.total + toggle-2.total + toggle-3.total;
         rule: false;
         label: "Notes left in All Notes";
         hint: "When you switch away from a note";

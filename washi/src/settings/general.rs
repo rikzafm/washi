@@ -24,6 +24,8 @@ pub struct GeneralDeps {
     pub open_note_count: Rc<dyn Fn() -> usize>,
     /// Save everything and exit, so a started uninstaller can remove the exe.
     pub quit_for_uninstall: Rc<dyn Fn()>,
+    /// Text now stays tilted while editing (true) or settles flat (false): open notes follow.
+    pub tilted_editing_changed: Rc<dyn Fn(bool)>,
 }
 
 pub struct General {
@@ -65,6 +67,12 @@ impl General {
         ui.on_toggle_on_top(move || {
             if let Some(g) = me.upgrade() {
                 g.toggle_on_top();
+            }
+        });
+        let me = self.me.clone();
+        ui.on_toggle_tilted_editing(move || {
+            if let Some(g) = me.upgrade() {
+                g.toggle_tilted_editing();
             }
         });
         let me = self.me.clone();
@@ -143,6 +151,7 @@ impl General {
         if let Some(ui) = self.ui.upgrade() {
             ui.set_start_with_windows(self.deps.env.startup.is_enabled());
             ui.set_new_notes_on_top(self.deps.db.new_notes_on_top());
+            ui.set_tilted_editing(self.deps.db.tilted_editing());
             ui.set_park_beside(self.deps.db.park_notes_beside());
         }
         self.refresh_uninstall();
@@ -157,6 +166,15 @@ impl General {
     fn toggle_on_top(&self) {
         if let Err(e) = self.deps.db.set_new_notes_on_top(!self.deps.db.new_notes_on_top()) {
             self.deps.env.dialogs.error(&format!("Washi could not save that setting: {e}"));
+        }
+        self.refresh_toggles();
+    }
+
+    fn toggle_tilted_editing(&self) {
+        let on = !self.deps.db.tilted_editing();
+        match self.deps.db.set_tilted_editing(on) {
+            Ok(()) => (self.deps.tilted_editing_changed)(on),
+            Err(e) => self.deps.env.dialogs.error(&format!("Washi could not save that setting: {e}")),
         }
         self.refresh_toggles();
     }

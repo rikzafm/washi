@@ -31,6 +31,9 @@ const MOCKUP_PAPER_H: [f32; 5] = [658.4, 600.0, 603.2, 766.8, 600.0];
 const APPEARANCE_PAPER_H: f32 = 583.0 + 116.0;
 /// The General row added after the mockup ("Notes left in All Notes"): its height with the rule.
 const PARK_ROW_H: f32 = 82.0;
+/// The General row added after that ("Keep text tilted while editing", above it): one line of hint, 56
+/// minimum and its 2px rule.
+const TILT_ROW_H: f32 = 58.0;
 /// The Font & Style rows taken out since the mockup: Fade text edge (80, its hint on two lines, and its
 /// 2px rule) and UI size (the 56 minimum, the last row; the Tape color row above it loses its 2px rule
 /// instead).
@@ -53,7 +56,7 @@ fn want_paper_h(i: usize) -> f32 {
         return APPEARANCE_PAPER_H;
     }
     let changed = match i as i32 {
-        tab::GENERAL => PARK_ROW_H,
+        tab::GENERAL => PARK_ROW_H + TILT_ROW_H,
         tab::STYLE => -STYLE_REMOVED_H,
         _ => 0.0,
     };

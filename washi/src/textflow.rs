@@ -3,8 +3,11 @@
 //! The mockup text is tilted with the paper, but the software renderer cannot rotate text. At rest
 //! the note therefore draws every word as its own upright `Text`, moved to where the tilted word
 //! would be (the paper's tilt about the paper's center). While editing, the stock level `TextInput`
-//! shows instead. Both must break lines in the same places, so this module wraps with the advances
-//! of the same embedded fonts (they have no kerning table, so the advances are exact).
+//! only places the caret and the selection, and the words stay where they are (tilted editing,
+//! Settings › General) or settle flat. Everything here is in the level layout either way: the note
+//! maps what it draws and what the pointer touches through the tilt. Both must break lines in the same
+//! places, so this module wraps with the advances of the same embedded fonts (they have no kerning
+//! table, so the advances are exact).
 //!
 //! The four faces (regular, bold, italic, bold italic) have the same advances, so a line breaks in
 //! the same places whatever its characters' styles. The edit fields lay their text out in a blank
@@ -286,7 +289,15 @@ fn line_starts(lines: &[Vec<Word>]) -> Vec<usize> {
 }
 
 /// The visual line and x of the caret at byte `offset` of block `b`, in a paper `paper_w` wide.
+/// Where a line wraps without a space the same offset ends one line and starts the next: this is
+/// the start of the next (see [`caret_line_on`]).
 pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLine {
+    caret_line_on(b, offset, false, paper_w, t)
+}
+
+/// [`caret_line`], with the side of a wrap the caret is on: with `line_end`, an offset that starts
+/// a line (other than the first) is the end of the line before it.
+pub fn caret_line_on(b: &Block, offset: usize, line_end: bool, paper_w: f64, t: &Tokens) -> CaretLine {
     let avail = paper_w - t.inset_left - t.inset_right;
     let m = Measure::new(false, false, t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
@@ -295,12 +306,22 @@ pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLi
     while !b.text.is_char_boundary(offset) {
         offset -= 1;
     }
-    let line = starts.iter().rposition(|&s| s <= offset).unwrap_or(0);
+    let mut line = starts.iter().rposition(|&s| s <= offset).unwrap_or(0);
+    if line_end && line > 0 && starts[line] == offset {
+        line -= 1;
+    }
     CaretLine { line, lines: lines.len(), x: m.width(&b.text[starts[line]..offset]) }
 }
 
 /// The byte offset on visual `line` (clamped to the block's last) of block `b` nearest to `x`.
 pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> usize {
+    offset_on_line(b, line, x, paper_w, t).0
+}
+
+/// [`offset_at`], and whether that offset is the end of `line` where the next line starts at the
+/// same offset (a wrap without a space): the caret is then on this line, not at the start of the
+/// next (the `line_end` of [`caret_line_on`]).
+pub fn offset_on_line(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> (usize, bool) {
     let avail = paper_w - t.inset_left - t.inset_right;
     let m = Measure::new(false, false, t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
@@ -326,7 +347,7 @@ pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> us
     if d < best.1 {
         best = (line_text_end, d);
     }
-    best.0
+    (best.0, best.0 > start && starts.get(line + 1) == Some(&best.0))
 }
 
 /// A thin filled bar in the paper's frame: an underline, a strike-through or a list bullet.
@@ -526,27 +547,45 @@ pub fn caret_span_with_images(blocks: &[Block], block: usize, offset: usize, pap
     Some((y, y + pitch))
 }
 
+/// Where the caret at byte `offset` of text block `block` is drawn, in the paper's frame: its x,
+/// and the top and bottom of its line box. `line_end` as in [`caret_line_on`]. An image has no caret.
+pub fn caret_box(blocks: &[Block], block: usize, offset: usize, line_end: bool, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Option<(f64, f64, f64)> {
+    let b = blocks.get(block).filter(|b| b.kind != Kind::Image)?;
+    let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+    let pitch = t.style(b.kind).pitch;
+    let at = caret_line_on(b, offset, line_end, paper_w, t);
+    let y = tops[block] + at.line as f64 * pitch;
+    Some((t.inset_left + at.x, y, y + pitch))
+}
+
 /// The caret under `point` (level paper frame, x from the paper's left edge): the block whose top is
 /// the last one above the point, the visual line within it, then the nearest character boundary.
 /// Above the first block is the start of the note, below the last its end. Anywhere on an image
 /// is that image's block (an image caret has offset 0), so a click selects the picture.
 pub fn hit(blocks: &[Block], point: (f64, f64), paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Caret {
+    hit_on_line(blocks, point, paper_w, t, image_size).0
+}
+
+/// [`hit`], and whether the caret is at the end of the line under the point where the next line
+/// starts at the same offset (see [`offset_on_line`]).
+pub fn hit_on_line(blocks: &[Block], point: (f64, f64), paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Caret, bool) {
     let (tops, bottom) = extent_with_images(blocks, paper_w, t, image_size);
-    let Some(last) = blocks.len().checked_sub(1) else { return Caret { block: 0, offset: 0 } };
+    let Some(last) = blocks.len().checked_sub(1) else { return (Caret { block: 0, offset: 0 }, false) };
     if point.1 < tops[0] {
-        return Caret { block: 0, offset: 0 };
+        return (Caret { block: 0, offset: 0 }, false);
     }
     if point.1 >= bottom {
-        return Caret { block: last, offset: if blocks[last].kind == Kind::Image { 0 } else { blocks[last].text.len() } };
+        return (Caret { block: last, offset: if blocks[last].kind == Kind::Image { 0 } else { blocks[last].text.len() } }, false);
     }
     let block = tops.iter().rposition(|&top| top <= point.1).unwrap_or(0);
     let b = &blocks[block];
     if b.kind == Kind::Image {
-        return Caret { block, offset: 0 };
+        return (Caret { block, offset: 0 }, false);
     }
     let pitch = t.style(b.kind).pitch;
     let line = ((point.1 - tops[block]) / pitch).floor().max(0.0) as usize;
-    Caret { block, offset: offset_at(b, line, point.0 - t.inset_left, paper_w, t) }
+    let (offset, line_end) = offset_on_line(b, line, point.0 - t.inset_left, paper_w, t);
+    (Caret { block, offset }, line_end)
 }
 
 /// A level box in the paper's frame.

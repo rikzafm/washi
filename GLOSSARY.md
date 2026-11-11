@@ -12,6 +12,10 @@ _Avoid_: Sticky, memo
 The tilted white sheet with washi tape that makes up a Note's visible body.
 _Avoid_: Card, page
 
+**Tilted editing**:
+How a Note's text is edited: by default it stays on the Paper's tilted baseline while you type, with the caret and the selection tilted too. Turned off (Settings › General, "Keep text tilted while editing"), the text settles flat for editing and tilts again at rest. One setting for every Note.
+_Avoid_: Slanted editing (slant is the italic style)
+
 **Dropdown menu**:
 The popup opened from a Note's menu button. It lists notes to jump to and holds the New, All notes and Settings actions.
 _Avoid_: Context menu (that is the separate right-click menu), overflow menu
