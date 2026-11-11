@@ -595,7 +595,7 @@ impl Editor {
                     return true;
                 }
                 if let Some(text) = editor.clipboard.text() {
-                    if text.contains('\n') || text.contains('\r') {
+                    if text.contains('\n') || text.contains('\r') || editor.has_range() {
                         let caret = editor.replace_range(&text);
                         changed(Some(caret));
                         return true;
@@ -890,6 +890,10 @@ impl Editor {
 
     pub fn selection(&self) -> Range {
         self.selection.get()
+    }
+
+    pub fn has_range(&self) -> bool {
+        self.range.get().is_some()
     }
 
     pub fn set_selection(&self, ui: &NoteWindow, range: Range) {
@@ -2072,5 +2076,41 @@ mod tests {
         // Undo restores original text
         editor.step(false);
         assert_eq!(editor.text(), "# Title\nFirst paragraph\nSecond paragraph");
+    }
+
+    #[test]
+    fn test_editor_multi_block_single_line_paste_with_clipboard_abstraction() {
+        let (_dir, editor, ui) = test_editor_with_ui("Block 0\nBlock 1\nBlock 2");
+        editor.relayout(&ui);
+
+        // Cross-block selection from block 0 offset 3 to block 2 offset 3
+        let range = Range {
+            anchor: Caret { block: 0, offset: 3 },
+            focus: Caret { block: 2, offset: 3 },
+        };
+        editor.set_selection(&ui, range);
+        assert!(editor.range.get().is_some(), "multi-block range selection active");
+
+        // Inject single-line plain text into clipboard abstraction (DummyClipboard)
+        editor.clipboard.set_rich(ClipboardPayload {
+            plain: Some("REPLACED".to_string()),
+            ..Default::default()
+        }).unwrap();
+
+        // Invoke paste-range callback
+        let handled = ui.invoke_paste_range();
+        assert!(handled, "paste-range handled single-line clipboard content");
+
+        // Selected range cleanly replaced
+        assert_eq!(editor.text(), "# BloREPLACEDck 2");
+        assert!(editor.range.get().is_none(), "range cleared after paste");
+
+        // Undo restores original multi-block text
+        editor.step(false);
+        assert_eq!(editor.text(), "# Block 0\nBlock 1\nBlock 2");
+
+        // Redo re-applies paste replacement
+        editor.step(true);
+        assert_eq!(editor.text(), "# BloREPLACEDck 2");
     }
 }
