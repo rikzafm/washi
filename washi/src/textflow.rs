@@ -308,7 +308,11 @@ pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> us
     let line = line.min(lines.len() - 1);
     let start = starts[line];
     let line_words = &lines[line];
-    let line_text_end = line_words.last().map_or(b.text.len(), |w| w.off + w.text.len());
+    let line_text_end = if line == lines.len() - 1 {
+        b.text.len()
+    } else {
+        line_words.last().map_or(b.text.len(), |w| w.off + w.text.len())
+    };
     let mut best = (start, f64::MAX);
     let mut at = 0.0;
     for (i, c) in b.text[start..line_text_end].char_indices().map(|(i, c)| (start + i, c)) {
@@ -853,6 +857,32 @@ mod tests {
         let line0_end = "Sentence one wraps here.".len();
         let at_end = offset_at(&b, 0, 5000.0, 363.0, &TOKENS);
         assert_eq!(at_end, line0_end, "Caret must sit directly after the sentence on line 0, before any wrapped spaces");
+    }
+
+    #[test]
+    fn clicking_to_the_right_of_trailing_whitespace_on_final_line_snaps_to_end_of_text() {
+        // Single-line block with trailing spaces
+        let single = Block::new(Kind::Body, "Single line with trailing spaces   ");
+        let at_single_end = offset_at(&single, 0, 5000.0, 363.0, &TOKENS);
+        assert_eq!(at_single_end, single.text.len(), "Single-line block must snap caret to end of text including trailing spaces");
+
+        // Multi-line block with trailing spaces on the final line
+        let multi = Block::new(Kind::Body, "Sentence one wraps here. Sentence two continues on the next line with trailing   ");
+        let last_line = caret_line(&multi, multi.text.len(), 363.0, &TOKENS).line;
+        assert!(last_line > 0, "multi block must wrap into multiple lines");
+
+        // Intermediate lines continue to position caret directly after the sentence, before wrapped whitespace
+        let line0_end = "Sentence one wraps here.".len();
+        let at_line0 = offset_at(&multi, 0, 5000.0, 363.0, &TOKENS);
+        assert_eq!(at_line0, line0_end, "Soft-wrapped line 0 must continue to snap before wrapped whitespace");
+
+        // Final line positions caret at the end of the text, after trailing whitespace
+        let at_final_line = offset_at(&multi, last_line, 5000.0, 363.0, &TOKENS);
+        assert_eq!(at_final_line, multi.text.len(), "Final line of multi-line block must snap caret to end of text including trailing spaces");
+
+        // Clamping to a line index beyond the last line also lands at the end of text
+        let at_clamped = offset_at(&multi, 999, 5000.0, 363.0, &TOKENS);
+        assert_eq!(at_clamped, multi.text.len(), "Line index beyond last must clamp to final line and snap to end of text");
     }
 
     fn rects(d: &Document, range: Range) -> Vec<Rect> {
