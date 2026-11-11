@@ -1203,6 +1203,29 @@ impl Editor {
         if is(Key::Return) || is(Key::Backspace) || is(Key::Delete) {
             return None;
         }
+        if is(Key::LeftArrow) {
+            if offset > 0 {
+                return None;
+            }
+            if i > 0 {
+                let prev = i - 1;
+                let to = doc.blocks()[prev].text.len();
+                return Some((Caret { block: prev, offset: to }, false));
+            } else {
+                return Some((Caret { block: 0, offset: 0 }, false));
+            }
+        }
+        if is(Key::RightArrow) {
+            let len = doc.blocks().get(i).map_or(0, |b| b.text.len());
+            if offset < len {
+                return None;
+            }
+            if i + 1 < doc.len() {
+                return Some((Caret { block: i + 1, offset: 0 }, false));
+            } else {
+                return Some((Caret { block: i, offset: len }, false));
+            }
+        }
         let up = is(Key::UpArrow);
         if !up && !is(Key::DownArrow) {
             return None;
@@ -2072,5 +2095,45 @@ mod tests {
         // Undo restores original text
         editor.step(false);
         assert_eq!(editor.text(), "# Title\nFirst paragraph\nSecond paragraph");
+    }
+
+    #[test]
+    fn test_editor_horizontal_arrow_paragraph_navigation() {
+        use slint::platform::Key;
+        let left_key = char::from(Key::LeftArrow).to_string();
+        let right_key = char::from(Key::RightArrow).to_string();
+
+        let (_dir, editor, ui) = test_editor_with_ui("Title\nParagraph 1\nParagraph 2");
+        editor.relayout(&ui);
+
+        // 1. Pressing Left Arrow at offset 0 of paragraph N (N > 0) moves focus and caret to the end of paragraph N-1.
+        let res = editor.key(1, &left_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 0, offset: 5 }, false)), "Left arrow at start of paragraph 1 moves to end of paragraph 0");
+
+        let res = editor.key(2, &left_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 1, offset: 11 }, false)), "Left arrow at start of paragraph 2 moves to end of paragraph 1");
+
+        // 2. Pressing Left Arrow within a paragraph (offset > 0) returns None so Slint handles intra-paragraph navigation.
+        let res = editor.key(1, &left_key, 5, &ui);
+        assert_eq!(res, None, "Left arrow mid-paragraph returns None");
+
+        // 3. Pressing Left Arrow at offset 0 of paragraph 0 remains at the start of the document without error.
+        let res = editor.key(0, &left_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 0, offset: 0 }, false)), "Left arrow at start of block 0 stays at start");
+
+        // 4. Pressing Right Arrow at the end of paragraph N moves focus and caret to offset 0 of paragraph N+1.
+        let res = editor.key(0, &right_key, 5, &ui);
+        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Right arrow at end of paragraph 0 moves to start of paragraph 1");
+
+        let res = editor.key(1, &right_key, 11, &ui);
+        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Right arrow at end of paragraph 1 moves to start of paragraph 2");
+
+        // 5. Pressing Right Arrow within a paragraph (offset < len) returns None so Slint handles intra-paragraph navigation.
+        let res = editor.key(1, &right_key, 5, &ui);
+        assert_eq!(res, None, "Right arrow mid-paragraph returns None");
+
+        // 6. Pressing Right Arrow at the end of the last paragraph remains at the end of the document without error.
+        let res = editor.key(2, &right_key, 11, &ui);
+        assert_eq!(res, Some((Caret { block: 2, offset: 11 }, false)), "Right arrow at end of last paragraph stays at end");
     }
 }
