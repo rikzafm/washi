@@ -22,7 +22,17 @@ fn main() {
     let px = washi::images::decode(&std::fs::read(&image).unwrap()).unwrap();
     let size = (px.width, px.height);
     let pic = washi::note_images::to_slint(&px);
-    let _viewer = washi::image_viewer::ImageViewer::open(pic, size, &caption, None, slint::Image::default(), Rc::new(|_| {})).unwrap();
+    let _viewer = washi::image_viewer::ImageViewer::open(
+        pic,
+        size,
+        &caption,
+        None,
+        Rc::new(snap::fakes::FakeWindowControl::default()),
+        Rc::new(snap::fakes::FakeClipboard::default()),
+        Some(px),
+        slint::Image::default(),
+        Rc::new(|| {}),
+    ).unwrap();
     let adapter = snap::platform::windows().pop().unwrap();
     let win = adapter.window();
     win.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });

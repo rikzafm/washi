@@ -1098,31 +1098,31 @@ impl Harness {
     }
 
     pub fn is_all_notes_open(&self) -> bool {
-        self.app.as_ref().is_some_and(|a| a.is_all_notes_open())
+        self.app.as_ref().is_some_and(|a| a.all_notes().is_some())
     }
 
     pub fn all_notes_selected_id(&self) -> Option<NoteId> {
-        self.app.as_ref().and_then(|a| a.all_notes_selected_id())
+        self.app.as_ref().and_then(|a| a.all_notes()).and_then(|v| v.selected_id())
     }
 
     pub fn all_notes_open_count(&self) -> Option<usize> {
-        self.app.as_ref().and_then(|a| a.all_notes_open_count())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.open_count())
     }
 
     pub fn all_notes_closed_count(&self) -> Option<usize> {
-        self.app.as_ref().and_then(|a| a.all_notes_closed_count())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.closed_count())
     }
 
     pub fn all_notes_open_items(&self) -> Vec<washi::note_window::AllNoteItem> {
-        self.app.as_ref().map(|a| a.all_notes_open_items()).unwrap_or_default()
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.open_items()).unwrap_or_default()
     }
 
     pub fn all_notes_closed_items(&self) -> Vec<washi::note_window::AllNoteItem> {
-        self.app.as_ref().map(|a| a.all_notes_closed_items()).unwrap_or_default()
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.closed_items()).unwrap_or_default()
     }
 
     pub fn all_notes_status_text(&self) -> Option<String> {
-        self.app.as_ref().and_then(|a| a.all_notes_status_text())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.status_text())
     }
 
     /// The note the All Notes editor shows (it may differ from the selected row only briefly).
@@ -1136,7 +1136,7 @@ impl Harness {
 
     /// The block whose field has the focus in the All Notes editor (-1 none).
     pub fn all_notes_editor_focused_block(&self) -> Option<i32> {
-        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_handle().ui().get_text_focused_block())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.ui().get_text_focused_block())
     }
 
     /// Draw the All Notes editor (that is when its text fields are made, and could take the focus).
@@ -1170,12 +1170,12 @@ impl Harness {
 
     /// How far the All Notes sidebar has slid in (1 at rest).
     pub fn all_notes_intro(&self) -> Option<f32> {
-        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_handle().ui().get_all_notes_intro())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.ui().get_all_notes_intro())
     }
 
     /// How far the editor's text has settled after the last note switch (1 at rest).
     pub fn all_notes_editor_settle(&self) -> Option<f32> {
-        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.editor_handle().ui().get_switch_settle())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.ui().get_switch_settle())
     }
 
     /// Type into the All Notes editor (replace its text without typing it).
@@ -1188,20 +1188,20 @@ impl Harness {
 
     /// Press the All Notes editor's menu button.
     pub fn invoke_editor_menu(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_editor_menu();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_open_dropdown();
         }
         self.settle();
     }
 
     pub fn editor_menu_button_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        self.app.as_ref().and_then(|a| a.editor_menu_button_rect())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.menu_button_rect())
     }
 
     /// Double click a row of the list.
     pub fn invoke_all_notes_open_note(&mut self, id: NoteId) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_open_note(id);
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_open_note(id);
         }
         self.settle();
     }
@@ -1216,78 +1216,78 @@ impl Harness {
     }
 
     pub fn all_notes_confirming_delete(&self) -> Option<bool> {
-        self.app.as_ref().and_then(|a| a.all_notes_confirming_delete())
+        self.app.as_ref().and_then(|a| a.all_notes()).map(|v| v.confirming_delete())
     }
 
     pub fn set_all_notes_confirming_delete(&mut self, confirming: bool) {
-        if let Some(app) = &self.app {
-            app.set_all_notes_confirming_delete(confirming);
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.set_confirming_delete(confirming);
         }
     }
 
     pub fn invoke_all_notes_select_note(&mut self, id: NoteId) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_select_note(id);
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_select_note(id);
         }
         self.settle();
     }
 
     pub fn invoke_all_notes_new_note(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_new_note();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_new_note();
         }
         self.settle();
     }
 
     pub fn invoke_all_notes_open_or_focus(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_open_or_focus();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_open_or_focus_note();
         }
         self.settle();
     }
 
     pub fn invoke_all_notes_close_note(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_close_note();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_close_note();
         }
         self.settle();
     }
 
     pub fn invoke_all_notes_export_note(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_export_note();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_export_note();
         }
         self.settle();
     }
 
     pub fn invoke_all_notes_request_delete(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_request_delete();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_request_delete();
         }
         self.settle();
     }
 
     pub fn invoke_all_notes_cancel_delete(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_cancel_delete();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_cancel_delete();
         }
         self.settle();
     }
 
     pub fn invoke_all_notes_confirm_delete(&mut self) {
-        if let Some(app) = &self.app {
-            app.invoke_all_notes_confirm_delete();
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.invoke_confirm_delete();
         }
         self.settle();
     }
 
     pub fn click_all_notes(&mut self, x: f32, y: f32) {
-        if let Some(app) = &self.app {
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
             let position = slint::LogicalPosition::new(x, y);
             let button = slint::platform::PointerEventButton::Left;
-            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerMoved { position });
-            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerPressed { position, button });
-            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerReleased { position, button });
+            v.dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+            v.dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+            v.dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
         }
         self.settle();
     }
@@ -1307,10 +1307,10 @@ impl Harness {
 
     /// Turn the mouse wheel over the All Notes editor window at (x, y).
     pub fn scroll_all_notes(&mut self, x: f32, y: f32, dy: f32) {
-        if let Some(app) = &self.app {
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
             let position = slint::LogicalPosition::new(x, y);
-            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerMoved { position });
-            app.dispatch_all_notes_event(slint::platform::WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: dy });
+            v.dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+            v.dispatch_event(slint::platform::WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y: dy });
         }
         self.settle();
     }
@@ -1349,11 +1349,11 @@ impl Harness {
     }
 
     pub fn press_all_notes_escape(&mut self) {
-        if let Some(app) = &self.app {
-            app.dispatch_all_notes_event(slint::platform::WindowEvent::KeyPressed {
+        if let Some(v) = self.app.as_ref().and_then(|a| a.all_notes()) {
+            v.dispatch_event(slint::platform::WindowEvent::KeyPressed {
                 text: slint::platform::Key::Escape.into(),
             });
-            app.dispatch_all_notes_event(slint::platform::WindowEvent::KeyReleased {
+            v.dispatch_event(slint::platform::WindowEvent::KeyReleased {
                 text: slint::platform::Key::Escape.into(),
             });
         }

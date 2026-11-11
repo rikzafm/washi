@@ -41,7 +41,7 @@ fn rect_contains_point(r: &ScreenRect, p: (i32, i32)) -> bool {
 
 /// Find the work area containing `point` (half-open: `[x, right)` and `[y, bottom)`),
 /// falling back to the first work area if no work area contains it.
-fn find_work_area<'a>(point: (i32, i32), work_areas: &'a [ScreenRect]) -> Option<&'a ScreenRect> {
+pub fn find_work_area<'a>(point: (i32, i32), work_areas: &'a [ScreenRect]) -> Option<&'a ScreenRect> {
     work_areas
         .iter()
         .find(|wa| rect_contains_point(wa, point))
@@ -342,5 +342,35 @@ mod tests {
         let dialog_size = (250, 150);
         let pos = center_over(target, dialog_size, &[]);
         assert_eq!(pos, ScreenRect::new(575, 475, 250, 150));
+    }
+
+    // --- find_work_area tests ---
+
+    #[test]
+    fn find_work_area_locates_correct_monitor() {
+        assert_eq!(find_work_area((500, 500), &[PRIMARY, SECOND]), Some(&PRIMARY));
+        assert_eq!(find_work_area((2500, 500), &[PRIMARY, SECOND]), Some(&SECOND));
+    }
+
+    #[test]
+    fn find_work_area_half_open_boundaries() {
+        // [0, 0] is top-left of PRIMARY: inside PRIMARY
+        assert_eq!(find_work_area((0, 0), &[PRIMARY, SECOND]), Some(&PRIMARY));
+        // [1919, 1039] is inside PRIMARY
+        assert_eq!(find_work_area((1919, 1039), &[PRIMARY, SECOND]), Some(&PRIMARY));
+        // [1920, 0] is right boundary of PRIMARY, which is left boundary of SECOND: inside SECOND
+        assert_eq!(find_work_area((1920, 0), &[PRIMARY, SECOND]), Some(&SECOND));
+        // [3840, 0] is right boundary of SECOND: outside all work areas -> falls back to first (PRIMARY)
+        assert_eq!(find_work_area((3840, 0), &[PRIMARY, SECOND]), Some(&PRIMARY));
+    }
+
+    #[test]
+    fn find_work_area_falls_back_to_first_when_offscreen() {
+        assert_eq!(find_work_area((-100, -100), &[PRIMARY, SECOND]), Some(&PRIMARY));
+    }
+
+    #[test]
+    fn find_work_area_empty_returns_none() {
+        assert_eq!(find_work_area((100, 100), &[]), None);
     }
 }

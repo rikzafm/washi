@@ -7,21 +7,11 @@
 //! [`images::MAX_STORED`]: crate::images::MAX_STORED
 
 use crate::note_window::{CaptionPiece, ImageViewerWindow};
+use crate::placement;
+use crate::platform::{ImageClipboard, ResizeEdge, ScreenRect, WindowControl};
 use crate::textflow;
-use crate::platform::ResizeEdge;
 use slint::ComponentHandle;
 use std::rc::Rc;
-
-/// What a viewer window asks the app to do.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ViewerEvent {
-    /// The close button, Esc, or the window itself was closed.
-    Close,
-    StartMove,
-    StartResize(ResizeEdge),
-    /// Ctrl+C was pressed to copy the picture.
-    Copy,
-}
 
 // The chrome around the picture, logical px; the same numbers as `ViewerMetrics` and
 // `PaperTheme.margin` in the .slint files.
@@ -58,6 +48,16 @@ fn pieces(text: &str, size: f64) -> slint::ModelRc<CaptionPiece> {
 /// The paper's tilt, degrees clockwise (`PaperTheme.paper-tilt`).
 const TILT_DEG: f64 = 1.5;
 
+fn hwnd_of(ui: &ImageViewerWindow) -> Option<isize> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let window_handle = ui.window().window_handle();
+    let handle = window_handle.window_handle().ok()?;
+    match handle.as_raw() {
+        RawWindowHandle::Win32(w) => Some(w.hwnd.get()),
+        _ => None,
+    }
+}
+
 pub struct ImageViewer {
     ui: ImageViewerWindow,
     /// The window's scale: the monitor's times the UI size.
@@ -65,14 +65,17 @@ pub struct ImageViewer {
 }
 
 impl ImageViewer {
-    /// Create and show the window. `max` is the screen's work area in physical px.
+    /// Create, position, and show the picture viewer window.
     pub fn open(
         picture: slint::Image,
         size: (u32, u32),
         caption: &str,
-        max: Option<(f32, f32)>,
+        target: Option<ScreenRect>,
+        window_control: Rc<dyn WindowControl>,
+        clipboard: Rc<dyn ImageClipboard>,
+        rgba: Option<crate::images::Rgba>,
         icon: slint::Image,
-        on_event: Rc<dyn Fn(ViewerEvent)>,
+        on_close: Rc<dyn Fn()>,
     ) -> Result<ImageViewer, slint::PlatformError> {
         let ui = ImageViewerWindow::new()?;
         // drawn at the UI size, like every window
@@ -108,36 +111,75 @@ impl ImageViewer {
         ui.set_info_pieces(pieces(&info, INFO_SIZE));
         ui.set_info_width(textflow::line_width(&info, INFO_SIZE) as f32);
         ui.set_app_icon(icon);
+
+        // Window positioning via placement.rs
+        let work_areas = window_control.work_areas();
+        let target_wa = if let Some(target_rect) = target {
+            let center = (target_rect.x + target_rect.w / 2, target_rect.y + target_rect.h / 2);
+            placement::find_work_area(center, &work_areas).copied()
+        } else {
+            work_areas.first().copied()
+        };
+
         let factor = scale.factor();
-        let (w, h) = window_size(size, max.map(|(mw, mh)| (mw / factor, mh / factor)));
+        let max_area = target_wa.map(|wa| (wa.w as f32 / factor, wa.h as f32 / factor));
+        let (w, h) = window_size(size, max_area);
         ui.window().set_size(slint::LogicalSize::new(w, h));
+
+        let phys_w = (w * factor).round() as i32;
+        let phys_h = (h * factor).round() as i32;
+        let target_anchor = target.or(target_wa).unwrap_or(ScreenRect::new(0, 0, 1920, 1080));
+        let pos = placement::center_over(target_anchor, (phys_w, phys_h), &work_areas);
+        ui.window().set_position(slint::PhysicalPosition::new(pos.x, pos.y));
+
+        // Direct window dragging via platform window_control adapter
         {
-            let on_event = on_event.clone();
-            ui.on_close_viewer(move || on_event(ViewerEvent::Close));
-        }
-        {
-            let on_event = on_event.clone();
-            ui.on_start_move(move || on_event(ViewerEvent::StartMove));
-        }
-        {
-            let on_event = on_event.clone();
-            ui.on_start_resize(move |code| {
-                if let Some(edge) = ResizeEdge::from_code(code) {
-                    on_event(ViewerEvent::StartResize(edge));
+            let wc = window_control.clone();
+            let weak = ui.as_weak();
+            ui.on_start_move(move || {
+                if let Some(ui) = weak.upgrade() {
+                    wc.begin_move(0, hwnd_of(&ui));
                 }
             });
         }
+
+        // Direct window resizing via platform window_control adapter
         {
-            let on_event = on_event.clone();
-            ui.on_copy_picture(move || on_event(ViewerEvent::Copy));
+            let wc = window_control.clone();
+            let weak = ui.as_weak();
+            ui.on_start_resize(move |code| {
+                if let Some(edge) = ResizeEdge::from_code(code) {
+                    if let Some(ui) = weak.upgrade() {
+                        wc.begin_resize(0, hwnd_of(&ui), edge);
+                    }
+                }
+            });
+        }
+
+        // Direct clipboard copy via platform clipboard adapter
+        {
+            let cb = clipboard.clone();
+            let img = rgba.clone();
+            ui.on_copy_picture(move || {
+                if let Some(ref img) = img {
+                    let _ = cb.set_image(img);
+                }
+            });
+        }
+
+        // Window closure handling
+        {
+            let on_close = on_close.clone();
+            ui.on_close_viewer(move || on_close());
         }
         {
-            let on_event = on_event.clone();
+            let on_close = on_close.clone();
             ui.window().on_close_requested(move || {
-                on_event(ViewerEvent::Close);
+                on_close();
                 slint::CloseRequestResponse::HideWindow
             });
         }
+
         ui.show()?;
         scale.resync(ui.window(), true);
         Ok(ImageViewer { ui, scale })
@@ -161,13 +203,28 @@ impl ImageViewer {
 
     /// The native window handle, once the window exists.
     pub fn hwnd(&self) -> Option<isize> {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        let window_handle = self.ui.window().window_handle();
-        let handle = window_handle.window_handle().ok()?;
-        match handle.as_raw() {
-            RawWindowHandle::Win32(w) => Some(w.hwnd.get()),
-            _ => None,
-        }
+        hwnd_of(&self.ui)
+    }
+
+    /// The underlying Slint component.
+    pub fn ui(&self) -> &ImageViewerWindow {
+        &self.ui
+    }
+
+    /// The physical window position on screen.
+    pub fn position(&self) -> (i32, i32) {
+        let pos = self.ui.window().position();
+        (pos.x, pos.y)
+    }
+
+    /// Invoke close programmatically.
+    pub fn close(&self) {
+        self.ui.invoke_close_viewer();
+    }
+
+    /// Invoke copy programmatically.
+    pub fn copy(&self) {
+        self.ui.invoke_copy_picture();
     }
 }
 
@@ -180,6 +237,8 @@ impl Drop for ImageViewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::NoteId;
+    use std::cell::{Cell, RefCell};
 
     #[test]
     fn a_small_picture_gets_the_minimum_window() {
@@ -195,5 +254,226 @@ mod tests {
     fn a_big_picture_is_held_to_nine_tenths_of_the_screen() {
         let (w, h) = window_size((662, 662), Some((800.0, 600.0)));
         assert_eq!((w, h), (720.0, 540.0));
+    }
+
+    #[derive(Default)]
+    struct TestWindowControl {
+        moved: Cell<bool>,
+        resized: Cell<Option<ResizeEdge>>,
+        areas: Vec<ScreenRect>,
+    }
+
+    impl WindowControl for TestWindowControl {
+        fn begin_move(&self, _note: NoteId, _hwnd: Option<isize>) {
+            self.moved.set(true);
+        }
+        fn begin_resize(&self, _note: NoteId, _hwnd: Option<isize>, edge: ResizeEdge) {
+            self.resized.set(Some(edge));
+        }
+        fn work_areas(&self) -> Vec<ScreenRect> {
+            self.areas.clone()
+        }
+        fn stacking_order(&self, notes: &[(NoteId, Option<isize>)]) -> Vec<NoteId> {
+            notes.iter().map(|(id, _)| *id).collect()
+        }
+    }
+
+    #[derive(Default)]
+    struct TestClipboard {
+        copied: RefCell<Option<crate::images::Rgba>>,
+    }
+
+    impl ImageClipboard for TestClipboard {
+        fn image(&self) -> Option<crate::images::Rgba> {
+            self.copied.borrow().clone()
+        }
+        fn set_image(&self, img: &crate::images::Rgba) -> Result<(), String> {
+            *self.copied.borrow_mut() = Some(img.clone());
+            Ok(())
+        }
+        fn set_rich(&self, payload: crate::platform::ClipboardPayload) -> Result<(), String> {
+            *self.copied.borrow_mut() = payload.image;
+            Ok(())
+        }
+        fn html(&self) -> Option<String> { None }
+        fn text(&self) -> Option<String> { None }
+    }
+
+    fn sample_rgba(w: u32, h: u32) -> crate::images::Rgba {
+        crate::images::Rgba {
+            width: w,
+            height: h,
+            data: vec![255; (w * h * 4) as usize],
+        }
+    }
+
+    #[test]
+    fn image_viewer_opens_and_centers_over_target() {
+        crate::dropdown::init_test_platform();
+        let wc = Rc::new(TestWindowControl {
+            areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
+            ..Default::default()
+        });
+        let cb = Rc::new(TestClipboard::default());
+        let rgba = sample_rgba(200, 150);
+        let pic = slint::Image::default();
+        let target = ScreenRect::new(500, 400, 400, 300);
+
+        let viewer = ImageViewer::open(
+            pic,
+            (200, 150),
+            "Test Caption",
+            Some(target),
+            wc.clone(),
+            cb.clone(),
+            Some(rgba),
+            slint::Image::default(),
+            Rc::new(|| {}),
+        ).expect("ImageViewer::open");
+
+        let (w, h) = window_size((200, 150), Some((1920.0, 1040.0)));
+        let expected = placement::center_over(target, (w.round() as i32, h.round() as i32), &wc.work_areas());
+        assert_eq!(viewer.position(), (expected.x, expected.y));
+    }
+
+    #[test]
+    fn image_viewer_centers_on_primary_work_area_when_target_is_none() {
+        crate::dropdown::init_test_platform();
+        let wa = ScreenRect::new(0, 0, 1920, 1040);
+        let wc = Rc::new(TestWindowControl {
+            areas: vec![wa],
+            ..Default::default()
+        });
+        let cb = Rc::new(TestClipboard::default());
+        let pic = slint::Image::default();
+
+        let viewer = ImageViewer::open(
+            pic,
+            (200, 150),
+            "No Target",
+            None,
+            wc.clone(),
+            cb.clone(),
+            None,
+            slint::Image::default(),
+            Rc::new(|| {}),
+        ).expect("ImageViewer::open");
+
+        let (w, h) = window_size((200, 150), Some((1920.0, 1040.0)));
+        let expected = placement::center_over(wa, (w.round() as i32, h.round() as i32), &wc.work_areas());
+        assert_eq!(viewer.position(), (expected.x, expected.y));
+    }
+
+    #[test]
+    fn image_viewer_target_on_secondary_monitor_places_on_secondary_monitor() {
+        crate::dropdown::init_test_platform();
+        let primary = ScreenRect::new(0, 0, 800, 600);
+        let secondary = ScreenRect::new(1920, 0, 2560, 1440);
+        let wc = Rc::new(TestWindowControl {
+            areas: vec![primary, secondary],
+            ..Default::default()
+        });
+        let cb = Rc::new(TestClipboard::default());
+        let pic = slint::Image::default();
+        let target = ScreenRect::new(2200, 300, 400, 300);
+
+        let viewer = ImageViewer::open(
+            pic,
+            (1200, 900),
+            "Secondary Monitor",
+            Some(target),
+            wc.clone(),
+            cb.clone(),
+            None,
+            slint::Image::default(),
+            Rc::new(|| {}),
+        ).expect("ImageViewer::open");
+
+        assert!(viewer.position().0 >= 1920, "viewer x ({}) must be on secondary monitor", viewer.position().0);
+    }
+
+    #[test]
+    fn image_viewer_copy_invokes_clipboard() {
+        crate::dropdown::init_test_platform();
+        let wc = Rc::new(TestWindowControl {
+            areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
+            ..Default::default()
+        });
+        let cb = Rc::new(TestClipboard::default());
+        let rgba = sample_rgba(100, 100);
+
+        let viewer = ImageViewer::open(
+            slint::Image::default(),
+            (100, 100),
+            "Copy Test",
+            None,
+            wc,
+            cb.clone(),
+            Some(rgba.clone()),
+            slint::Image::default(),
+            Rc::new(|| {}),
+        ).expect("ImageViewer::open");
+
+        assert!(cb.copied.borrow().is_none());
+        viewer.copy();
+        assert_eq!(cb.copied.borrow().as_ref(), Some(&rgba));
+    }
+
+    #[test]
+    fn image_viewer_close_invokes_on_close_callback() {
+        crate::dropdown::init_test_platform();
+        let wc = Rc::new(TestWindowControl {
+            areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
+            ..Default::default()
+        });
+        let cb = Rc::new(TestClipboard::default());
+        let closed = Rc::new(Cell::new(false));
+        let closed_clone = closed.clone();
+
+        let viewer = ImageViewer::open(
+            slint::Image::default(),
+            (100, 100),
+            "Close Test",
+            None,
+            wc,
+            cb,
+            None,
+            slint::Image::default(),
+            Rc::new(move || closed_clone.set(true)),
+        ).expect("ImageViewer::open");
+
+        assert!(!closed.get());
+        viewer.close();
+        assert!(closed.get());
+    }
+
+    #[test]
+    fn image_viewer_drag_and_resize_invokes_window_control() {
+        crate::dropdown::init_test_platform();
+        let wc = Rc::new(TestWindowControl {
+            areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
+            ..Default::default()
+        });
+        let cb = Rc::new(TestClipboard::default());
+
+        let viewer = ImageViewer::open(
+            slint::Image::default(),
+            (100, 100),
+            "Drag and Resize Test",
+            None,
+            wc.clone(),
+            cb,
+            None,
+            slint::Image::default(),
+            Rc::new(|| {}),
+        ).expect("ImageViewer::open");
+
+        assert!(!wc.moved.get());
+        viewer.ui().invoke_start_move();
+        assert!(wc.moved.get());
+
+        assert_eq!(wc.resized.get(), None);
+        viewer.ui().invoke_start_resize(3); // 3 = SouthEast
+        assert_eq!(wc.resized.get(), Some(ResizeEdge::SouthEast));
     }
 }
