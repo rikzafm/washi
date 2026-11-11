@@ -1305,7 +1305,7 @@ impl Editor {
             let mut doc = self.doc.borrow_mut();
             if !collapsed {
                 doc.toggle_style_range(sel, flag)
-            } else if let Some((start, end)) = doc.word_at(i, cursor) {
+            } else if let Some((start, end)) = doc.word_at(i, cursor).filter(|&(start, end)| cursor > start && cursor < end) {
                 doc.toggle_style(i, start, end, flag)
             } else {
                 false
@@ -1994,6 +1994,63 @@ mod tests {
         let Range { anchor, focus } = editor.selection();
         assert_eq!(anchor, Caret { block: 1, offset: 0 }, "triple click anchor at start of paragraph");
         assert_eq!(focus, Caret { block: 1, offset: "First word second".len() }, "triple click focus at end of paragraph");
+    }
+
+    #[test]
+    fn test_double_click_word_selection_at_boundaries() {
+        let text = "# Title\nFirst  second...third";
+        let (_dir, editor, _ui) = test_editor_with_ui(text);
+
+        // Block 1 text: "First  second...third"
+        // "First" is 0..5
+        // Beginning of "First" (offset 0)
+        let r0 = editor.unit_at(Caret { block: 1, offset: 0 }, 2);
+        assert_eq!(r0, Range { anchor: Caret { block: 1, offset: 0 }, focus: Caret { block: 1, offset: 5 } });
+
+        // Trailing boundary of "First" before whitespace (offset 5)
+        let r5 = editor.unit_at(Caret { block: 1, offset: 5 }, 2);
+        assert_eq!(r5, Range { anchor: Caret { block: 1, offset: 0 }, focus: Caret { block: 1, offset: 5 } });
+
+        // Double-clicking inside whitespace (offset 6) collapses
+        let r6 = editor.unit_at(Caret { block: 1, offset: 6 }, 2);
+        assert_eq!(r6, Range { anchor: Caret { block: 1, offset: 6 }, focus: Caret { block: 1, offset: 6 } });
+
+        // Beginning of "second" (offset 7)
+        let r7 = editor.unit_at(Caret { block: 1, offset: 7 }, 2);
+        assert_eq!(r7, Range { anchor: Caret { block: 1, offset: 7 }, focus: Caret { block: 1, offset: 13 } });
+
+        // Double-clicking inside punctuation (offset 14) collapses
+        let r14 = editor.unit_at(Caret { block: 1, offset: 14 }, 2);
+        assert_eq!(r14, Range { anchor: Caret { block: 1, offset: 14 }, focus: Caret { block: 1, offset: 14 } });
+
+        // Trailing boundary of "third" at EOF (offset 21)
+        let r21 = editor.unit_at(Caret { block: 1, offset: 21 }, 2);
+        assert_eq!(r21, Range { anchor: Caret { block: 1, offset: 16 }, focus: Caret { block: 1, offset: 21 } });
+    }
+
+    #[test]
+    fn test_formatting_toggle_unaffected_at_boundaries() {
+        let (_dir, editor, ui) = test_editor_with_ui("title\nbody text");
+        editor.relayout(&ui);
+
+        // Caret collapsed at end of "body" (block 1, offset 4)
+        editor.set_selection(&ui, Range {
+            anchor: Caret { block: 1, offset: 4 },
+            focus: Caret { block: 1, offset: 4 },
+        });
+
+        // Toggle bold when collapsed at word boundary does NOT style "body", applies to typing style
+        assert!(!editor.format(0));
+        assert_eq!(editor.text(), "# title\nbody text");
+        assert!(editor.typing_style().contains(Flags::BOLD));
+
+        // Caret collapsed inside "body" (block 1, offset 2) styles the word
+        editor.set_selection(&ui, Range {
+            anchor: Caret { block: 1, offset: 2 },
+            focus: Caret { block: 1, offset: 2 },
+        });
+        assert!(editor.format(0));
+        assert_eq!(editor.text(), "# title\n**body** text");
     }
 
     #[test]
