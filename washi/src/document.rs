@@ -891,23 +891,14 @@ impl Document {
     }
 
     /// The word around byte `offset` of a block: its byte range when at, inside, or at the trailing
-    /// boundary of a word before whitespace or EOF.
+    /// boundary of a word before whitespace, punctuation, or EOF.
     pub fn word_at(&self, block: usize, offset: usize) -> Option<(usize, usize)> {
         let t = &self.blocks.get(block)?.text;
         let at = floor_boundary(t, offset);
         let word = |c: char| c.is_alphanumeric() || c == '_' || c == '\'';
-        if t[at..].chars().next().is_some_and(word) {
-            let start = t[..at].char_indices().rev().take_while(|&(_, c)| word(c)).last().map_or(at, |(i, _)| i);
-            let end = t[at..].char_indices().find(|&(_, c)| !word(c)).map_or(t.len(), |(i, _)| at + i);
-            Some((start, end))
-        } else if t[..at].chars().next_back().is_some_and(word)
-            && t[at..].chars().next().map_or(true, |c| c.is_whitespace())
-        {
-            let start = t[..at].char_indices().rev().take_while(|&(_, c)| word(c)).last().map_or(at, |(i, _)| i);
-            Some((start, at))
-        } else {
-            None
-        }
+        let start = t[..at].char_indices().rev().take_while(|&(_, c)| word(c)).last().map_or(at, |(i, _)| i);
+        let end = t[at..].char_indices().find(|&(_, c)| !word(c)).map_or(t.len(), |(i, _)| at + i);
+        (start < end).then_some((start, end))
     }
 
     /// Toggle a body block into a list item and back. False for titles, headings and images.
@@ -1580,7 +1571,7 @@ mod tests {
         assert_eq!(d.word_at(0, 0), Some((0, 6)), "at the start of a word selects the word");
         assert_eq!(d.word_at(0, 6), Some((0, 6)), "at the end of a word before space selects the word");
         assert_eq!(d.word_at(0, 7), Some((7, 13)), "at start of second word selects it");
-        assert_eq!(d.word_at(0, 13), None, "trailing boundary before punctuation does not select word");
+        assert_eq!(d.word_at(0, 13), Some((7, 13)), "trailing boundary before punctuation selects word");
         assert_eq!(d.word_at(0, 14), None, "in whitespace/punctuation does not select word");
         assert_eq!(d.word_at(0, 15), Some((15, 16)), "start of single-letter word");
         assert_eq!(d.word_at(0, 16), Some((15, 16)), "at end of single-letter word at EOF");
@@ -1599,7 +1590,7 @@ mod tests {
         // Beginning of word2
         assert_eq!(d.word_at(0, 8), Some((8, 13)));
         // Trailing boundary before punctuation
-        assert_eq!(d.word_at(0, 13), None);
+        assert_eq!(d.word_at(0, 13), Some((8, 13)));
         // Inside punctuation
         assert_eq!(d.word_at(0, 14), None);
         assert_eq!(d.word_at(0, 15), None);

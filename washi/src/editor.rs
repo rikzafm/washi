@@ -115,6 +115,16 @@ pub fn block_data(b: &Block) -> BlockData {
     }
 }
 
+/// Landing caret on a target block: offset 0 if at start or an image block, else end of text.
+fn block_boundary_caret(doc: &Document, block: usize, at_start: bool) -> Caret {
+    let offset = if at_start || doc.blocks().get(block).is_some_and(|b| b.kind == Kind::Image) {
+        0
+    } else {
+        doc.blocks().get(block).map_or(0, |b| b.text.len())
+    };
+    Caret { block, offset }
+}
+
 /// The pointer's press in progress: what a drag extends, by characters, words or paragraphs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PointerState {
@@ -973,8 +983,7 @@ impl Editor {
                 }
                 Caret { block: focus.block, offset: floor_boundary(&block.text, offset - 1) }
             } else if focus.block > 0 {
-                let prev = focus.block - 1;
-                Caret { block: prev, offset: doc.blocks()[prev].text.len() }
+                block_boundary_caret(&doc, focus.block - 1, false)
             } else {
                 focus
             }
@@ -989,7 +998,7 @@ impl Editor {
                 }
                 Caret { block: focus.block, offset: o }
             } else if focus.block + 1 < doc.len() {
-                Caret { block: focus.block + 1, offset: 0 }
+                block_boundary_caret(&doc, focus.block + 1, true)
             } else {
                 focus
             }
@@ -1212,9 +1221,7 @@ impl Editor {
                 return None;
             }
             if i > 0 {
-                let prev = i - 1;
-                let to = if doc.blocks()[prev].kind == Kind::Image { 0 } else { doc.blocks()[prev].text.len() };
-                return Some((Caret { block: prev, offset: to }, false));
+                return Some((block_boundary_caret(&doc, i - 1, false), false));
             } else {
                 return Some((Caret { block: 0, offset: 0 }, false));
             }
@@ -1225,7 +1232,7 @@ impl Editor {
                 return None;
             }
             if i + 1 < doc.len() {
-                return Some((Caret { block: i + 1, offset: 0 }, false));
+                return Some((block_boundary_caret(&doc, i + 1, true), false));
             } else {
                 return Some((Caret { block: i, offset: len }, false));
             }
@@ -1476,15 +1483,13 @@ impl Editor {
         let doc = self.doc.borrow();
         if is(Key::UpArrow) || is(Key::LeftArrow) {
             if i > 0 {
-                let prev = i - 1;
-                let to = if doc.blocks()[prev].kind == Kind::Image { 0 } else { doc.blocks()[prev].text.len() };
-                Some((Caret { block: prev, offset: to }, false))
+                Some((block_boundary_caret(&doc, i - 1, false), false))
             } else {
                 None
             }
         } else if is(Key::DownArrow) || is(Key::RightArrow) {
             if i + 1 < doc.len() {
-                Some((Caret { block: i + 1, offset: 0 }, false))
+                Some((block_boundary_caret(&doc, i + 1, true), false))
             } else {
                 None
             }
@@ -2018,6 +2023,10 @@ mod tests {
         // Beginning of "second" (offset 7)
         let r7 = editor.unit_at(Caret { block: 1, offset: 7 }, 2);
         assert_eq!(r7, Range { anchor: Caret { block: 1, offset: 7 }, focus: Caret { block: 1, offset: 13 } });
+
+        // Trailing boundary of "second" before punctuation (offset 13)
+        let r13 = editor.unit_at(Caret { block: 1, offset: 13 }, 2);
+        assert_eq!(r13, Range { anchor: Caret { block: 1, offset: 7 }, focus: Caret { block: 1, offset: 13 } });
 
         // Double-clicking inside punctuation (offset 14) collapses
         let r14 = editor.unit_at(Caret { block: 1, offset: 14 }, 2);

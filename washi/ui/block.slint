@@ -381,7 +381,7 @@ export component BlockView inherits Rectangle {
             if (e.text == Key.Return || e.text == Key.Backspace || e.text == Key.Delete
                 || (!e.modifiers.shift && (e.text == Key.UpArrow || e.text == Key.DownArrow
                     || (e.text == Key.LeftArrow && self.cursor-position-byte-offset == 0)
-                    || (e.text == Key.RightArrow && self.cursor-position-byte-offset >= self.text.character-count)))) {
+                    || e.text == Key.RightArrow))) {
                 return root.key(e.text, self.cursor-position-byte-offset) ? accept : reject;
             }
             reject

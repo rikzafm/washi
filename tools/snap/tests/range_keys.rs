@@ -44,7 +44,7 @@ fn drag(h: &mut Harness, from: (f32, f32), to: (f32, f32)) {
     h.press_button(0, from.0, from.1, false);
     h.pointer_move(0, to.0, to.1);
     h.release_button(0, to.0, to.1, false);
-    h.advance(ms(400));
+    h.advance(ms(600));
 }
 
 /// "paragraph here / second one / third " selected: from block 1 offset 6 into block 3 offset 6.
