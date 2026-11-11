@@ -1213,7 +1213,7 @@ impl Editor {
             }
             if i > 0 {
                 let prev = i - 1;
-                let to = doc.blocks()[prev].text.len();
+                let to = if doc.blocks()[prev].kind == Kind::Image { 0 } else { doc.blocks()[prev].text.len() };
                 return Some((Caret { block: prev, offset: to }, false));
             } else {
                 return Some((Caret { block: 0, offset: 0 }, false));
@@ -1237,19 +1237,29 @@ impl Editor {
         let tokens = self.tokens(ui);
         let width = self.paper.get().0;
         let at = textflow::caret_line(doc.blocks().get(i)?, offset, width, &tokens);
-        let target = if up {
+        let (target, to) = if up {
             if at.line > 0 {
                 return None;
             }
-            doc.prev_text_block(i)?
+            if i > 0 && doc.blocks()[i - 1].kind == Kind::Image {
+                (i - 1, 0)
+            } else {
+                let target = doc.prev_text_block(i)?;
+                let to = textflow::offset_at(&doc.blocks()[target], usize::MAX, at.x, width, &tokens);
+                (target, to)
+            }
         } else {
             if at.line + 1 < at.lines {
                 return None;
             }
-            doc.next_text_block(i)?
+            if i + 1 < doc.len() && doc.blocks()[i + 1].kind == Kind::Image {
+                (i + 1, 0)
+            } else {
+                let target = doc.next_text_block(i)?;
+                let to = textflow::offset_at(&doc.blocks()[target], 0, at.x, width, &tokens);
+                (target, to)
+            }
         };
-        let line = if up { usize::MAX } else { 0 };
-        let to = textflow::offset_at(&doc.blocks()[target], line, at.x, width, &tokens);
         Some((Caret { block: target, offset: to }, false))
     }
 
@@ -1465,10 +1475,19 @@ impl Editor {
         }
         let doc = self.doc.borrow();
         if is(Key::UpArrow) || is(Key::LeftArrow) {
-            let p = doc.prev_text_block(i)?;
-            Some((Caret { block: p, offset: doc.blocks()[p].text.len() }, false))
+            if i > 0 {
+                let prev = i - 1;
+                let to = if doc.blocks()[prev].kind == Kind::Image { 0 } else { doc.blocks()[prev].text.len() };
+                Some((Caret { block: prev, offset: to }, false))
+            } else {
+                None
+            }
         } else if is(Key::DownArrow) || is(Key::RightArrow) {
-            Some((Caret { block: doc.next_text_block(i)?, offset: 0 }, false))
+            if i + 1 < doc.len() {
+                Some((Caret { block: i + 1, offset: 0 }, false))
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -2175,5 +2194,98 @@ mod tests {
         // Redo re-applies paste replacement
         editor.step(true);
         assert_eq!(editor.text(), "# BloREPLACEDck 2");
+    }
+
+    #[test]
+    fn test_editor_arrow_navigation_onto_and_off_images() {
+        use slint::platform::Key;
+        let up_key = char::from(Key::UpArrow).to_string();
+        let down_key = char::from(Key::DownArrow).to_string();
+        let left_key = char::from(Key::LeftArrow).to_string();
+        let right_key = char::from(Key::RightArrow).to_string();
+
+        let (_dir, db) = test_db();
+        let note_id = db.create_note(0).expect("create note");
+        let flat_rgba = crate::images::Rgba {
+            width: 200,
+            height: 100,
+            data: vec![255; 200 * 100 * 4],
+        };
+        let png = crate::images::encode_png(&flat_rgba).expect("encode png");
+        let img1 = db.add_image(note_id, "image/png", 200, 100, &png).expect("add image 1");
+        let img2 = db.add_image(note_id, "image/png", 200, 100, &png).expect("add image 2");
+
+        let content = format!("First\n![](img:{img1})\nMiddle\n![](img:{img2})\nLast");
+        crate::dropdown::init_test_platform();
+        let clipboard = Rc::new(DummyClipboard::default());
+        let editor = Rc::new(Editor::new(note_id, &content, db, clipboard));
+        let ui = NoteWindow::new().expect("NoteWindow");
+        ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));
+        editor.bind_ui(&ui, Rc::new(|_| {}), None, None, None);
+        editor.relayout(&ui);
+
+        // Document structure:
+        // 0: "First" (text, len 5)
+        // 1: img1 (image)
+        // 2: "Middle" (text, len 6)
+        // 3: img2 (image)
+        // 4: "Last" (text, len 4)
+
+        // 1. Down Arrow at bottom line of paragraph preceding image focuses image
+        let res = editor.key(0, &down_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Down arrow from block 0 focuses image 1");
+
+        // 2. Right Arrow at end of paragraph preceding image focuses image
+        let res = editor.key(0, &right_key, 5, &ui);
+        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Right arrow from end of block 0 focuses image 1");
+
+        // 3. Up Arrow at top line of paragraph following image focuses image
+        let res = editor.key(2, &up_key, 3, &ui);
+        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Up arrow from block 2 focuses image 1");
+
+        // 4. Left Arrow at offset 0 of paragraph immediately after image focuses image
+        let res = editor.key(2, &left_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Left arrow from start of block 2 focuses image 1");
+
+        // 5. Exiting image 1 backwards (Up / Left) lands at end of block 0
+        let res = editor.key(1, &up_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 0, offset: 5 }, false)), "Up arrow on image 1 lands at end of block 0");
+        let res = editor.key(1, &left_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 0, offset: 5 }, false)), "Left arrow on image 1 lands at end of block 0");
+
+        // 6. Exiting image 1 forwards (Down / Right) lands at offset 0 of block 2
+        let res = editor.key(1, &down_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Down arrow on image 1 lands at start of block 2");
+        let res = editor.key(1, &right_key, 0, &ui);
+        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Right arrow on image 1 lands at start of block 2");
+
+        // Test navigation between adjacent image blocks
+        let (_dir2, db2) = test_db();
+        let note_id2 = db2.create_note(0).expect("create note 2");
+        let img1_b = db2.add_image(note_id2, "image/png", 200, 100, &png).expect("add img");
+        let img2_b = db2.add_image(note_id2, "image/png", 200, 100, &png).expect("add img");
+        let content2 = format!("Before\n![](img:{img1_b})\n![](img:{img2_b})\nAfter");
+        let editor2 = Rc::new(Editor::new(note_id2, &content2, db2, Rc::new(DummyClipboard::default())));
+        let ui2 = NoteWindow::new().expect("NoteWindow");
+        ui2.window().set_size(slint::LogicalSize::new(447.0, 468.0));
+        editor2.bind_ui(&ui2, Rc::new(|_| {}), None, None, None);
+        editor2.relayout(&ui2);
+
+        // 0: "Before"
+        // 1: img1
+        // 2: img2
+        // 3: "After"
+
+        // Down from image 1 should move to image 2
+        let res = editor2.key(1, &down_key, 0, &ui2);
+        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Down arrow from image 1 moves to adjacent image 2");
+        let res = editor2.key(1, &right_key, 0, &ui2);
+        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Right arrow from image 1 moves to adjacent image 2");
+
+        // Up from image 2 should move to image 1
+        let res = editor2.key(2, &up_key, 0, &ui2);
+        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Up arrow from image 2 moves to adjacent image 1");
+        let res = editor2.key(2, &left_key, 0, &ui2);
+        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Left arrow from image 2 moves to adjacent image 1");
     }
 }
