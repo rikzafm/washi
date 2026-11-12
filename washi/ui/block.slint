@@ -66,6 +66,12 @@ export struct SelRect {
     height: length,
 }
 
+/// The modifiers a navigation key is pressed with.
+export struct KeyMods {
+    shift: bool,
+    control: bool,
+}
+
 /// An underline, a strike-through or a list bullet: a level box plus the offset onto the tilted baseline.
 export struct RuleData {
     block: int,
@@ -112,7 +118,9 @@ export component BlockView inherits Rectangle {
     callback edited(string, int);
     /// Enter, Backspace, Delete, Up or Down was pressed (the key's text, the caret's byte offset);
     /// true when the note took it (the field then does nothing).
-    callback key(string, int) -> bool;
+    callback key(string, KeyMods, int) -> bool;
+    /// Undo (false) or redo (true): the note keeps the history, not the field.
+    callback history(bool);
     /// Make this block take the focus with the caret at `focus-offset` whenever `focus-serial` changes.
     in property <bool> wanted: false;
     in property <int> focus-serial: 0;
@@ -206,7 +214,7 @@ export component BlockView inherits Rectangle {
             if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta) { return reject; }
             if (e.text == Key.Backspace || e.text == Key.Delete || e.text == Key.UpArrow || e.text == Key.DownArrow
                 || e.text == Key.LeftArrow || e.text == Key.RightArrow) {
-                return root.key(e.text, 0) ? accept : reject;
+                return root.key(e.text, { shift: false, control: false }, 0) ? accept : reject;
             }
             reject
         }
@@ -387,18 +395,20 @@ export component BlockView inherits Rectangle {
             // Ctrl+Z undoes, Ctrl+Y (or Ctrl+Shift+Z) redoes: the note keeps the history, not the field
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta) {
                 if (!e.modifiers.shift && (e.text == "z" || e.text == "\u{1a}")) {
-                    return root.key("\u{1a}", self.cursor-position-byte-offset) ? accept : reject;
+                    root.history(false);
+                    return accept;
                 }
                 if ((!e.modifiers.shift && (e.text == "y" || e.text == "\u{19}"))
                     || (e.modifiers.shift && (e.text == "z" || e.text == "Z" || e.text == "\u{1a}"))) {
-                    return root.key("\u{19}", self.cursor-position-byte-offset) ? accept : reject;
+                    root.history(true);
+                    return accept;
                 }
             }
             // Shift+arrows may carry the selection over this paragraph's edge: the note decides
             if (e.modifiers.shift && !e.modifiers.alt && !e.modifiers.meta
                 && (e.modifiers.control ? (e.text == Key.Home || e.text == Key.End)
                     : (e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.UpArrow || e.text == Key.DownArrow))) {
-                if (root.key((e.modifiers.control ? "ctrl+shift+" : "shift+") + e.text, self.cursor-position-byte-offset)) {
+                if (root.key(e.text, { shift: true, control: e.modifiers.control }, self.cursor-position-byte-offset)) {
                     return accept;
                 }
             }
@@ -408,9 +418,9 @@ export component BlockView inherits Rectangle {
             }
             if (e.text == Key.Return || e.text == Key.Backspace || e.text == Key.Delete
                 || (!e.modifiers.shift && (e.text == Key.UpArrow || e.text == Key.DownArrow
-                    || (e.text == Key.LeftArrow && self.cursor-position-byte-offset == 0)
+                    || e.text == Key.LeftArrow
                     || e.text == Key.RightArrow || e.text == Key.Home || e.text == Key.End))) {
-                return root.key(e.text, self.cursor-position-byte-offset) ? accept : reject;
+                return root.key(e.text, { shift: false, control: false }, self.cursor-position-byte-offset) ? accept : reject;
             }
             reject
         }

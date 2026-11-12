@@ -5,6 +5,7 @@ import {
     BlockView,
     MarkerData,
     RuleData,
+    KeyMods,
     RunData,
     SelRect,
 } from "block.slint";
@@ -185,7 +186,8 @@ export component TextLayer inherits Rectangle {
     in property <angle> tilt: 0deg;
     in property <length> scroll-y: 0px;
     callback block-edited(int, string, int);
-    callback block-key(int, string, int) -> bool;
+    callback block-key(int, string, KeyMods, int) -> bool;
+    callback block-history(bool);
     /// The caret moved or the selection changed: block, caret byte offset, the selection's other end.
     callback caret-moved(int, int, int);
     /// The block whose field an input method is composing in (-1 none): it shows its own text.
@@ -491,7 +493,8 @@ export component TextLayer inherits Rectangle {
             caret-here: i == root.caret-block && i == root.focused-block;
             caret-serial: root.caret-serial;
             edited(t, c) => { root.block-edited(i, t, c); }
-            key(k, o) => { return root.block-key(i, k, o); }
+            key(k, m, o) => { return root.block-key(i, k, m, o); }
+            history(redo) => { root.block-history(redo); }
             caret-moved(o, a) => { root.caret-moved(i, o, a); }
             composing-changed(c) => {
                 if (c) { root.composing-block = i; } else if (root.composing-block == i) { root.composing-block = -1; }

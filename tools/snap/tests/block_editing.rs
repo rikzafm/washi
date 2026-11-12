@@ -243,3 +243,20 @@ fn the_hint_sits_on_the_title_line() {
     assert!((runs[0].1 - 32.0).abs() < 0.01 && (runs[0].2 - 38.2).abs() < 0.01, "{:?}", runs[0]);
     assert!(runs.iter().all(|r| r.2 == runs[0].2), "one line");
 }
+
+/// Navigation reaches the note as a key plus typed modifiers (no string protocol), and the note,
+/// not the field, decides what an edge means.
+#[test]
+fn the_note_takes_a_navigation_key_with_typed_modifiers() {
+    let mut h = note("t
+ab");
+    h.press(0, Key::RightArrow); // the caret at the end of the title
+    // Shift+Right at the end of the title carries the selection into the next paragraph
+    assert!(h.block_key(0, 0, Key::RightArrow, true, false, 1));
+    assert_eq!(h.selection(0), ((0, 1), (1, 0)));
+    // Ctrl+Shift+End extends to the end of the note
+    assert!(h.block_key(0, 0, Key::End, true, true, 1));
+    assert_eq!(h.selection(0), ((0, 1), (1, 2)));
+    // Plain Left inside a paragraph is the field's own: the note declines it
+    assert!(!h.block_key(0, 1, Key::LeftArrow, false, false, 1));
+}

@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { BlockData, MarkerData, RuleData, RunData, SelRect } from "block.slint";
+import { BlockData, KeyMods, MarkerData, RuleData, RunData, SelRect } from "block.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
@@ -14,6 +14,7 @@ import { SidebarPanel } from "sidebar-panel.slint";
 export {
     BlockData,
     BlockKind,
+    KeyMods,
     MarkerData,
     RuleData,
     RunData,
@@ -202,7 +203,9 @@ export component NoteWindow inherits Window {
     /// Block `i` was edited to this text.
     callback block-edited(int, string, int);
     /// Enter, Backspace, Delete, Up or Down in block `i` at the caret offset; true when taken.
-    callback block-key(int, string, int) -> bool;
+    callback block-key(int, string, KeyMods, int) -> bool;
+    /// Undo (false) or redo (true) from a field.
+    callback block-history(bool);
     /// Rust asks a block to take the focus (block, caret offset, request counter).
     in-out property <int> focus-block: -1;
     in-out property <int> focus-offset: 0;
@@ -493,7 +496,8 @@ export component NoteWindow inherits Window {
                         range-replace(t) => { root.picker-open = false; root.range-replace(t); }
                         range-key(k, s) => { return root.range-key(k, s); }
                         block-edited(i, t, c) => { root.picker-open = false; root.block-edited(i, t, c); }
-                        block-key(i, k, o) => { return root.block-key(i, k, o); }
+                        block-key(i, k, m, o) => { return root.block-key(i, k, m, o); }
+                        block-history(r) => { root.block-history(r); }
                         caret-moved(i, o, a) => { root.caret-moved(i, o, a); }
                     }
                 }

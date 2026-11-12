@@ -15,7 +15,7 @@ slint::include_modules!();
 pub use crate::editor::{
     block_data, ink_color, marker_color, rgb, same_row, swatch_marker, CURSOR_DEFAULT, CURSOR_RESIZE,
     CURSOR_TEXT, FORMAT_BOLD, FORMAT_ITALIC, FORMAT_LIST, FORMAT_STRIKE, FORMAT_UNDERLINE, GRIP,
-    HINT, HISTORY_PAUSE, MULTI_CLICK, MULTI_CLICK_SLOP, AUTOSCROLL_STEP, REDO_KEY, START, UNDO_KEY,
+    HINT, HISTORY_PAUSE, MULTI_CLICK, MULTI_CLICK_SLOP, AUTOSCROLL_STEP, START,
 };
 
 /// Quiet period after the last edit before the note is written to the database.

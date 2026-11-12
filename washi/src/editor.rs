@@ -54,10 +54,6 @@ pub const START: Caret = Caret { block: 0, offset: 0 };
 /// Side of a picture's resize grip, logical px.
 pub const GRIP: f64 = 10.0;
 
-/// The keys the block field sends for Ctrl+Z and Ctrl+Y (see ui/block.slint).
-pub const UNDO_KEY: &str = "\u{1a}";
-pub const REDO_KEY: &str = "\u{19}";
-
 pub fn rgb(c: u32) -> slint::Color {
     slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
@@ -400,16 +396,10 @@ impl Editor {
             let changed = changed.clone();
             let editor_weak = editor_weak.clone();
             let weak_ui = ui.as_weak();
-            ui.on_block_key(move |i, key, offset| {
+            ui.on_block_key(move |i, key, mods, offset| {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return false };
-                if key == UNDO_KEY || key == REDO_KEY {
-                    if let Some(caret) = editor.step(key == REDO_KEY) {
-                        changed(Some(caret));
-                    }
-                    return true;
-                }
-                if key.contains("shift+") {
-                    return editor.extend(&ui, key.as_str());
+                if mods.shift {
+                    return editor.extend(&ui, key.as_str(), mods.control);
                 }
                 let Some((caret, edited)) = editor.key(i.max(0) as usize, key.as_str(), offset.max(0) as usize, &ui) else { return false };
                 if edited {
@@ -422,6 +412,18 @@ impl Editor {
                     editor.show_caret(&ui);
                 }
                 true
+            });
+        }
+
+        // Wire on_block_history (Ctrl+Z, Ctrl+Y from a field)
+        {
+            let changed = changed.clone();
+            let editor_weak = editor_weak.clone();
+            ui.on_block_history(move |redo| {
+                let Some(editor) = editor_weak.upgrade() else { return };
+                if let Some(caret) = editor.step(redo) {
+                    changed(Some(caret));
+                }
             });
         }
 
@@ -1034,7 +1036,7 @@ impl Editor {
         self.fill_handles(doc, tokens);
     }
 
-    pub fn extend(&self, ui: &NoteWindow, key: &str) -> bool {
+    pub fn extend(&self, ui: &NoteWindow, key: &str, ctrl: bool) -> bool {
         use slint::platform::Key;
         let sel = self.selection.get();
         let across = sel.anchor.block != sel.focus.block;
@@ -1042,10 +1044,6 @@ impl Editor {
         let doc = self.doc.borrow();
         let Some(block) = doc.blocks().get(focus.block) else { return false };
         let offset = focus.offset;
-        let (key, ctrl) = match key.strip_prefix("ctrl+shift+") {
-            Some(k) => (k, true),
-            None => (key.strip_prefix("shift+").unwrap_or(key), false),
-        };
         let is = |k: Key| key == char::from(k).to_string();
         let to = if ctrl {
             let all = doc.all();

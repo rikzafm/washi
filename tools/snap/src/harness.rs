@@ -183,6 +183,16 @@ impl Harness {
         self.settle();
     }
 
+    /// Hand a navigation key with typed modifiers straight to the note, as a field does; whether the note took it.
+    pub fn block_key(&mut self, note: usize, block: i32, key: Key, shift: bool, control: bool, offset: i32) -> bool {
+        let id = self.id(note);
+        let took = self.app().with_note(id, |n| {
+            n.ui().invoke_block_key(block, key.into(), washi::note_window::KeyMods { shift, control }, offset)
+        });
+        self.settle();
+        took.unwrap_or(false)
+    }
+
     /// Press one key several times.
     pub fn press_n(&mut self, note: usize, key: Key, times: usize) {
         for _ in 0..times {
