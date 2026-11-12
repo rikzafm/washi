@@ -76,6 +76,119 @@ fn boundary(doc: &Document, block: usize, at_start: bool) -> Caret {
     Caret { block, offset }
 }
 
+/// A vertical motion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Vertical {
+    Up,
+    Down,
+}
+
+impl Vertical {
+    /// The motion a Slint key text stands for, if it is Up or Down.
+    pub fn from_key(key: &str) -> Option<Vertical> {
+        use slint::platform::Key;
+        if key == char::from(Key::UpArrow).to_string() {
+            Some(Vertical::Up)
+        } else if key == char::from(Key::DownArrow).to_string() {
+            Some(Vertical::Down)
+        } else {
+            None
+        }
+    }
+}
+
+/// Where a caret sits in its paragraph's wrapped lines: the line (0 first), how many lines the
+/// paragraph has, and the distance from the line's left edge.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineAt {
+    pub line: usize,
+    pub lines: usize,
+    pub x: f64,
+}
+
+/// The line layout vertical motion needs, which only the editor can measure (fonts, paper width).
+/// Kept behind a trait so the motion is tested with a fake layout.
+pub trait Lines {
+    /// Where the caret at `offset` of text block `block` is. With `line_end`, an offset that
+    /// starts a wrapped line is the end of the line before it.
+    fn line_at(&self, block: usize, offset: usize, line_end: bool) -> LineAt;
+    /// The offset on `line` of text block `block` nearest to `x` (`usize::MAX` is the last line),
+    /// and whether it is the end of that line where the next line starts at the same offset.
+    fn offset_on(&self, block: usize, line: usize, x: f64) -> (usize, bool);
+}
+
+/// What an Up or Down key does: the new selection, whether its caret is at the end of a wrapped
+/// line, and the goal column to keep for the next vertical move (None when the move leaves it
+/// behind, as collapsing a range or crossing an image does).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Moved {
+    pub range: Range,
+    pub line_end: bool,
+    pub goal_x: Option<f64>,
+}
+
+/// Where Up or Down takes `sel`; `extend` (Shift) moves only the focus end and keeps the anchor.
+///
+/// One rule for both: a line up or down in the paragraph keeping the goal column (`goal_x`, else
+/// the caret's own x); past the first or last line the caret enters the neighbouring block, an
+/// image at its only offset (0) and text on its last or first line; at the note's ends Shift selects to the start or end of the text and a plain key stays put. Leaving an image lands at the end of the text before it or the
+/// start of the text after it. A plain key over a non-empty range collapses it to the edge it
+/// points at. `line_end` is whether the focus is at the end of a wrapped line.
+pub fn vertical(doc: &Document, lines: &dyn Lines, sel: Range, motion: Vertical, extend: bool, line_end: bool, goal_x: Option<f64>) -> Moved {
+    let up = motion == Vertical::Up;
+    let done = |to: Caret, line_end: bool, goal_x: Option<f64>| Moved {
+        range: Range { anchor: if extend { sel.anchor } else { to }, focus: to },
+        line_end,
+        goal_x,
+    };
+    if !extend && sel.anchor != sel.focus {
+        let (start, end) = sel.ordered();
+        let to = if up { start } else { end };
+        return done(to, false, None);
+    }
+    let focus = sel.focus;
+    let kind_of = |b: usize| doc.blocks().get(b).map(|b| b.kind);
+    if kind_of(focus.block) == Some(Kind::Image) {
+        let to = if up && focus.block > 0 {
+            boundary(doc, focus.block - 1, false)
+        } else if !up && focus.block + 1 < doc.len() {
+            boundary(doc, focus.block + 1, true)
+        } else {
+            focus
+        };
+        return done(to, false, None);
+    }
+    let text = doc.blocks().get(focus.block).map_or("", |b| b.text.as_str());
+    let offset = floor_boundary(text, focus.offset);
+    let at = lines.line_at(focus.block, offset, line_end);
+    let x = goal_x.unwrap_or(at.x);
+    let land = |block: usize, line: usize| {
+        let (offset, line_end) = lines.offset_on(block, line, x);
+        done(Caret { block, offset }, line_end, Some(x))
+    };
+    if up {
+        if at.line > 0 {
+            land(focus.block, at.line - 1)
+        } else if focus.block == 0 {
+            // the note's start: Shift selects to it, a plain key stays where it is
+            if extend { done(Caret { block: 0, offset: 0 }, false, Some(x)) } else { done(Caret { block: 0, offset }, line_end, goal_x) }
+        } else if kind_of(focus.block - 1) == Some(Kind::Image) {
+            done(boundary(doc, focus.block - 1, true), false, None)
+        } else {
+            land(focus.block - 1, usize::MAX)
+        }
+    } else if at.line + 1 < at.lines {
+        land(focus.block, at.line + 1)
+    } else if focus.block + 1 >= doc.len() {
+        // the note's end: Shift selects to it, a plain key stays where it is
+        if extend { done(Caret { block: focus.block, offset: text.len() }, false, Some(x)) } else { done(Caret { block: focus.block, offset }, line_end, goal_x) }
+    } else if kind_of(focus.block + 1) == Some(Kind::Image) {
+        done(boundary(doc, focus.block + 1, true), false, None)
+    } else {
+        land(focus.block + 1, 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +265,109 @@ mod tests {
         assert_eq!(Horizontal::from_key(&char::from(Key::LeftArrow).to_string()), Some(Left));
         assert_eq!(Horizontal::from_key(&char::from(Key::RightArrow).to_string()), Some(Right));
         assert_eq!(Horizontal::from_key(&char::from(Key::UpArrow).to_string()), None);
+    }
+
+    /// Text wrapped four bytes to a line, each byte 10 px wide.
+    struct Fake<'a>(&'a Document);
+
+    impl Lines for Fake<'_> {
+        fn line_at(&self, block: usize, offset: usize, _line_end: bool) -> LineAt {
+            let len = self.0.blocks()[block].text.len();
+            LineAt { line: (offset / 4).min(len.saturating_sub(1) / 4), lines: len.div_ceil(4).max(1), x: (offset % 4) as f64 * 10.0 }
+        }
+
+        fn offset_on(&self, block: usize, line: usize, x: f64) -> (usize, bool) {
+            let len = self.0.blocks()[block].text.len();
+            let line = line.min(len.saturating_sub(1) / 4);
+            let start = line * 4;
+            ((start + (x / 10.0).round() as usize).min((start + 4).min(len)), false)
+        }
+    }
+
+    /// "abcdefgh"(2 lines) / "xy" / image / "ABCDEFGH"(2 lines) / "tail"
+    fn tall() -> Document {
+        Document::from_blocks(vec![
+            Block::new(Kind::Body, "abcdefgh"),
+            Block::new(Kind::Body, "xy"),
+            Block::image(1),
+            Block::new(Kind::Body, "ABCDEFGH"),
+            Block::new(Kind::Body, "tail"),
+        ])
+    }
+
+    fn go(sel: Range, motion: Vertical, extend: bool, goal: Option<f64>) -> Moved {
+        let doc = tall();
+        vertical(&doc, &Fake(&doc), sel, motion, extend, false, goal)
+    }
+
+    /// (name, caret, motion, where the focus lands). Each row is run with and without Shift.
+    #[allow(clippy::type_complexity)]
+    fn vertical_table() -> Vec<(&'static str, (usize, usize), Vertical, (usize, usize))> {
+        use Vertical::{Down, Up};
+        vec![
+            ("down a line in the paragraph keeps the column", (0, 2), Down, (0, 6)),
+            ("up a line in the paragraph keeps the column", (0, 6), Up, (0, 2)),
+            ("down off the last line enters the next paragraph at the column", (0, 6), Down, (1, 2)),
+            ("up from the first line lands on the last line before", (1, 1), Up, (0, 5)),
+            ("down onto an image enters it", (1, 1), Down, (2, 0)),
+            ("up onto an image enters it", (3, 2), Up, (2, 0)),
+            ("down off an image lands at the start of the text after", (2, 0), Down, (3, 0)),
+            ("up off an image lands at the end of the text before", (2, 0), Up, (1, 2)),
+        ]
+    }
+
+    #[test]
+    fn up_and_down_land_where_the_table_says_with_and_without_shift() {
+        for (name, from, motion, to) in vertical_table() {
+            let sel = caret(from.0, from.1);
+            let plain = go(sel, motion, false, None);
+            let shifted = go(sel, motion, true, None);
+            assert_eq!(plain.range, caret(to.0, to.1), "{name}");
+            assert_eq!(shifted.range, range(from, to), "{name}: shift keeps the anchor");
+            assert_eq!((plain.line_end, plain.goal_x), (shifted.line_end, shifted.goal_x), "{name}");
+        }
+    }
+
+    #[test]
+    fn shift_up_from_the_paragraph_after_an_image_enters_the_image_like_plain_up() {
+        // it used to skip the image and land in the paragraph before it
+        assert_eq!(go(caret(3, 2), Vertical::Up, true, None).range, range((3, 2), (2, 0)));
+        assert_eq!(go(caret(1, 1), Vertical::Down, true, None).range, range((1, 1), (2, 0)));
+    }
+
+    #[test]
+    fn the_goal_column_survives_a_short_paragraph_with_and_without_shift() {
+        let doc = tall();
+        let lines = Fake(&doc);
+        for extend in [false, true] {
+            let first = vertical(&doc, &lines, caret(0, 7), Vertical::Down, extend, false, None);
+            assert_eq!(first.range.focus, c(1, 2), "extend={extend}: clamped to the short paragraph");
+            assert_eq!(first.goal_x, Some(30.0));
+            let second = vertical(&doc, &lines, first.range, Vertical::Up, extend, first.line_end, first.goal_x);
+            assert_eq!(second.range.focus, c(0, 7), "extend={extend}: the column is back");
+        }
+    }
+
+    #[test]
+    fn at_the_note_s_ends_shift_selects_to_them_and_a_plain_key_stays() {
+        assert_eq!(go(caret(0, 2), Vertical::Up, true, None).range, range((0, 2), (0, 0)));
+        assert_eq!(go(caret(4, 1), Vertical::Down, true, None).range, range((4, 1), (4, 4)));
+        assert_eq!(go(caret(0, 2), Vertical::Up, false, None).range, caret(0, 2));
+        assert_eq!(go(caret(4, 1), Vertical::Down, false, None).range, caret(4, 1));
+    }
+
+    #[test]
+    fn plain_up_and_down_collapse_a_range_to_the_edge_they_point_at() {
+        let sel = range((3, 2), (1, 1));
+        assert_eq!(go(sel, Vertical::Up, false, None).range, caret(1, 1));
+        assert_eq!(go(sel, Vertical::Down, false, None).range, caret(3, 2));
+    }
+
+    #[test]
+    fn keys_map_to_vertical_motions() {
+        use slint::platform::Key;
+        assert_eq!(Vertical::from_key(&char::from(Key::UpArrow).to_string()), Some(Vertical::Up));
+        assert_eq!(Vertical::from_key(&char::from(Key::DownArrow).to_string()), Some(Vertical::Down));
+        assert_eq!(Vertical::from_key(&char::from(Key::LeftArrow).to_string()), None);
     }
 }
