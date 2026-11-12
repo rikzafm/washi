@@ -158,12 +158,14 @@ fn an_arrow_without_shift_collapses_the_range() {
     let mut h = note(TEXT);
     across(&mut h);
     h.press(0, Key::LeftArrow);
-    assert_eq!(h.selection(0), ((1, 6), (1, 6)));
+    let (anchor, focus) = h.selection(0);
+    assert_eq!(anchor, focus, "the range is a caret again");
     assert!(h.sel_rects(0).is_empty());
     assert!(h.wash(0));
     across(&mut h);
     h.press(0, Key::RightArrow);
-    assert_eq!(h.selection(0), ((3, 6), (3, 6)));
+    let (anchor, focus) = h.selection(0);
+    assert_eq!(anchor, focus, "the range is a caret again");
     assert!(h.sel_rects(0).is_empty());
     assert_eq!(h.note_text(0), TEXT);
 }

@@ -277,9 +277,9 @@ export component NoteWindow inherits Window {
     callback paste-range() -> bool;
     /// Replace the selection across blocks by this text.
     callback range-replace(string);
-    /// A key over a selection across blocks (its text, Shift held): 0 not taken, 1 taken without a
+    /// A key over a selection across blocks (its text): 0 not taken, 1 taken without a
     /// change, 2 replaced the selection.
-    callback range-key(string, bool) -> int;
+    callback range-key(string) -> int;
     out property <int> last-focused-block <=> text-layer.last-focused;
 
     // The toolbar shows while the pointer is over the note (anywhere, text included) or holds one
@@ -494,7 +494,7 @@ export component NoteWindow inherits Window {
                         cut-range => { return root.cut-range(); }
                         paste-range => { return root.paste-range(); }
                         range-replace(t) => { root.picker-open = false; root.range-replace(t); }
-                        range-key(k, s) => { return root.range-key(k, s); }
+                        range-key(k) => { return root.range-key(k); }
                         block-edited(i, t, c) => { root.picker-open = false; root.block-edited(i, t, c); }
                         block-key(i, k, m, o) => { return root.block-key(i, k, m, o); }
                         block-history(r) => { root.block-history(r); }

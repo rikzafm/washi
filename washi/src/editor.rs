@@ -407,27 +407,16 @@ impl Editor {
             let weak_ui = ui.as_weak();
             ui.on_block_key(move |i, key, mods, offset| {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return false };
-                if !mods.control {
-                    if let Some(m) = caret_motion::Horizontal::from_key(key.as_str()) {
-                        return editor.move_horizontally(&ui, m, mods.shift, i.max(0) as usize, offset.max(0) as usize);
-                    }
-                    if let Some(m) = caret_motion::Vertical::from_key(key.as_str()) {
-                        return editor.move_vertically(&ui, m, mods.shift, i.max(0) as usize, offset.max(0) as usize);
-                    }
+                let (block, offset) = (i.max(0) as usize, offset.max(0) as usize);
+                if editor.navigate(&ui, key.as_str(), (mods.shift, mods.control), block, offset) {
+                    return true;
                 }
-                if mods.shift {
-                    return editor.extend(&ui, key.as_str(), mods.control);
+                if mods.control || mods.selecting {
+                    // Ctrl+Backspace and the like, or a selection inside the field: the field's own
+                    return false;
                 }
-                let Some((caret, edited)) = editor.key(i.max(0) as usize, key.as_str(), offset.max(0) as usize, &ui) else { return false };
-                if edited {
-                    changed(Some(caret));
-                } else {
-                    // the field reports its caret only when the offset changes: the caret's side of
-                    // a wrap can change without it
-                    editor.store(Range { anchor: caret, focus: caret });
-                    editor.focus_at(&ui, caret);
-                    editor.show_caret(&ui);
-                }
+                let Some(caret) = editor.key(block, key.as_str(), offset) else { return false };
+                changed(Some(caret));
                 true
             });
         }
@@ -501,10 +490,9 @@ impl Editor {
         {
             let changed = changed.clone();
             let editor_weak = editor_weak.clone();
-            let weak_ui = ui.as_weak();
-            ui.on_range_key(move |key, shift| {
-                let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return 0 };
-                let (taken, caret) = editor.range_key(&ui, key.as_str(), shift);
+            ui.on_range_key(move |key| {
+                let Some(editor) = editor_weak.upgrade() else { return 0 };
+                let (taken, caret) = editor.range_key(key.as_str());
                 if let Some(c) = caret {
                     changed(Some(c));
                 }
@@ -1053,27 +1041,6 @@ impl Editor {
         self.fill_handles(doc, tokens);
     }
 
-    pub fn extend(&self, ui: &NoteWindow, key: &str, ctrl: bool) -> bool {
-        use slint::platform::Key;
-        let sel = self.selection.get();
-        let doc = self.doc.borrow();
-        if doc.blocks().get(sel.focus.block).is_none() {
-            return false;
-        }
-        if let (false, Some(m)) = (ctrl, caret_motion::Horizontal::from_key(key)) {
-            let Some(range) = caret_motion::horizontal(&doc, sel, m, true) else { return false };
-            drop(doc);
-            self.set_selection(ui, range);
-            return true;
-        }
-        let is = |k: Key| key == char::from(k).to_string();
-        let all = doc.all();
-        let to = if is(Key::Home) { all.anchor } else { all.focus };
-        drop(doc);
-        self.set_selection(ui, Range { anchor: sel.anchor, focus: to });
-        true
-    }
-
     /// Up or Down pressed with the selection's focus at `focus` (the caret a plain key moves, or
     /// the focus end of the range Shift extends). False when the key goes nowhere (the note's ends for a plain key, or an image at them).
     fn apply_vertical(&self, ui: &NoteWindow, motion: caret_motion::Vertical, extend: bool, sel: Range) -> bool {
@@ -1099,19 +1066,52 @@ impl Editor {
         true
     }
 
-    /// Up or Down pressed in block `i` with its field's caret at `offset`.
-    fn move_vertically(&self, ui: &NoteWindow, motion: caret_motion::Vertical, extend: bool, i: usize, offset: usize) -> bool {
-        let here = Caret { block: i, offset };
-        let sel = if extend { self.selection.get() } else { Range { anchor: here, focus: here } };
-        self.apply_vertical(ui, motion, extend, sel)
+    /// Home, End, Ctrl+Home or Ctrl+End pressed with the selection `sel`. False on an image, which
+    /// has no line to go to the edge of.
+    fn apply_edge(&self, ui: &NoteWindow, edge: caret_motion::Edge, extend: bool, sel: Range) -> bool {
+        use caret_motion::Edge::{LineEnd, LineStart};
+        let focus = sel.focus;
+        let line_end = self.line_end.get() == Some(focus);
+        let moved = {
+            let doc = self.doc.borrow();
+            let Some(block) = doc.blocks().get(focus.block) else { return false };
+            if block.kind == Kind::Image && matches!(edge, LineStart | LineEnd) {
+                return false;
+            }
+            let tokens = self.tokens(ui);
+            let lines = NoteLines { doc: &doc, width: self.paper.get().0, tokens: &tokens };
+            caret_motion::to_edge(&doc, &lines, sel, edge, extend, line_end)
+        };
+        self.select(ui, moved.range, moved.line_end);
+        true
     }
 
-    /// Left or Right pressed in block `i` with its field's caret at `offset`. False when the field
-    /// is to move the caret itself (or there is nowhere to go from an image).
-    fn move_horizontally(&self, ui: &NoteWindow, motion: caret_motion::Horizontal, extend: bool, i: usize, offset: usize) -> bool {
-        let selection = self.selection.get();
+    /// A key pressed in block `i` with its field's caret at `offset`, with (Shift, Ctrl) held: true
+    /// when it moved the caret or the selection (the field then does nothing), false when it is no
+    /// motion of the note's or the field is to move itself (a step inside its paragraph, Ctrl with
+    /// an arrow).
+    fn navigate(&self, ui: &NoteWindow, key: &str, (shift, ctrl): (bool, bool), i: usize, offset: usize) -> bool {
         let here = Caret { block: i, offset };
-        let sel = if extend { selection } else { Range { anchor: here, focus: here } };
+        let held = self.selection.get();
+        // the range the note holds, or else the caret the field reports
+        let sel = if shift || held.anchor != held.focus { held } else { Range { anchor: here, focus: here } };
+        if let Some(edge) = caret_motion::Edge::from_key(key, ctrl) {
+            return self.apply_edge(ui, edge, shift, sel);
+        }
+        if ctrl {
+            return false;
+        }
+        if let Some(m) = caret_motion::Vertical::from_key(key) {
+            return self.apply_vertical(ui, m, shift, sel);
+        }
+        let Some(m) = caret_motion::Horizontal::from_key(key) else { return false };
+        self.apply_horizontal(ui, m, shift, sel)
+    }
+
+    /// Left or Right pressed with the selection `sel`. False when the field is to move the caret
+    /// itself (or there is nowhere to go from an image).
+    fn apply_horizontal(&self, ui: &NoteWindow, motion: caret_motion::Horizontal, extend: bool, sel: Range) -> bool {
+        let i = sel.focus.block;
         let moved = caret_motion::horizontal(&self.doc.borrow(), sel, motion, extend);
         let Some(range) = moved else { return false };
         let on_image = self.doc.borrow().blocks().get(i).is_some_and(|b| b.kind == Kind::Image);
@@ -1122,7 +1122,9 @@ impl Editor {
         true
     }
 
-    pub fn range_key(&self, ui: &NoteWindow, key: &str, shift: bool) -> (i32, Option<Caret>) {
+    /// A key over a selection across blocks that is not a motion (those go through `navigate`):
+    /// (1, None) a modifier key alone, (2, caret) the key replaced the selection, (0, None) any other.
+    pub fn range_key(&self, key: &str) -> (i32, Option<Caret>) {
         use slint::platform::Key;
         let mut chars = key.chars();
         let (Some(c), None) = (chars.next(), chars.next()) else { return (0, None) };
@@ -1130,22 +1132,6 @@ impl Editor {
             return (1, None);
         }
         let is = |k: Key| c == char::from(k);
-        if is(Key::LeftArrow) || is(Key::UpArrow) || is(Key::RightArrow) || is(Key::DownArrow) {
-            if shift {
-                return (0, None);
-            }
-            if let Some(m) = caret_motion::Horizontal::from_key(key) {
-                let moved = caret_motion::horizontal(&self.doc.borrow(), self.selection.get(), m, false);
-                if let Some(range) = moved {
-                    self.set_selection(ui, range);
-                }
-                return (1, None);
-            }
-            if let Some(m) = caret_motion::Vertical::from_key(key) {
-                self.apply_vertical(ui, m, false, self.selection.get());
-            }
-            return (1, None);
-        }
         let text = if is(Key::Backspace) || is(Key::Delete) {
             String::new()
         } else if is(Key::Return) {
@@ -1326,8 +1312,14 @@ impl Editor {
         Some(caret)
     }
 
-    pub fn key(&self, i: usize, key: &str, offset: usize, ui: &NoteWindow) -> Option<(Caret, bool)> {
+    /// Enter, Backspace or Delete pressed in block `i` with its field's caret at `offset`: the caret
+    /// after the edit, or None when the key is no edit of the note's.
+    pub fn key(&self, i: usize, key: &str, offset: usize) -> Option<Caret> {
         use slint::platform::Key;
+        let is = |k: Key| key == char::from(k).to_string();
+        if !(is(Key::Return) || is(Key::Backspace) || is(Key::Delete)) {
+            return None;
+        }
         let before = self.doc.borrow().clone();
         if before.blocks().get(i).is_some_and(|b| b.kind == Kind::Image) {
             return self.image_key(i, key, before);
@@ -1338,43 +1330,19 @@ impl Editor {
             before.blocks().get(i).map(|b| b.style_for_insert(offset))
         };
         let mut doc = self.doc.borrow_mut();
-        let is = |k: Key| key == char::from(k).to_string();
         let edit = if is(Key::Return) {
             let c = doc.split(i, offset);
             self.typing.set(carried.filter(|&s| s != Flags::NONE).map(|s| (c, s)));
             Some(c)
         } else if is(Key::Backspace) {
             doc.backspace(i, offset)
-        } else if is(Key::Delete) {
-            doc.delete(i, offset)
         } else {
-            None
+            doc.delete(i, offset)
         };
-        if let Some(c) = edit {
-            drop(doc);
-            self.structural(before);
-            return Some((c, true));
-        }
-        if is(Key::Return) || is(Key::Backspace) || is(Key::Delete) {
-            return None;
-        }
-        let (home, end) = (is(Key::Home), is(Key::End));
-        if !home && !end {
-            return None;
-        }
-        // The lines are the note's own (the field knows only a byte offset, which where a line
-        // wraps without a space is both the end of one line and the start of the next).
-        let here = Caret { block: i, offset };
-        let tokens = self.tokens(ui);
-        let width = self.paper.get().0;
-        let block = doc.blocks().get(i)?;
-        let at = textflow::caret_line_on(block, offset, self.line_end.get() == Some(here), width, &tokens);
-        // past the end of any line: the paper's own width
-        let (to, line_end) = textflow::offset_on_line(block, at.line, if home { 0.0 } else { width }, width, &tokens);
-        let c = Caret { block: i, offset: to };
-        self.line_end.set(line_end.then_some(c));
-        self.goal_x.set(None);
-        Some((c, false))
+        let caret = edit?;
+        drop(doc);
+        self.structural(before);
+        Some(caret)
     }
 
     pub fn typing_style(&self) -> Flags {
@@ -1578,14 +1546,14 @@ impl Editor {
         CURSOR_TEXT
     }
 
-    pub fn image_key(&self, i: usize, key: &str, before: Document) -> Option<(Caret, bool)> {
+    pub fn image_key(&self, i: usize, key: &str, before: Document) -> Option<Caret> {
         use slint::platform::Key;
         let is = |k: Key| key == char::from(k).to_string();
         if is(Key::Backspace) || is(Key::Delete) {
             let range = Range { anchor: Caret { block: i, offset: 0 }, focus: Caret { block: i + 1, offset: 0 } };
             let caret = self.doc.borrow_mut().replace_range(range, "");
             self.structural(before);
-            return Some((caret, true));
+            return Some(caret);
         }
         None
     }
@@ -2276,7 +2244,7 @@ mod tests {
         assert!(editor.clipboard.text().unwrap().contains("paragraph\nSecond"));
 
         // Replace range with key
-        let (code, caret) = editor.range_key(&ui, "X", false);
+        let (code, caret) = editor.range_key("X");
         assert_eq!(code, 2, "range replaced");
         assert!(caret.is_some());
         assert_eq!(editor.text(), "# Title\nFirst X paragraph");
@@ -2322,124 +2290,44 @@ mod tests {
         assert_eq!(editor.text(), "# BloREPLACEDck 2");
     }
 
+    /// Where each motion lands is the caret motion module's to test; here only that the note takes
+    /// the keys a block forwards, on a text block and on an image, and leaves the rest to the field.
     #[test]
-    fn test_editor_arrow_navigation_onto_and_off_images() {
+    fn a_block_forwards_navigation_keys_to_the_note() {
+        use crate::note_window::KeyMods;
         use slint::platform::Key;
-        let up_key = char::from(Key::UpArrow).to_string();
-        let down_key = char::from(Key::DownArrow).to_string();
-        let press = |editor: &Editor, ui: &NoteWindow, key: &String, block: i32, offset: i32| {
-            assert!(ui.invoke_block_key(block, key.as_str().into(), crate::note_window::KeyMods { shift: false, control: false }, offset));
-            let f = editor.selection.get().focus;
-            Some((f, false))
-        };
-        let press_up = |e: &Editor, u: &NoteWindow, b: i32, o: i32| press(e, u, &up_key, b, o);
-        let press_down = |e: &Editor, u: &NoteWindow, b: i32, o: i32| press(e, u, &down_key, b, o);
-        let (_dir, db) = test_db();
-        let note_id = db.create_note(0).expect("create note");
-        let flat_rgba = crate::images::Rgba {
-            width: 200,
-            height: 100,
-            data: vec![255; 200 * 100 * 4],
-        };
-        let png = crate::images::encode_png(&flat_rgba).expect("encode png");
-        let img1 = db.add_image(note_id, "image/png", 200, 100, &png).expect("add image 1");
-        let img2 = db.add_image(note_id, "image/png", 200, 100, &png).expect("add image 2");
-
-        let content = format!("First\n![](img:{img1})\nMiddle\n![](img:{img2})\nLast");
-        crate::dropdown::init_test_platform();
-        let clipboard = Rc::new(DummyClipboard::default());
-        let editor = Rc::new(Editor::new(note_id, &content, db, clipboard));
-        let ui = NoteWindow::new().expect("NoteWindow");
-        ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));
-        editor.bind_ui(&ui, Rc::new(|_| {}), None, None, None);
-        editor.relayout(&ui);
-
-        // Document structure:
-        // 0: "First" (text, len 5)
-        // 1: img1 (image)
-        // 2: "Middle" (text, len 6)
-        // 3: img2 (image)
-        // 4: "Last" (text, len 4)
-
-        // 1. Down Arrow at bottom line of paragraph preceding image focuses image
-        let res = press_down(&editor, &ui, 0, 0);
-        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Down arrow from block 0 focuses image 1");
-
-        // 2. Right Arrow at end of paragraph preceding image focuses image
-
-        // 3. Up Arrow at top line of paragraph following image focuses image
-        let res = press_up(&editor, &ui, 2, 3);
-        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Up arrow from block 2 focuses image 1");
-
-        // 4. Left Arrow at offset 0 of paragraph immediately after image focuses image
-
-        // 5. Exiting image 1 backwards (Up / Left) lands at end of block 0
-        let res = press_up(&editor, &ui, 1, 0);
-        assert_eq!(res, Some((Caret { block: 0, offset: 5 }, false)), "Up arrow on image 1 lands at end of block 0");
-
-        // 6. Exiting image 1 forwards (Down / Right) lands at offset 0 of block 2
-        let res = press_down(&editor, &ui, 1, 0);
-        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Down arrow on image 1 lands at start of block 2");
-
-        // Test navigation between adjacent image blocks
-        let (_dir2, db2) = test_db();
-        let note_id2 = db2.create_note(0).expect("create note 2");
-        let img1_b = db2.add_image(note_id2, "image/png", 200, 100, &png).expect("add img");
-        let img2_b = db2.add_image(note_id2, "image/png", 200, 100, &png).expect("add img");
-        let content2 = format!("Before\n![](img:{img1_b})\n![](img:{img2_b})\nAfter");
-        let editor2 = Rc::new(Editor::new(note_id2, &content2, db2, Rc::new(DummyClipboard::default())));
-        let ui2 = NoteWindow::new().expect("NoteWindow");
-        ui2.window().set_size(slint::LogicalSize::new(447.0, 468.0));
-        editor2.bind_ui(&ui2, Rc::new(|_| {}), None, None, None);
-        editor2.relayout(&ui2);
-
-        // 0: "Before"
-        // 1: img1
-        // 2: img2
-        // 3: "After"
-
-        // Down from image 1 should move to image 2
-        let res = press_down(&editor2, &ui2, 1, 0);
-        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Down arrow from image 1 moves to adjacent image 2");
-
-        // Up from image 2 should move to image 1
-        let res = press_up(&editor2, &ui2, 2, 0);
-        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Up arrow from image 2 moves to adjacent image 1");
-    }
-
-    #[test]
-    fn up_and_down_treat_image_blocks_the_same_with_and_without_shift() {
-        use slint::platform::Key;
-        let up = char::from(Key::UpArrow).to_string();
-        let down = char::from(Key::DownArrow).to_string();
+        let key = |k: Key| char::from(k).to_string();
         let (_dir, db) = test_db();
         let note_id = db.create_note(0).expect("create note");
         let rgba = crate::images::Rgba { width: 200, height: 100, data: vec![255; 200 * 100 * 4] };
         let png = crate::images::encode_png(&rgba).expect("encode png");
         let img = db.add_image(note_id, "image/png", 200, 100, &png).expect("add image");
-        let content = format!("First
-![](img:{img})
-Middle");
+        let content = format!("First\n![](img:{img})\nMiddle");
         crate::dropdown::init_test_platform();
         let editor = Rc::new(Editor::new(note_id, &content, db, Rc::new(DummyClipboard::default())));
         let ui = NoteWindow::new().expect("NoteWindow");
         ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));
         editor.bind_ui(&ui, Rc::new(|_| {}), None, None, None);
         editor.relayout(&ui);
-        let at = |block, offset| Caret { block, offset };
-
+        let press = |k: &str, shift, control, block, offset| {
+            ui.invoke_block_key(block, k.into(), KeyMods { shift, control, selecting: false }, offset)
+        };
         // 0 "First", 1 image, 2 "Middle"
-        for (shift, from, key, block, offset, want) in [
-            (false, at(2, 3), &up, 2, 3, at(1, 0)),
-            (true, at(2, 3), &up, 2, 3, at(1, 0)),
-            (false, at(0, 2), &down, 0, 2, at(1, 0)),
-            (true, at(0, 2), &down, 0, 2, at(1, 0)),
-        ] {
-            editor.set_selection(&ui, Range { anchor: from, focus: from });
-            assert!(ui.invoke_block_key(block, key.as_str().into(), crate::note_window::KeyMods { shift, control: false }, offset), "shift={shift}");
-            let sel = editor.selection.get();
-            assert_eq!(sel.focus, want, "shift={shift} from {from:?}");
-            assert_eq!(sel.anchor, if shift { from } else { want }, "shift={shift} from {from:?}");
+        for shift in [false, true] {
+            assert!(press(&key(Key::DownArrow), shift, false, 0, 2), "down, shift={shift}");
+            assert!(press(&key(Key::UpArrow), shift, false, 2, 3), "up, shift={shift}");
+            assert!(press(&key(Key::Home), shift, false, 2, 3), "home, shift={shift}");
+            assert!(press(&key(Key::End), shift, false, 2, 3), "end, shift={shift}");
+            assert!(press(&key(Key::Home), shift, true, 2, 3), "ctrl+home, shift={shift}");
+            assert!(press(&key(Key::End), shift, true, 0, 3), "ctrl+end, shift={shift}");
+            assert!(press(&key(Key::DownArrow), shift, false, 1, 0), "down off an image, shift={shift}");
+            assert!(press(&key(Key::LeftArrow), shift, false, 1, 0), "left off an image, shift={shift}");
         }
+        let on_image = Caret { block: 1, offset: 0 };
+        editor.set_selection(&ui, Range { anchor: on_image, focus: on_image });
+        assert!(!press(&key(Key::Home), false, false, 1, 0), "an image has no line to go to the edge of");
+        assert!(!press(&key(Key::LeftArrow), false, false, 0, 2), "a step inside a paragraph is the field's");
+        assert!(!press(&key(Key::LeftArrow), false, true, 0, 2), "ctrl+arrow is the field's");
+        assert!(!press("a", false, false, 0, 2), "typing is the field's");
     }
 }

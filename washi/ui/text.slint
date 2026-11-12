@@ -241,10 +241,10 @@ export component TextLayer inherits Rectangle {
     callback paste-range() -> bool;
     /// Replace the selection across blocks by this text (typing, pasting, cutting).
     callback range-replace(string);
-    /// A key over a selection across blocks, as its text and whether Shift is held (Rust): 1 taken
-    /// without a change (a modifier key alone, an arrow that collapses the selection), 2 the key
+    /// A key over a selection across blocks, as its text (Rust): 1 taken
+    /// without a change (a modifier key alone), 2 the key
     /// replaced the selection, 0 any other key.
-    callback range-key(string, bool) -> int;
+    callback range-key(string) -> int;
     // The clipboard goes through a field of Slint's, so no platform code is needed.
     clipboard := TextInput {
         visible: false;
@@ -474,7 +474,7 @@ export component TextLayer inherits Rectangle {
                     // undo or redo, a format, a new note: not ours; the selection stays
                     return false;
                 }
-                return root.range-key(e.text, e.modifiers.shift) != 0;
+                return root.range-key(e.text) != 0;
             }
             italic: b.italic;
             autofocus: i == 0 && root.allow-autofocus;

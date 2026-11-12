@@ -251,12 +251,12 @@ fn the_note_takes_a_navigation_key_with_typed_modifiers() {
     let mut h = note("t
 ab");
     h.press(0, Key::RightArrow); // the caret at the end of the title
+    // Plain Left inside a paragraph is the field's own: the note declines it
+    assert!(!h.block_key(0, 0, Key::LeftArrow, false, false, 1));
     // Shift+Right at the end of the title carries the selection into the next paragraph
     assert!(h.block_key(0, 0, Key::RightArrow, true, false, 1));
     assert_eq!(h.selection(0), ((0, 1), (1, 0)));
     // Ctrl+Shift+End extends to the end of the note
     assert!(h.block_key(0, 0, Key::End, true, true, 1));
     assert_eq!(h.selection(0), ((0, 1), (1, 2)));
-    // Plain Left inside a paragraph is the field's own: the note declines it
-    assert!(!h.block_key(0, 1, Key::LeftArrow, false, false, 1));
 }

@@ -466,7 +466,7 @@ fn stress_image_deletion_cutting_and_undo_invariants() {
     let before = editor.doc.borrow().clone();
     let caret = editor.image_key(3, &char::from(slint::platform::Key::Backspace).to_string(), before);
     assert!(caret.is_some());
-    editor.notify_change(caret.map(|(c, _)| c));
+    editor.notify_change(caret);
     assert_eq!(editor.model.row_count(), 4);
 
     // 4. Undo restores second image

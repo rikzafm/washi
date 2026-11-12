@@ -131,8 +131,9 @@ pub struct Moved {
 ///
 /// One rule for both: a line up or down in the paragraph keeping the goal column (`goal_x`, else
 /// the caret's own x); past the first or last line the caret enters the neighbouring block, an
-/// image at its only offset (0) and text on its last or first line; at the note's ends Shift selects to the start or end of the text and a plain key stays put. Leaving an image lands at the end of the text before it or the
-/// start of the text after it. A plain key over a non-empty range collapses it to the edge it
+/// image at its only offset (0) and text on its last or first line; at the note's ends Shift selects
+/// to the start or end of the text and a plain key stays put. Leaving an image lands at the end of
+/// the text before it or the start of the text after it. A plain key over a non-empty range collapses it to the edge it
 /// points at. `line_end` is whether the focus is at the end of a wrapped line.
 pub fn vertical(doc: &Document, lines: &dyn Lines, sel: Range, motion: Vertical, extend: bool, line_end: bool, goal_x: Option<f64>) -> Moved {
     let up = motion == Vertical::Up;
@@ -187,6 +188,58 @@ pub fn vertical(doc: &Document, lines: &dyn Lines, sel: Range, motion: Vertical,
     } else {
         land(focus.block + 1, 0)
     }
+}
+
+/// Where Home or End takes the caret: the line's start or end (Home, End), or the note's
+/// (Ctrl+Home, Ctrl+End).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    LineStart,
+    LineEnd,
+    NoteStart,
+    NoteEnd,
+}
+
+impl Edge {
+    /// The edge a Slint key text stands for, if it is Home or End; `ctrl` takes it to the note's ends.
+    pub fn from_key(key: &str, ctrl: bool) -> Option<Edge> {
+        use slint::platform::Key;
+        if key == char::from(Key::Home).to_string() {
+            Some(if ctrl { Edge::NoteStart } else { Edge::LineStart })
+        } else if key == char::from(Key::End).to_string() {
+            Some(if ctrl { Edge::NoteEnd } else { Edge::LineEnd })
+        } else {
+            None
+        }
+    }
+}
+
+/// Where Home, End, Ctrl+Home or Ctrl+End takes `sel`'s focus; `extend` (Shift) keeps the anchor.
+///
+/// A line edge is that of the wrapped line the focus is on (`line_end`: whether it is at the end of
+/// one); an image has none, so the key leaves it where it is. A plain key over a range collapses
+/// it to the new focus. The goal column is forgotten.
+pub fn to_edge(doc: &Document, lines: &dyn Lines, sel: Range, edge: Edge, extend: bool, line_end: bool) -> Moved {
+    let focus = sel.focus;
+    let (to, at_line_end) = match edge {
+        Edge::NoteStart => (Caret { block: 0, offset: 0 }, false),
+        Edge::NoteEnd => {
+            let block = doc.len().saturating_sub(1);
+            (Caret { block, offset: doc.blocks().get(block).map_or(0, |b| b.text.len()) }, false)
+        }
+        Edge::LineStart | Edge::LineEnd => match doc.blocks().get(focus.block) {
+            Some(b) if b.kind != Kind::Image => {
+                let offset = floor_boundary(&b.text, focus.offset);
+                let at = lines.line_at(focus.block, offset, line_end);
+                // far past the end of any line is the end of the line it is on
+                let x = if edge == Edge::LineStart { 0.0 } else { 1e9 };
+                let (offset, at_end) = lines.offset_on(focus.block, at.line, x);
+                (Caret { block: focus.block, offset }, at_end)
+            }
+            _ => (focus, false),
+        },
+    };
+    Moved { range: Range { anchor: if extend { sel.anchor } else { to }, focus: to }, line_end: at_line_end, goal_x: None }
 }
 
 #[cfg(test)]
@@ -369,5 +422,58 @@ mod tests {
         assert_eq!(Vertical::from_key(&char::from(Key::UpArrow).to_string()), Some(Vertical::Up));
         assert_eq!(Vertical::from_key(&char::from(Key::DownArrow).to_string()), Some(Vertical::Down));
         assert_eq!(Vertical::from_key(&char::from(Key::LeftArrow).to_string()), None);
+    }
+
+    /// (name, caret, edge, where the focus lands). Each row is run with and without Shift.
+    fn edge_table() -> Vec<(&'static str, (usize, usize), Edge, (usize, usize))> {
+        use Edge::{LineEnd, LineStart, NoteEnd, NoteStart};
+        vec![
+            ("home goes to the start of the line", (0, 6), LineStart, (0, 4)),
+            ("home on the first line goes to the paragraph's start", (0, 2), LineStart, (0, 0)),
+            ("end goes to the end of the line", (0, 1), LineEnd, (0, 4)),
+            ("end on the last line goes to the paragraph's end", (0, 5), LineEnd, (0, 8)),
+            ("ctrl+home goes to the note's start", (3, 5), NoteStart, (0, 0)),
+            ("ctrl+end goes to the note's end", (1, 1), NoteEnd, (4, 4)),
+        ]
+    }
+
+    #[test]
+    fn home_end_and_ctrl_home_end_land_where_the_table_says_with_and_without_shift() {
+        let doc = tall();
+        for (name, from, edge, to) in edge_table() {
+            let sel = caret(from.0, from.1);
+            let plain = to_edge(&doc, &Fake(&doc), sel, edge, false, false);
+            let shifted = to_edge(&doc, &Fake(&doc), sel, edge, true, false);
+            assert_eq!(plain.range, caret(to.0, to.1), "{name}");
+            assert_eq!(shifted.range, range(from, to), "{name}: shift keeps the anchor");
+            assert_eq!(plain.goal_x, None, "{name}: forgets the goal column");
+        }
+    }
+
+    #[test]
+    fn plain_home_and_end_over_a_range_collapse_to_the_line_edge_of_the_focus() {
+        let doc = tall();
+        let sel = range((3, 2), (0, 6));
+        assert_eq!(to_edge(&doc, &Fake(&doc), sel, Edge::LineStart, false, false).range, caret(0, 4));
+        assert_eq!(to_edge(&doc, &Fake(&doc), sel, Edge::LineEnd, false, false).range, caret(0, 8));
+    }
+
+    #[test]
+    fn home_and_end_on_an_image_stay_put() {
+        let doc = tall();
+        assert_eq!(to_edge(&doc, &Fake(&doc), caret(2, 0), Edge::LineStart, false, false).range, caret(2, 0));
+        assert_eq!(to_edge(&doc, &Fake(&doc), caret(2, 0), Edge::LineEnd, true, false).range, caret(2, 0));
+    }
+
+    #[test]
+    fn keys_map_to_edges() {
+        use slint::platform::Key;
+        let home = char::from(Key::Home).to_string();
+        let end = char::from(Key::End).to_string();
+        assert_eq!(Edge::from_key(&home, false), Some(Edge::LineStart));
+        assert_eq!(Edge::from_key(&end, false), Some(Edge::LineEnd));
+        assert_eq!(Edge::from_key(&home, true), Some(Edge::NoteStart));
+        assert_eq!(Edge::from_key(&end, true), Some(Edge::NoteEnd));
+        assert_eq!(Edge::from_key("a", false), None);
     }
 }
