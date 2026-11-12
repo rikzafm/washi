@@ -183,7 +183,7 @@ pub struct Editor {
     pub marker_wash: Rc<VecModel<SelRect>>,
 
     // Editor state
-    pub selection: Cell<Range>,
+    selection: Cell<Range>,
     pub range: Cell<Option<Range>>,
     /// The caret that sits at the end of a line whose next line starts at the same offset (a wrap
     /// without a space), when the caret is there; any other caret is drawn where its offset starts.
@@ -417,7 +417,7 @@ impl Editor {
                 } else {
                     // the field reports its caret only when the offset changes: the caret's side of
                     // a wrap can change without it
-                    editor.selection.set(Range { anchor: caret, focus: caret });
+                    editor.store(Range { anchor: caret, focus: caret });
                     editor.focus_at(&ui, caret);
                     editor.show_caret(&ui);
                 }
@@ -983,7 +983,7 @@ impl Editor {
         self.goal_x.set(None);
         let (start, end) = range.ordered();
         let across = start.block != end.block;
-        self.selection.set(range);
+        self.store(range);
         ui.set_wash(!across);
         if across {
             self.range.set(Some(range));
@@ -1171,9 +1171,21 @@ impl Editor {
     }
 
     pub fn set_caret(&self, c: Caret) {
+        self.set_range(Range { anchor: c, focus: c });
+    }
+
+    /// Make `range` the selection without touching a window: the one way to select when there is
+    /// none. With a window, `set_selection` also washes and focuses.
+    pub fn set_range(&self, range: Range) {
         self.line_end.set(None);
         self.goal_x.set(None);
-        self.selection.set(Range { anchor: c, focus: c });
+        self.store(range);
+    }
+
+    /// The only assignment of the selection: everything else reaches it through `set_selection`,
+    /// `set_range` or `caret_moved` (the field's own report).
+    fn store(&self, range: Range) {
+        self.selection.set(range);
     }
 
     pub fn caret_moved(&self, ui: &NoteWindow, block: usize, offset: usize, anchor: usize) {
@@ -1183,7 +1195,7 @@ impl Editor {
             return;
         }
         let caret = Caret { block, offset };
-        self.selection.set(Range { anchor: Caret { block, offset: anchor }, focus: caret });
+        self.store(Range { anchor: Caret { block, offset: anchor }, focus: caret });
         // the caret is where the note put it: it keeps its side of a wrap and its column
         if anchor != offset || self.line_end.get().is_some_and(|c| c != caret) {
             self.line_end.set(None);
