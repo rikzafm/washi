@@ -6,6 +6,7 @@
 //! image resize grips, drag math, hit testing, multi-click selection, Slint view models, and
 //! UI event binding.
 
+use crate::caret_motion;
 use crate::document::{
     clamp_palette, floor_boundary, Align, Block, Caret, Document, Kind, Paint, Range,
     Style as Flags, IMAGE_PCT_MAX, IMAGE_PCT_MIN, PALETTE, PALETTE_MAX,
@@ -398,6 +399,11 @@ impl Editor {
             let weak_ui = ui.as_weak();
             ui.on_block_key(move |i, key, mods, offset| {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return false };
+                if !mods.control {
+                    if let Some(m) = caret_motion::Horizontal::from_key(key.as_str()) {
+                        return editor.move_horizontally(&ui, m, mods.shift, i.max(0) as usize, offset.max(0) as usize);
+                    }
+                }
                 if mods.shift {
                     return editor.extend(&ui, key.as_str(), mods.control);
                 }
@@ -1044,36 +1050,16 @@ impl Editor {
         let doc = self.doc.borrow();
         let Some(block) = doc.blocks().get(focus.block) else { return false };
         let offset = focus.offset;
+        if let (false, Some(m)) = (ctrl, caret_motion::Horizontal::from_key(key)) {
+            let Some(range) = caret_motion::horizontal(&doc, sel, m, true) else { return false };
+            drop(doc);
+            self.set_selection(ui, range);
+            return true;
+        }
         let is = |k: Key| key == char::from(k).to_string();
         let to = if ctrl {
             let all = doc.all();
             if is(Key::Home) { all.anchor } else { all.focus }
-        } else if is(Key::LeftArrow) {
-            if offset > 0 {
-                if !across {
-                    return false;
-                }
-                Caret { block: focus.block, offset: floor_boundary(&block.text, offset - 1) }
-            } else if focus.block > 0 {
-                block_boundary_caret(&doc, focus.block - 1, false)
-            } else {
-                focus
-            }
-        } else if is(Key::RightArrow) {
-            if offset < block.text.len() {
-                if !across {
-                    return false;
-                }
-                let mut o = offset + 1;
-                while !block.text.is_char_boundary(o) {
-                    o += 1;
-                }
-                Caret { block: focus.block, offset: o }
-            } else if focus.block + 1 < doc.len() {
-                block_boundary_caret(&doc, focus.block + 1, true)
-            } else {
-                focus
-            }
         } else {
             let up = is(Key::UpArrow);
             let tokens = self.tokens(ui);
@@ -1099,6 +1085,22 @@ impl Editor {
         true
     }
 
+    /// Left or Right pressed in block `i` with its field's caret at `offset`. False when the field
+    /// is to move the caret itself (or there is nowhere to go from an image).
+    fn move_horizontally(&self, ui: &NoteWindow, motion: caret_motion::Horizontal, extend: bool, i: usize, offset: usize) -> bool {
+        let selection = self.selection.get();
+        let here = Caret { block: i, offset };
+        let sel = if extend { selection } else { Range { anchor: here, focus: here } };
+        let moved = caret_motion::horizontal(&self.doc.borrow(), sel, motion, extend);
+        let Some(range) = moved else { return false };
+        let on_image = self.doc.borrow().blocks().get(i).is_some_and(|b| b.kind == Kind::Image);
+        if on_image && range == sel {
+            return false;
+        }
+        self.set_selection(ui, range);
+        true
+    }
+
     pub fn range_key(&self, ui: &NoteWindow, key: &str, shift: bool) -> (i32, Option<Caret>) {
         use slint::platform::Key;
         let mut chars = key.chars();
@@ -1111,6 +1113,13 @@ impl Editor {
         if is(Key::LeftArrow) || is(Key::UpArrow) || is(Key::RightArrow) || is(Key::DownArrow) {
             if shift {
                 return (0, None);
+            }
+            if let Some(m) = caret_motion::Horizontal::from_key(key) {
+                let moved = caret_motion::horizontal(&self.doc.borrow(), self.selection.get(), m, false);
+                if let Some(range) = moved {
+                    self.set_selection(ui, range);
+                }
+                return (1, None);
             }
             let to = if is(Key::LeftArrow) || is(Key::UpArrow) { start } else { end };
             self.set_selection(ui, Range { anchor: to, focus: to });
@@ -1327,27 +1336,6 @@ impl Editor {
         }
         if is(Key::Return) || is(Key::Backspace) || is(Key::Delete) {
             return None;
-        }
-        if is(Key::LeftArrow) {
-            if offset > 0 {
-                return None;
-            }
-            if i > 0 {
-                return Some((block_boundary_caret(&doc, i - 1, false), false));
-            } else {
-                return Some((Caret { block: 0, offset: 0 }, false));
-            }
-        }
-        if is(Key::RightArrow) {
-            let len = doc.blocks().get(i).map_or(0, |b| b.text.len());
-            if offset < len {
-                return None;
-            }
-            if i + 1 < doc.len() {
-                return Some((block_boundary_caret(&doc, i + 1, true), false));
-            } else {
-                return Some((Caret { block: i, offset: len }, false));
-            }
         }
         let up = is(Key::UpArrow);
         let (home, end) = (is(Key::Home), is(Key::End));
@@ -1605,13 +1593,13 @@ impl Editor {
             return Some((caret, true));
         }
         let doc = self.doc.borrow();
-        if is(Key::UpArrow) || is(Key::LeftArrow) {
+        if is(Key::UpArrow) {
             if i > 0 {
                 Some((block_boundary_caret(&doc, i - 1, false), false))
             } else {
                 None
             }
-        } else if is(Key::DownArrow) || is(Key::RightArrow) {
+        } else if is(Key::DownArrow) {
             if i + 1 < doc.len() {
                 Some((block_boundary_caret(&doc, i + 1, true), false))
             } else {
@@ -2319,46 +2307,6 @@ mod tests {
     }
 
     #[test]
-    fn test_editor_horizontal_arrow_paragraph_navigation() {
-        use slint::platform::Key;
-        let left_key = char::from(Key::LeftArrow).to_string();
-        let right_key = char::from(Key::RightArrow).to_string();
-
-        let (_dir, editor, ui) = test_editor_with_ui("Title\nParagraph 1\nParagraph 2");
-        editor.relayout(&ui);
-
-        // 1. Pressing Left Arrow at offset 0 of paragraph N (N > 0) moves focus and caret to the end of paragraph N-1.
-        let res = editor.key(1, &left_key, 0, &ui);
-        assert_eq!(res, Some((Caret { block: 0, offset: 5 }, false)), "Left arrow at start of paragraph 1 moves to end of paragraph 0");
-
-        let res = editor.key(2, &left_key, 0, &ui);
-        assert_eq!(res, Some((Caret { block: 1, offset: 11 }, false)), "Left arrow at start of paragraph 2 moves to end of paragraph 1");
-
-        // 2. Pressing Left Arrow within a paragraph (offset > 0) returns None so Slint handles intra-paragraph navigation.
-        let res = editor.key(1, &left_key, 5, &ui);
-        assert_eq!(res, None, "Left arrow mid-paragraph returns None");
-
-        // 3. Pressing Left Arrow at offset 0 of paragraph 0 remains at the start of the document without error.
-        let res = editor.key(0, &left_key, 0, &ui);
-        assert_eq!(res, Some((Caret { block: 0, offset: 0 }, false)), "Left arrow at start of block 0 stays at start");
-
-        // 4. Pressing Right Arrow at the end of paragraph N moves focus and caret to offset 0 of paragraph N+1.
-        let res = editor.key(0, &right_key, 5, &ui);
-        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Right arrow at end of paragraph 0 moves to start of paragraph 1");
-
-        let res = editor.key(1, &right_key, 11, &ui);
-        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Right arrow at end of paragraph 1 moves to start of paragraph 2");
-
-        // 5. Pressing Right Arrow within a paragraph (offset < len) returns None so Slint handles intra-paragraph navigation.
-        let res = editor.key(1, &right_key, 5, &ui);
-        assert_eq!(res, None, "Right arrow mid-paragraph returns None");
-
-        // 6. Pressing Right Arrow at the end of the last paragraph remains at the end of the document without error.
-        let res = editor.key(2, &right_key, 11, &ui);
-        assert_eq!(res, Some((Caret { block: 2, offset: 11 }, false)), "Right arrow at end of last paragraph stays at end");
-    }
-
-    #[test]
     fn test_editor_multi_block_single_line_paste_with_clipboard_abstraction() {
         let (_dir, editor, ui) = test_editor_with_ui("Block 0\nBlock 1\nBlock 2");
         editor.relayout(&ui);
@@ -2399,9 +2347,6 @@ mod tests {
         use slint::platform::Key;
         let up_key = char::from(Key::UpArrow).to_string();
         let down_key = char::from(Key::DownArrow).to_string();
-        let left_key = char::from(Key::LeftArrow).to_string();
-        let right_key = char::from(Key::RightArrow).to_string();
-
         let (_dir, db) = test_db();
         let note_id = db.create_note(0).expect("create note");
         let flat_rgba = crate::images::Rgba {
@@ -2434,28 +2379,20 @@ mod tests {
         assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Down arrow from block 0 focuses image 1");
 
         // 2. Right Arrow at end of paragraph preceding image focuses image
-        let res = editor.key(0, &right_key, 5, &ui);
-        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Right arrow from end of block 0 focuses image 1");
 
         // 3. Up Arrow at top line of paragraph following image focuses image
         let res = editor.key(2, &up_key, 3, &ui);
         assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Up arrow from block 2 focuses image 1");
 
         // 4. Left Arrow at offset 0 of paragraph immediately after image focuses image
-        let res = editor.key(2, &left_key, 0, &ui);
-        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Left arrow from start of block 2 focuses image 1");
 
         // 5. Exiting image 1 backwards (Up / Left) lands at end of block 0
         let res = editor.key(1, &up_key, 0, &ui);
         assert_eq!(res, Some((Caret { block: 0, offset: 5 }, false)), "Up arrow on image 1 lands at end of block 0");
-        let res = editor.key(1, &left_key, 0, &ui);
-        assert_eq!(res, Some((Caret { block: 0, offset: 5 }, false)), "Left arrow on image 1 lands at end of block 0");
 
         // 6. Exiting image 1 forwards (Down / Right) lands at offset 0 of block 2
         let res = editor.key(1, &down_key, 0, &ui);
         assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Down arrow on image 1 lands at start of block 2");
-        let res = editor.key(1, &right_key, 0, &ui);
-        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Right arrow on image 1 lands at start of block 2");
 
         // Test navigation between adjacent image blocks
         let (_dir2, db2) = test_db();
@@ -2477,13 +2414,9 @@ mod tests {
         // Down from image 1 should move to image 2
         let res = editor2.key(1, &down_key, 0, &ui2);
         assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Down arrow from image 1 moves to adjacent image 2");
-        let res = editor2.key(1, &right_key, 0, &ui2);
-        assert_eq!(res, Some((Caret { block: 2, offset: 0 }, false)), "Right arrow from image 1 moves to adjacent image 2");
 
         // Up from image 2 should move to image 1
         let res = editor2.key(2, &up_key, 0, &ui2);
         assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Up arrow from image 2 moves to adjacent image 1");
-        let res = editor2.key(2, &left_key, 0, &ui2);
-        assert_eq!(res, Some((Caret { block: 1, offset: 0 }, false)), "Left arrow from image 2 moves to adjacent image 1");
     }
 }

@@ -2,6 +2,7 @@
 //! drives the same `App` on a stand-in platform.
 
 pub mod all_notes;
+pub mod caret_motion;
 pub mod app;
 pub mod clipboard_html;
 pub mod delete_dialog;
