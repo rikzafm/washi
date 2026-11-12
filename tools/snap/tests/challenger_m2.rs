@@ -103,7 +103,7 @@ fn challenge_headless_editor_operations_without_ui() {
         anchor: Caret { block: 1, offset: 0 },
         focus: Caret { block: 1, offset: 7 },
     };
-    editor.selection.set(bold_range);
+    editor.set_range(bold_range);
     assert!(editor.format(washi::editor::FORMAT_BOLD));
     assert!(editor.text().contains("**Updated**"));
 
@@ -112,7 +112,8 @@ fn challenge_headless_editor_operations_without_ui() {
         anchor: Caret { block: 1, offset: 8 },
         focus: Caret { block: 1, offset: 12 },
     };
-    editor.selection.set(paint_range);
+    editor.set_range(paint_range);
+    assert_eq!(editor.selection(), paint_range);
     assert!(editor.apply_paint(Some(2), Some(1)));
     let text_with_paint = editor.text();
     assert!(text_with_paint.contains("<c=") && text_with_paint.contains("<m="), "serialized document contains ink and marker tags: {text_with_paint}");
