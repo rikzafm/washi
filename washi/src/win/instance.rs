@@ -8,6 +8,20 @@ use windows_sys::Win32::System::Threading::{CreateEventW, CreateMutexW, SetEvent
 const MUTEX_NAME: &str = "Local\\Washi-SingleInstance";
 const EVENT_NAME: &str = "Local\\Washi-NewNote";
 
+/// `name` for this profile. A throwaway profile (`WASHI_DATA_DIR`: the measuring tools) is a Washi
+/// of its own: it must neither be handed off to the user's running Washi nor open a note in it.
+fn scoped(name: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    match std::env::var_os("WASHI_DATA_DIR") {
+        Some(dir) => {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            dir.hash(&mut h);
+            format!("{name}-{:016x}", h.finish())
+        }
+        None => name.to_string(),
+    }
+}
+
 thread_local! {
     /// Set on the UI thread by `listen`; the waiter thread asks the event loop to run it.
     static ON_REQUEST: RefCell<Option<Rc<dyn Fn()>>> = const { RefCell::new(None) };
@@ -16,7 +30,7 @@ thread_local! {
 /// The named "open a new note" event (created if it does not exist yet), or `None` if Windows
 /// refused. The caller owns the handle and must close it.
 fn new_note_event() -> Option<usize> {
-    let name = wide(EVENT_NAME);
+    let name = wide(&scoped(EVENT_NAME));
     // SAFETY: auto-reset, initially unsignalled; opens the existing event if there is one.
     let handle = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
     if handle.is_null() {
@@ -33,7 +47,7 @@ pub struct Win32Instance;
 
 impl SingleInstance for Win32Instance {
     fn acquire(&self) -> Launch {
-        let name = wide(MUTEX_NAME);
+        let name = wide(&scoped(MUTEX_NAME));
         // SAFETY: the mutex handle is deliberately kept for the life of the process: it is what
         // marks this process as the running Washi.
         let (mutex, error) = unsafe {

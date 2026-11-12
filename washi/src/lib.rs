@@ -5,6 +5,7 @@ pub mod all_notes;
 pub mod caret_motion;
 pub mod app;
 pub mod clipboard_html;
+pub mod context_menu;
 pub mod delete_dialog;
 pub mod document;
 pub mod dropdown;

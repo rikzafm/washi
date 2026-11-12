@@ -87,7 +87,7 @@ fn test_concurrent_all_notes_open_while_desktop_notes_edited_parked_unparked_res
     h.place_note(0, g0);
 
     for i in 1..4 {
-        h.right_click(0, Some(&["New note"]));
+        h.new_note_from(0);
         let idx = h.open_note_count() - 1;
         h.set_note_text(idx, &format!("# Note {i}\nInitial body {i}."));
         h.place_note(
@@ -182,11 +182,11 @@ fn test_interleave_typing_active_desktop_note_with_row_switching_all_notes() {
     let g0 = Geometry { x: 100, y: 100, w: 460, h: 460 };
     h.place_note(0, g0);
 
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Beta\nBeta body.");
     h.place_note(1, Geometry { x: 580, y: 100, w: 460, h: 460 });
 
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(2, "# Gamma\nGamma body.");
     h.place_note(2, Geometry { x: 1060, y: 100, w: 460, h: 460 });
 
@@ -255,7 +255,7 @@ fn test_multiple_image_viewers_while_all_notes_active_and_editing() {
     h.wait_for_images();
 
     // Note 1 gets blue image
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Blue Note");
     h.choose_picture(&img_blue);
     h.click_image_button(1);
@@ -350,8 +350,10 @@ fn test_clipboard_interleaved_viewer_copy_note_text_paste_note_image_paste() {
     assert!(h.note_text(0).contains("Clipboard Hub Added plain text."));
     assert_eq!(h.block_kinds(0), ["title"]);
 
-    // Note 1: Image container note
-    h.right_click(0, Some(&["New note"]));
+    // Note 1: Image container note (made as before: a right click on note 0, then New)
+    h.click_right(0, 5.0, 5.0);
+    h.dismiss_menu();
+    h.new_note_from(0);
     h.type_text(1, "Image Source");
     h.choose_picture(&img_path);
     h.click_image_button(1);
@@ -444,7 +446,7 @@ fn test_cascade_parking_edge_cases_park_switch_delete_unpark() {
     h.place_note(0, Geometry { x: 300, y: 100, w: 460, h: 480 });
 
     for i in 1..5 {
-        h.right_click(0, Some(&["New note"]));
+        h.new_note_from(0);
         let idx = h.open_note_count() - 1;
         h.set_note_text(idx, &format!("# Note {i}\nBody {i}"));
         h.place_note(
@@ -551,11 +553,11 @@ fn test_geometry_persistence_across_complex_parking_unparking_cycles() {
     h.set_note_text(0, "# Geometrist 0");
     h.place_note(0, g0);
 
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Geometrist 1");
     h.place_note(1, g1);
 
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(2, "# Geometrist 2");
     h.place_note(2, g2);
 
@@ -682,7 +684,7 @@ fn test_high_stress_interleaved_matrix() {
             4 => {
                 // Open new note
                 if h.open_note_count() < 6 {
-                    h.right_click(0, Some(&["New note"]));
+                    h.new_note_from(0);
                     let last = h.open_note_count() - 1;
                     h.set_note_text(last, &format!("# Created note {step}"));
                 }

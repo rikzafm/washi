@@ -58,7 +58,7 @@ fn new_note_opens_a_note() {
 #[test]
 fn close_note_closes_the_note() {
     let mut h = note();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
     press(&mut h, keys_of("Close note"));
     assert_eq!(h.open_note_count(), 1);

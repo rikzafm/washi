@@ -22,6 +22,8 @@ export {
 export { Theme } from "theme.slint";
 export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
+export { ContextMenuWindow, ClosedItem } from "context-menu.slint";
+import { TapeShape } from "settings-widgets.slint";
 export { AllNoteItem } from "all-notes.slint";
 export { SidebarPanel } from "sidebar-panel.slint";
 export { SettingsWindow } from "settings.slint";
@@ -55,6 +57,9 @@ export component NoteWindow inherits Window {
     // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
     in property <string> window-title: "Washi";
     in property <bool> pinned: false;
+    /// The note's Tape color (an index into `TapePalette`) and the shape of a recolored tape.
+    in property <int> tape-style: 0;
+    in property <TapeShape> tape-shape;
     in property <image> app-icon;
     title: window-title;
     always-on-top: pinned;
@@ -654,6 +659,8 @@ export component NoteWindow inherits Window {
     Tapes {
             width: root.note-w;
             height: root.height;
+            style: root.tape-style;
+            shape: root.tape-shape;
         }
     }
 }

@@ -22,7 +22,7 @@ fn close_settings(h: &mut Harness) {
 }
 
 fn new_note(h: &mut Harness) -> usize {
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.open_note_count() - 1
 }
 

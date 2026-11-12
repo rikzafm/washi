@@ -5,8 +5,13 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetTopWindow, GetWindow, PostMessageW, GW_HWNDNEXT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
-    HTTOPRIGHT, WM_LBUTTONUP, WM_NCDESTROY, WM_NCLBUTTONDOWN,
+    HTTOPRIGHT, WM_LBUTTONUP, WM_NCDESTROY, WM_NCLBUTTONDOWN, WM_SIZE,
 };
+
+thread_local! {
+    /// The window Windows is moving or sizing for the user right now (0: none).
+    static DRAGGED: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+}
 
 const DRAG_SUBCLASS_ID: usize = 0x5744_5247; // "WDRG"
 
@@ -55,12 +60,27 @@ fn start_native_drag(hwnd: Option<isize>, hit: u32) {
 unsafe extern "system" fn drag_subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
     match msg {
         WM_NCLBUTTONDOWN if wparam == HTCAPTION as usize || (HTLEFT as usize..=HTBOTTOMRIGHT as usize).contains(&wparam) => {
+            DRAGGED.with(|d| d.set(hwnd as isize));
             let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+            DRAGGED.with(|d| d.set(0));
             let mut at = POINT { x: 0, y: 0 };
             GetCursorPos(&mut at);
             ScreenToClient(hwnd, &mut at);
             let client = (((at.y as u32) & 0xFFFF) << 16 | ((at.x as u32) & 0xFFFF)) as LPARAM;
             PostMessageW(hwnd, WM_LBUTTONUP, 0, client);
+            result
+        }
+        // A step of the user's resize. Slint has the new size once the window's own procedure has
+        // run, but what follows from it (the `changed width` handlers: the words laid out for the new
+        // paper) only runs on the next turn of the event loop, after the paint Windows asks for now.
+        // Every step was therefore painted twice, first with the words still laid out for the old
+        // size, and each paint is a full software repaint: the note flickered and lagged the pointer.
+        // Running the handlers here lets that one paint draw the new layout. Only inside the size
+        // loop of this window, where no Slint code is on the stack (the loop was started by a posted
+        // message).
+        WM_SIZE if DRAGGED.with(|d| d.get()) == hwnd as isize => {
+            let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+            slint::platform::update_timers_and_animations();
             result
         }
         WM_NCDESTROY => {

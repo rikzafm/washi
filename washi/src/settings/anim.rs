@@ -91,6 +91,17 @@ pub const TAB_SWITCH: Duration = Duration::from_millis(130);
 /// frame starts as soon as the last one is drawn instead of waiting out a whole 16 ms.
 pub const TICK: Duration = Duration::from_millis(8);
 
+/// The most animation time one frame may cover: two frames of a 60 Hz screen. A frame that took
+/// longer to draw (a hitch) plays late instead of skipping ahead.
+pub const MAX_FRAME: Duration = Duration::from_millis(32);
+
+/// How far the animation clock moves for a frame that came `real` after the last one. The first
+/// frame of the open morph follows the page's first paint (the slowest one, by far): it counts as
+/// one tick, so the grow starts from the note instead of from wherever that paint's time puts it.
+pub fn frame_step(real: Duration, first: bool) -> Duration {
+    real.min(if first { TICK } else { MAX_FRAME })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ease {
     Linear,
@@ -262,6 +273,16 @@ mod tests {
         assert!(GROW + TICK <= ms(200), "open is about 200 ms: {GROW:?}");
         assert!(GROW + NOTE_FADE + 2 * TICK <= ms(250), "close is under 250 ms");
         assert!(TAB_SWITCH >= ms(120) && TAB_SWITCH <= ms(150), "{TAB_SWITCH:?}");
+    }
+
+    #[test]
+    fn a_slow_frame_plays_late_instead_of_skipping() {
+        assert_eq!(frame_step(ms(8), false), ms(8), "frames in time follow the real clock");
+        assert_eq!(frame_step(ms(16), false), ms(16));
+        assert_eq!(frame_step(ms(120), false), MAX_FRAME, "a hitch does not jump the animation");
+        // the page's first paint: the grow starts at the note, not most of the way through
+        let after_first_paint = Tween::new(0.0, 1.0, ms(0), GROW, Ease::OutCubic).sample(frame_step(ms(120), true)).0;
+        assert!(after_first_paint < 0.15, "{after_first_paint}");
     }
 
     #[test]

@@ -229,6 +229,8 @@ impl Note {
 
         ui.set_window_title(window_title(content).into());
         ui.set_pinned(always_on_top);
+        ui.set_tape_shape(crate::settings::tape::note_tape_shape());
+        ui.set_tape_style(autosave.db.tape_style(id) as i32);
         ui.set_app_icon(app_icon());
 
         let scale = Rc::new(crate::ui_scale::WindowScale::attach(ui.window()));
@@ -498,6 +500,48 @@ impl Note {
         self.geometry.current().unwrap_or(Geometry { x: 0, y: 0, w: 0, h: 0 })
     }
 
+    /// Something is selected (text or a picture): Cut and Copy have something to take.
+    pub fn has_selection(&self) -> bool {
+        self.editor.has_selection()
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.editor.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.editor.can_redo()
+    }
+
+    pub fn cut(&self) -> bool {
+        self.ui.invoke_cut_range()
+    }
+
+    pub fn copy(&self) -> bool {
+        self.ui.invoke_copy_range()
+    }
+
+    pub fn undo(&self) {
+        self.ui.invoke_block_history(false);
+    }
+
+    pub fn redo(&self) {
+        self.ui.invoke_block_history(true);
+    }
+
+    /// The note's Tape color: an index into the Tape color list (0 is pink and blue).
+    pub fn tape_style(&self) -> i32 {
+        self.ui.get_tape_style()
+    }
+
+    /// Show and remember the Tape color of the note.
+    pub fn set_tape_style(&self, style: i32) {
+        self.ui.set_tape_style(style);
+        if let Err(e) = self.autosave.db.set_tape_style(self.id.get(), style as i64) {
+            eprintln!("washi: could not save the tape color of note {}: {e}", self.id.get());
+        }
+    }
+
     pub fn always_on_top(&self) -> bool {
         self.ui.get_pinned()
     }
@@ -549,6 +593,7 @@ impl Note {
         self.flush_text();
         self.scroll_timer.stop();
         self.id.set(id);
+        self.ui.set_tape_style(self.autosave.db.tape_style(id) as i32);
         self.editor.switch_to(&self.ui, id, content);
     }
 

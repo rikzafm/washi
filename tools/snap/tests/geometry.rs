@@ -227,10 +227,10 @@ fn closed_note_reopens_at_its_moved_geometry() {
     let mut h = note();
     h.type_text(0, "moved note");
     h.drag(0, TAPE, (200.0, 100.0));
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
     h.close_note(0);
-    h.right_click(0, Some(&["Open note", "moved note"]));
+    h.right_click(0, Some(&["Recently closed", "moved note"]));
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.window_position(1), (200, 100));
 }
@@ -239,7 +239,7 @@ fn closed_note_reopens_at_its_moved_geometry() {
 fn a_new_note_opens_offset_from_the_moved_one() {
     let mut h = note();
     h.drag(0, TAPE, (200.0, 100.0));
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.window_position(1), (230, 130));
 }
 

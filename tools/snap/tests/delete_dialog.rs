@@ -48,7 +48,7 @@ fn delete_dialog_keep_it_button_cancels_and_keeps_note() {
     let id = h.note_id(0);
     h.type_text(0, "important thought");
 
-    h.right_click(0, Some(&["Delete"]));
+    h.delete_note(0);
     assert!(h.is_delete_dialog_open());
 
     // Invoke "Keep it"
@@ -64,7 +64,7 @@ fn delete_dialog_keep_it_button_cancels_and_keeps_note() {
 fn delete_dialog_confirm_button_permanently_deletes_note() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
 
     let id1 = h.note_id(1);
@@ -87,7 +87,7 @@ fn delete_dialog_confirm_button_permanently_deletes_note() {
 fn closing_note_dismisses_its_delete_dialog() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
 
     let id1 = h.note_id(1);

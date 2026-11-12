@@ -11,17 +11,9 @@ fn ms(n: u64) -> Duration {
 fn two_notes() -> Harness {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
     h
-}
-
-fn labels(items: &[washi::platform::MenuItem]) -> Vec<String> {
-    items.iter().map(|i| i.label.clone()).collect()
-}
-
-fn menu_item<'a>(items: &'a [washi::platform::MenuItem], label: &str) -> &'a washi::platform::MenuItem {
-    items.iter().find(|i| i.label == label).unwrap_or_else(|| panic!("no menu item {label}"))
 }
 
 #[test]
@@ -32,12 +24,15 @@ fn right_click_anywhere_opens_the_menu() {
     for (x, y) in [(5.0, 5.0), (200.0, 200.0), (420.0, 440.0)] {
         h.click_right(0, x, y);
     }
-    assert_eq!(h.menu.shown.borrow().len(), 3);
-    let items = h.last_menu();
-    assert_eq!(labels(&items), ["Paste", "Paste image", "New note", "Open note", "Close", "Delete", "Always on top", "Start with Windows", "Export as Markdown\u{2026}"]);
-    assert!(!menu_item(&items, "Paste").enabled, "no clipboard content yet");
-    assert!(!menu_item(&items, "Paste image").enabled, "no image on clipboard");
-    assert!(!menu_item(&items, "Open note").enabled, "no closed notes yet, so nothing to open");
+    assert_eq!(h.menus_shown(), 3);
+    let menu = h.last_menu();
+    assert!(!menu.can_paste, "no clipboard content yet");
+    assert!(!menu.can_paste_image, "no image on clipboard");
+    assert!(!menu.has_selection, "nothing selected");
+    assert!(!menu.can_undo && !menu.can_redo, "nothing typed yet");
+    assert!(!menu.pinned);
+    assert_eq!(menu.tape_style, 0);
+    assert!(menu.closed.is_empty(), "no closed notes yet, so nothing to reopen");
 }
 
 #[test]
@@ -45,7 +40,7 @@ fn left_click_does_not_open_the_menu() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.right_click(0, None);
-    assert_eq!(h.menu.shown.borrow().len(), 1);
+    assert_eq!(h.menus_shown(), 1);
     assert_eq!(h.open_note_count(), 1, "dismissing the menu changes nothing");
 }
 
@@ -54,7 +49,7 @@ fn new_note_from_the_menu_is_empty_and_the_old_note_is_kept() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "first");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.note_text(0), "# first");
     assert_eq!(h.note_text(1), "");
@@ -75,7 +70,7 @@ fn close_hides_the_note_without_asking() {
     let mut h = two_notes();
     h.dialogs.confirm_answer.set(false); // would veto if it were asked
     h.type_text(1, "scribble");
-    h.right_click(1, Some(&["Close"]));
+    h.close_note(1);
     assert!(!h.has_quit());
     assert_eq!(h.open_note_count(), 1);
     assert_eq!(h.window_count(), 1, "the closed note's window is released");
@@ -95,15 +90,15 @@ fn closed_notes_are_listed_by_title_newest_first() {
     h.start().unwrap();
     h.type_text(0, "oldest note");
     h.advance(ms(600));
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "the middle one");
     h.press_enter(1);
     h.type_text(1, "with a second line");    h.advance(ms(600));
-    h.right_click(1, Some(&["New note"]));
+    h.new_note_from(1);
     let long = "x".repeat(60);
     h.type_text(2, &long);
     h.advance(ms(600));
-    h.right_click(2, Some(&["New note"]));
+    h.new_note_from(2);
     h.advance(ms(600));
     // Close the first three; the fourth (empty) stays open.
     h.press_ctrl(0, 'w');
@@ -112,10 +107,7 @@ fn closed_notes_are_listed_by_title_newest_first() {
     assert_eq!(h.open_note_count(), 1);
 
     h.right_click(0, None);
-    let items = h.last_menu();
-    let open = menu_item(&items, "Open note");
-    assert!(open.enabled);
-    let titles = labels(&open.children);
+    let titles = h.last_menu().closed;
     assert_eq!(titles.len(), 3);
     assert_eq!(titles[0], format!("{}…", "x".repeat(40)), "truncated to 40 characters");
     assert_eq!(titles[1], "the middle one", "first line only");
@@ -127,24 +119,24 @@ fn choosing_a_closed_note_reopens_it_at_its_saved_size() {
     let mut h = two_notes();
     h.type_text(1, "come back to me");
     h.resize_note(1, 500, 470);
-    h.right_click(1, Some(&["Close"]));
+    h.close_note(1);
     assert_eq!(h.open_note_count(), 1);
 
-    h.right_click(0, Some(&["Open note", "come back to me"]));
+    h.right_click(0, Some(&["Recently closed", "come back to me"]));
     assert_eq!(h.open_note_count(), 2);
     assert_eq!(h.note_text(1), "# come back to me");
     assert_eq!(h.note_size(1), (500, 470));
 
     // It is open again, so it is no longer listed.
     h.right_click(0, None);
-    assert!(!menu_item(&h.last_menu(), "Open note").enabled);
+    assert!(h.last_menu().closed.is_empty());
 }
 
 #[test]
 fn delete_asks_and_keeps_the_note_when_declined() {
     let mut h = two_notes();
     h.type_text(1, "keep me");
-    h.right_click(1, Some(&["Delete"]));
+    h.delete_note(1);
     assert!(h.is_delete_dialog_open());
     h.invoke_keep_note();
     assert_eq!(h.open_note_count(), 2);
@@ -161,7 +153,7 @@ fn delete_removes_the_note_for_good_when_confirmed() {
     let id = h.note_id(1);
     h.type_text(1, "WASHI_CANARY_delete_me");
     h.advance(ms(500));
-    h.right_click(1, Some(&["Delete"]));
+    h.delete_note(1);
     assert!(h.is_delete_dialog_open());
     h.invoke_confirm_delete();
     assert_eq!(h.open_note_count(), 1);
@@ -170,7 +162,7 @@ fn delete_removes_the_note_for_good_when_confirmed() {
 
     // Not listed as a closed note either.
     h.right_click(0, None);
-    assert!(!menu_item(&h.last_menu(), "Open note").enabled);
+    assert!(h.last_menu().closed.is_empty());
 
     // The write-ahead log was emptied, so no trace of the note lingers in it.
     let (db, wal) = h.raw_db_bytes();
@@ -218,9 +210,9 @@ fn restart_reopens_exactly_the_notes_that_were_open() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "alpha");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "beta");
-    h.right_click(1, Some(&["New note"]));
+    h.new_note_from(1);
     h.type_text(2, "gamma");
     h.advance(ms(500));
     h.press_ctrl(1, 'w'); // close beta
@@ -230,7 +222,7 @@ fn restart_reopens_exactly_the_notes_that_were_open() {
     assert_eq!(h.note_text(0), "# alpha");
     assert_eq!(h.note_text(1), "# gamma");
     h.right_click(0, None);
-    assert_eq!(labels(&menu_item(&h.last_menu(), "Open note").children), ["beta"]);
+    assert_eq!(h.last_menu().closed, ["beta"]);
 }
 
 #[test]
@@ -260,7 +252,7 @@ fn closing_multiple_notes_in_quick_succession_reopens_all_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "first note");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "second note");
     assert_eq!(h.open_note_count(), 2);
 
@@ -284,7 +276,7 @@ fn closing_a_note_then_waiting_over_30s_keeps_it_closed_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note A");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "note B");
     assert_eq!(h.open_note_count(), 2);
 
@@ -300,7 +292,7 @@ fn closing_a_note_then_waiting_over_30s_keeps_it_closed_on_restart() {
     assert_eq!(h.note_id(0), id_b);
     assert_eq!(h.note_text(0), "# note B");
     h.right_click(0, None);
-    assert_eq!(labels(&menu_item(&h.last_menu(), "Open note").children), ["note A"]);
+    assert_eq!(h.last_menu().closed, ["note A"]);
 }
 
 #[test]
@@ -308,7 +300,7 @@ fn closing_a_note_then_deleting_the_last_note_restores_the_closed_note() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note A");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "note B");
     assert_eq!(h.open_note_count(), 2);
 
@@ -317,7 +309,7 @@ fn closing_a_note_then_deleting_the_last_note_restores_the_closed_note() {
     h.close_note(0);
     h.advance(Duration::from_secs(5));
     // Note B is now at index 0. Delete it.
-    h.right_click(0, Some(&["Delete"]));
+    h.delete_note(0);
     assert!(h.is_delete_dialog_open());
     h.invoke_confirm_delete();
     assert!(h.has_quit());
@@ -333,7 +325,7 @@ fn closing_empty_and_non_empty_notes_reopens_only_non_empty_notes_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "not empty note");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     // Note 1 is empty
     assert_eq!(h.open_note_count(), 2);
     let id0 = h.note_id(0);
@@ -354,7 +346,7 @@ fn closing_non_empty_then_empty_note_reopens_only_non_empty_notes_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "not empty note");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     // Note 1 is empty
     assert_eq!(h.open_note_count(), 2);
     let id0 = h.note_id(0);
@@ -375,9 +367,9 @@ fn exit_sequence_preserves_stacking_order_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "bottom note");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "middle note");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(2, "top note");
     let ids: Vec<_> = (0..3).map(|i| h.note_id(i)).collect();
     // stacking order bottom to top: ids[1], ids[0], ids[2]
@@ -402,7 +394,7 @@ fn session_end_with_pending_exit_candidates_restores_them_on_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note 0");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "note 1");
     assert_eq!(h.open_note_count(), 2);
 
@@ -434,9 +426,9 @@ fn consecutive_note_closes_within_30s_accumulate_in_exit_candidates() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note 0");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "note 1");
-    h.right_click(1, Some(&["New note"]));
+    h.new_note_from(1);
     h.type_text(2, "note 2");
     assert_eq!(h.open_note_count(), 3);
 
@@ -468,9 +460,9 @@ fn exit_candidates_cleared_after_30s_inactivity() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note 0");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "note 1");
-    h.right_click(1, Some(&["New note"]));
+    h.new_note_from(1);
     h.type_text(2, "note 2");
     assert_eq!(h.open_note_count(), 3);
 
@@ -498,7 +490,7 @@ fn reopening_note_removes_it_from_exit_candidates() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "note 0");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "note 1");
     assert_eq!(h.open_note_count(), 2);
 
@@ -511,7 +503,7 @@ fn reopening_note_removes_it_from_exit_candidates() {
     assert_eq!(h.exit_candidates()[0].id, id1);
 
     // Reopen note 1 via "Open note" menu
-    h.right_click(0, Some(&["Open note", "note 1"]));
+    h.right_click(0, Some(&["Recently closed", "note 1"]));
     assert_eq!(h.open_note_count(), 2);
     assert!(h.exit_candidates().is_empty());
 }
@@ -521,7 +513,7 @@ fn closing_empty_note_records_it_as_empty_candidate() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "not empty");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
 
     let id1 = h.note_id(1);

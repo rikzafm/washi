@@ -362,7 +362,7 @@ fn test_app_multiple_viewers_independent_lifecycle() {
     h.start().unwrap();
 
     // Create a second note
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
 
     // Insert image 1 into note 0
@@ -546,7 +546,7 @@ fn test_multiple_viewers_simultaneous_same_frame_close() {
     let mut h = Harness::new();
     h.start().unwrap();
 
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.choose_picture(&img1);
     h.click_image_button(0);
     h.wait_for_images();

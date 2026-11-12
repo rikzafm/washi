@@ -702,11 +702,16 @@ impl Document {
         Caret { block: block + 1, offset: 0 }
     }
 
-    /// Backspace at the start of a block: merge it into the previous one (or delete a previous
+    /// Backspace at the start of a block: a list item first loses its bullet (becoming body, caret
+    /// in place); otherwise merge it into the previous one (or delete a previous
     /// image). `None` when nothing happens: not at the start, or the title.
     pub fn backspace(&mut self, block: usize, offset: usize) -> Option<Caret> {
         if offset != 0 || block == 0 || !self.blocks.get(block)?.is_text() {
             return None;
+        }
+        if self.blocks[block].kind == Kind::ListItem {
+            self.blocks[block].kind = Kind::Body;
+            return Some(Caret { block, offset: 0 });
         }
         if self.blocks[block - 1].kind == Kind::Image {
             self.blocks.remove(block - 1);
@@ -1493,6 +1498,20 @@ mod tests {
         let mut e = doc(&[(Kind::Title, "t"), (Kind::Body, "")]);
         e.backspace(1, 0);
         assert_eq!((kinds(&e), texts(&e)), (vec![Kind::Title], vec!["t"]));
+    }
+
+    #[test]
+    fn backspace_at_the_start_of_a_list_item_removes_the_bullet_first() {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "a"), (Kind::ListItem, "")]);
+        assert_eq!(d.backspace(2, 0), Some(Caret { block: 2, offset: 0 }));
+        assert_eq!((kinds(&d), texts(&d)), (vec![Kind::Title, Kind::Body, Kind::Body], vec!["t", "a", ""]));
+        // the next press merges as usual
+        assert_eq!(d.backspace(2, 0), Some(Caret { block: 1, offset: 1 }));
+        assert_eq!(kinds(&d), [Kind::Title, Kind::Body]);
+        // a non-empty item keeps its text
+        let mut e = doc(&[(Kind::Title, "t"), (Kind::ListItem, "milk")]);
+        assert_eq!(e.backspace(1, 0), Some(Caret { block: 1, offset: 0 }));
+        assert_eq!((kinds(&e), texts(&e)), (vec![Kind::Title, Kind::Body], vec!["t", "milk"]));
     }
 
     #[test]

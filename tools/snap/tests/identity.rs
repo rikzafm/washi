@@ -3,10 +3,6 @@
 
 use snap::Harness;
 
-fn menu_item(h: &Harness, label: &str) -> washi::platform::MenuItem {
-    h.last_menu().into_iter().find(|i| i.label == label).unwrap_or_else(|| panic!("no menu item {label:?}"))
-}
-
 #[test]
 fn window_title_is_washi_when_empty_and_follows_the_first_line() {
     let mut h = Harness::new();
@@ -37,21 +33,21 @@ fn window_title_is_restored_for_a_saved_note() {
 fn always_on_top_is_off_by_default_and_toggles_per_note() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.right_click(0, None);
-    let item = menu_item(&h, "Always on top");
-    assert!(!item.checked && item.enabled);
+    assert!(!h.last_menu().pinned);
     assert!(!h.always_on_top(0) && !h.always_on_top(1));
 
-    h.right_click(0, Some(&["Always on top"]));
+    h.pick(&["Pin on top"]);
     assert!(h.always_on_top(0));
     assert!(!h.always_on_top(1), "the other note is unaffected");
+    assert!(h.last_menu().pinned, "the open menu shows it at once");
     h.right_click(0, None);
-    assert!(menu_item(&h, "Always on top").checked);
+    assert!(h.last_menu().pinned);
     h.right_click(1, None);
-    assert!(!menu_item(&h, "Always on top").checked);
+    assert!(!h.last_menu().pinned);
 
-    h.right_click(0, Some(&["Always on top"]));
+    h.right_click(0, Some(&["Pin on top"]));
     assert!(!h.always_on_top(0));
 }
 
@@ -59,31 +55,12 @@ fn always_on_top_is_off_by_default_and_toggles_per_note() {
 fn always_on_top_is_restored_after_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
-    h.right_click(1, Some(&["Always on top"]));
+    h.new_note_from(0);
+    h.right_click(1, Some(&["Pin on top"]));
     h.restart().unwrap();
     assert_eq!(h.open_note_count(), 2);
     assert!(!h.always_on_top(0));
     assert!(h.always_on_top(1));
-}
-
-#[test]
-fn start_with_windows_is_off_by_default_and_toggles_the_registration() {
-    let mut h = Harness::new();
-    h.start().unwrap();
-    h.right_click(0, None);
-    assert!(!menu_item(&h, "Start with Windows").checked);
-    assert!(!h.startup_registered());
-
-    h.right_click(0, Some(&["Start with Windows"]));
-    assert!(h.startup_registered());
-    h.right_click(0, None);
-    assert!(menu_item(&h, "Start with Windows").checked);
-
-    h.restart().unwrap();
-    assert!(h.startup_registered(), "the setting lives outside the app process");
-    h.right_click(0, Some(&["Start with Windows"]));
-    assert!(!h.startup_registered());
 }
 
 #[test]

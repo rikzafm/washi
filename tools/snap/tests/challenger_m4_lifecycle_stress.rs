@@ -155,7 +155,6 @@ fn make_test_env(dir: &tempfile::TempDir) -> Env {
         clock: Rc::new(FakeClock::new(Rc::new(Cell::new(Duration::from_secs(10))))),
         signals: Rc::new(FakeSignals::default()),
         power: Rc::new(FakePower::default()),
-        menu: Rc::new(FakeMenu::default()),
         startup: Rc::new(FakeStartup::default()),
         instance: Rc::new(FakeInstance::default()),
         dialogs: Rc::new(FakeDialogs::default()),

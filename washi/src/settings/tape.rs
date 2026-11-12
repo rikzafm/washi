@@ -94,6 +94,30 @@ pub fn set_preview_tapes(ui: &crate::note_window::SettingsWindow) {
     ui.set_preview_tapes(slint::ModelRc::new(slint::VecModel::from(shapes)));
 }
 
+/// A recolored tape of a note (the Tape color choice): the Paper's 113 by 33 strip as it lies on the
+/// desk, with the same stripes the Settings page draws.
+pub fn note_tape_shape() -> crate::note_window::TapeShape {
+    let (w, h) = (113.0, 33.0);
+    let (bw, bh) = tape_box(w, h, TAPE_ANGLE);
+    crate::note_window::TapeShape {
+        outline: outline_path(w, h, TAPE_ANGLE).into(),
+        stripes: stripe_path(w, h, TAPE_ANGLE, css_pitch(8.0)).into(),
+        w: bw,
+        h: bh,
+    }
+}
+
+/// One of the two upright 12 by 22 chips of a colorway in the right-click menu.
+pub fn menu_chip_shape() -> crate::note_window::TapeShape {
+    let (w, h) = (12.0, 22.0);
+    crate::note_window::TapeShape {
+        outline: outline_path(w, h, 0.0).into(),
+        stripes: stripe_path(w, h, 0.0, css_pitch(4.0)).into(),
+        w,
+        h,
+    }
+}
+
 /// Rotate `pts` and place them in the tape's box.
 fn polygon_path(pts: &[P], w: f32, h: f32, angle_deg: f32) -> String {
     let (bw, bh) = tape_box(w, h, angle_deg);

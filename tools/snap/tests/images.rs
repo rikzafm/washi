@@ -289,7 +289,7 @@ fn export_as_markdown_writes_the_note_and_its_pictures_beside_it() {
     h.type_text(0, "bye");
     *h.dialogs.save_path.borrow_mut() = Some(out.path().join("my trip.md"));
 
-    h.right_click(0, Some(&["Export as Markdown\u{2026}"]));
+    h.export_note(0);
 
     let md = std::fs::read_to_string(out.path().join("my trip.md")).unwrap();
     assert_eq!(md, "# Trip\nhello\n![image 1](my%20trip-image-1.png)\nbye\n");
@@ -305,16 +305,8 @@ fn export_as_markdown_writes_the_note_and_its_pictures_beside_it() {
 fn a_cancelled_export_writes_nothing() {
     let mut h = note_with_title();
     *h.dialogs.save_path.borrow_mut() = None;
-    h.right_click(0, Some(&["Export as Markdown\u{2026}"]));
+    h.export_note(0);
     assert!(h.dialogs.errors.borrow().is_empty());
-}
-
-#[test]
-fn the_menu_offers_export_last() {
-    let mut h = note_with_title();
-    h.right_click(0, None);
-    let labels: Vec<String> = h.last_menu().into_iter().map(|i| i.label).collect();
-    assert_eq!(labels.last().map(String::as_str), Some("Export as Markdown\u{2026}"));
 }
 
 #[test]
@@ -397,7 +389,7 @@ fn ctrl_x_on_selected_image_cuts_picture_and_undo_restores_it() {
 }
 
 #[test]
-fn right_click_menu_offers_cut_and_copy_image() {
+fn right_click_menu_cuts_and_copies_a_selected_picture() {
     let mut h = note_with_title();
     let img = flat(60, 60, RED);
     h.copy_picture(img.clone());
@@ -407,21 +399,19 @@ fn right_click_menu_offers_cut_and_copy_image() {
 
     let (x, y) = select_image(&mut h);
 
-    // Right click on image without choosing an item: check menu items
+    // A right click on the picture keeps it selected, so Cut and Copy are offered
     h.right_click_at(0, x, y, None);
-    let labels: Vec<String> = h.last_menu().into_iter().map(|i| i.label).collect();
-    assert!(labels.contains(&"Cut image".to_string()));
-    assert!(labels.contains(&"Copy image".to_string()));
+    assert!(h.last_menu().has_selection);
 
-    // Copy via context menu
+    // Copy via the menu
     *h.clipboard.image.borrow_mut() = None;
-    h.right_click_at(0, x, y, Some(&["Copy image"]));
+    h.pick(&["Copy"]);
     assert!(h.clipboard_image().is_some());
     assert_eq!(h.block_kinds(0), ["title", "image", "body"]);
 
-    // Cut via context menu
+    // Cut via the menu
     *h.clipboard.image.borrow_mut() = None;
-    h.right_click_at(0, x, y, Some(&["Cut image"]));
+    h.right_click_at(0, x, y, Some(&["Cut"]));
     assert!(h.clipboard_image().is_some());
     assert_eq!(h.block_kinds(0), ["title", "body"]);
 }
@@ -433,18 +423,16 @@ fn right_click_menu_offers_paste_and_paste_image() {
     // 1. With empty clipboard, both are disabled
     h.right_click(0, None);
     let menu = h.last_menu();
-    let paste_item = menu.iter().find(|i| i.label == "Paste").expect("Paste item");
-    let paste_img_item = menu.iter().find(|i| i.label == "Paste image").expect("Paste image item");
-    assert!(!paste_item.enabled, "Paste should be disabled when clipboard is empty");
-    assert!(!paste_img_item.enabled, "Paste image should be disabled when clipboard is empty");
+    assert!(!menu.can_paste, "Paste should be disabled when clipboard is empty");
+    assert!(!menu.can_paste_image, "Paste image should be disabled when clipboard is empty");
 
     // 2. With image on clipboard, both are enabled, and Paste image inserts the image
     let img = flat(60, 60, RED);
     h.copy_picture(img);
     h.right_click(0, None);
     let menu = h.last_menu();
-    assert!(menu.iter().find(|i| i.label == "Paste").unwrap().enabled);
-    assert!(menu.iter().find(|i| i.label == "Paste image").unwrap().enabled);
+    assert!(menu.can_paste);
+    assert!(menu.can_paste_image);
 
     h.right_click(0, Some(&["Paste image"]));
     h.wait_for_images();
@@ -456,8 +444,8 @@ fn right_click_menu_offers_paste_and_paste_image() {
     *h.clipboard.text.borrow_mut() = Some("appended text".to_string());
     h.right_click(0, None);
     let menu = h.last_menu();
-    assert!(menu.iter().find(|i| i.label == "Paste").unwrap().enabled);
-    assert!(!menu.iter().find(|i| i.label == "Paste image").unwrap().enabled);
+    assert!(menu.can_paste);
+    assert!(!menu.can_paste_image);
 
     h.right_click(0, Some(&["Paste"]));
     assert_eq!(h.note_text(0), "# Trip\n![](img:1)\nappended text");

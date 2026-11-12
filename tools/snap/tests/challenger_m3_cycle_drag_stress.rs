@@ -13,7 +13,7 @@ fn setup_two_notes() -> (Harness, i64, i64) {
     h.place_note(0, Geometry { x: 500, y: 100, ..g });
     h.advance(Duration::from_millis(600));
 
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Note B\nBody of note B");
     h.place_note(1, Geometry { x: 1200, y: 400, ..g });
     h.advance(Duration::from_millis(600));

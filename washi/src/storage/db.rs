@@ -74,6 +74,8 @@ pub struct ClosedNote {
     pub id: NoteId,
     /// The first part of the note's content, enough to build a title.
     pub preview: String,
+    /// When the note was last edited (unix ms).
+    pub updated_at: i64,
 }
 
 pub struct Db {
@@ -318,6 +320,19 @@ impl Db {
         Ok(())
     }
 
+    /// The tape colorway of a note (an index into the Tape color list; 0 is the default pink and blue).
+    pub fn tape_style(&self, id: NoteId) -> i64 {
+        self.conn
+            .query_row("SELECT tape_style FROM notes WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap_or(0)
+    }
+
+    pub fn set_tape_style(&self, id: NoteId, style: i64) -> Result<(), DbError> {
+        self.conn
+            .execute("UPDATE notes SET tape_style = ?1 WHERE id = ?2", rusqlite::params![style, id])?;
+        Ok(())
+    }
+
     /// Notes with `is_open = 1`, bottom of the stack first (then oldest first).
     pub fn open_notes(&self) -> Result<Vec<NoteRow>, DbError> {
         let mut stmt = self.conn.prepare(&format!("{} WHERE is_open = 1 ORDER BY z_order, id", Self::ROW))?;
@@ -335,10 +350,10 @@ impl Db {
     /// Closed notes, most recently edited first.
     pub fn closed_notes(&self) -> Result<Vec<ClosedNote>, DbError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, substr(content, 1, 200) FROM notes WHERE is_open = 0 ORDER BY updated_at DESC, id DESC",
+            "SELECT id, substr(content, 1, 200), updated_at FROM notes WHERE is_open = 0 ORDER BY updated_at DESC, id DESC",
         )?;
         let rows = stmt
-            .query_map([], |r| Ok(ClosedNote { id: r.get(0)?, preview: r.get(1)? }))?
+            .query_map([], |r| Ok(ClosedNote { id: r.get(0)?, preview: r.get(1)?, updated_at: r.get(2)? }))?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }

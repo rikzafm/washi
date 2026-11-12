@@ -66,7 +66,7 @@ fn choose_ui_size(h: &mut Harness, option: i32) {
 }
 
 fn new_note(h: &mut Harness) -> usize {
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.open_note_count() - 1
 }
 
@@ -598,7 +598,7 @@ fn picture_viewer_on_secondary_monitor_caps_to_secondary_monitor_work_area() {
 fn exit_candidate_geometry_rescales_on_ui_scale_change() {
     let mut h = started();
     h.type_text(0, "note 0");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "note 1");
     let initial_geom = h.note_geometry(1);
     h.close_note(1);

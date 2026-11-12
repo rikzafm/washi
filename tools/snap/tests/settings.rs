@@ -31,7 +31,7 @@ fn close_settings(h: &mut Harness) {
 fn settings_opens_at_the_note_hides_only_the_host_and_closes_back() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
     h.set_note_text(0, "# Host\nsome text");
     // well inside the screen, so nothing needs to shift
@@ -149,7 +149,7 @@ fn escape_closes_settings() {
 fn a_second_press_brings_the_existing_page_forward() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     let windows_before = h.window_count();
 
     open_settings_from(&mut h, 0);
@@ -184,7 +184,7 @@ fn the_compact_dropdown_has_no_settings() {
 fn all_notes_never_shows_the_settings_host() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     let (id0, id1) = (h.note_id(0), h.note_id(1));
     open_settings_from(&mut h, 0);
     assert!(!h.note_visible(0));

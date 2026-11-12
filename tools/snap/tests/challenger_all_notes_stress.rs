@@ -11,7 +11,7 @@ fn two_open_notes() -> (Harness, i64, i64) {
     h.set_note_text(0, "# Host\nbody");
     let g = h.note_geometry(0);
     h.place_note(0, Geometry { x: 600, y: 100, ..g });
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Other\nbody");
     h.place_note(1, Geometry { x: 1400, y: 500, ..g });
     let (host, other) = (h.note_id(0), h.note_id(1));
@@ -27,7 +27,7 @@ fn test_rapid_selection_and_switch_stress() {
     h.start().unwrap();
     let g = h.note_geometry(0);
     for i in 1..5 {
-        h.right_click(0, Some(&["New note"]));
+        h.new_note_from(0);
         h.set_note_text(i, &format!("# Note {i}\nBody {i}"));
         h.place_note(i, Geometry { x: 600 + (i as i32 * 50), y: 100, ..g });
     }

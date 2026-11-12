@@ -219,6 +219,28 @@ pub struct Editor {
     pub clock: RefCell<Rc<dyn Clock>>,
 }
 
+/// Bring `model` to `rows`, touching only the rows that differ. A relayout (every step of a resize)
+/// mostly leaves the words where they are: resetting the model made Slint build every word's element
+/// again, which cost several times the layout itself.
+fn sync_rows<T: Clone + PartialEq + 'static>(model: &VecModel<T>, rows: Vec<T>) {
+    let had = model.row_count();
+    if had == 0 || rows.is_empty() {
+        model.set_vec(rows);
+        return;
+    }
+    for (i, row) in rows.iter().enumerate().take(had) {
+        if model.row_data(i).as_ref() != Some(row) {
+            model.set_row_data(i, row.clone());
+        }
+    }
+    for i in (rows.len()..had).rev() {
+        model.remove(i);
+    }
+    for row in rows.into_iter().skip(had) {
+        model.push(row);
+    }
+}
+
 impl Editor {
     /// Create a new Editor instance initialized with content.
     pub fn new(id: NoteId, content: &str, db: Rc<Db>, clipboard: Rc<dyn ImageClipboard>) -> Self {
@@ -517,9 +539,16 @@ impl Editor {
         {
             let editor_weak = editor_weak.clone();
             let weak_ui = ui.as_weak();
+            let laid_out = Cell::new(None);
             ui.on_paper_resized(move |w, h| {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return };
-                editor.paper.set((w as f64, h as f64));
+                // A corner drag changes the width and the height at once and each reports the new
+                // paper: lay the words out once.
+                let paper = (w as f64, h as f64);
+                if laid_out.replace(Some(paper)) == Some(paper) && editor.paper.get() == paper {
+                    return;
+                }
+                editor.paper.set(paper);
                 editor.relayout(&ui);
             });
         }
@@ -864,7 +893,7 @@ impl Editor {
         let doc = self.doc.borrow();
         let (mut runs, rules, markers) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
         ui.set_content_height(textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b)).1 as f32);
-        self.rules.set_vec(
+        sync_rows(&self.rules, 
             rules
                 .iter()
                 .map(|r| RuleData {
@@ -878,7 +907,7 @@ impl Editor {
                 })
                 .collect::<Vec<_>>(),
         );
-        self.marker_data.set_vec(
+        sync_rows(&self.marker_data, 
             markers
                 .iter()
                 .map(|m| MarkerData {
@@ -896,7 +925,7 @@ impl Editor {
         if hint {
             runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
         }
-        self.runs.set_vec(
+        sync_rows(&self.runs, 
             runs.iter()
                 .map(|r| RunData {
                     block: if hint { -2 } else { r.block as i32 },
@@ -954,6 +983,12 @@ impl Editor {
 
     pub fn selection(&self) -> Range {
         self.selection.get()
+    }
+
+    /// Something is selected: a range of text, or a picture.
+    pub fn has_selection(&self) -> bool {
+        let r = self.selection.get();
+        r.anchor != r.focus || self.selected_image(&self.doc.borrow()).is_some()
     }
 
     /// Text now stays tilted while editing (true) or settles flat (false).

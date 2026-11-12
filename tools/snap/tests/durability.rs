@@ -7,7 +7,7 @@ fn session_end_saves_pending_edits_of_every_note_at_once() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.type_text(0, "first");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.type_text(1, "second");
     assert_eq!(h.saved_text(0), "", "still inside the autosave delay");
     h.end_session(); // WM_QUERYENDSESSION / WM_ENDSESSION: no time to wait for the debounce
@@ -50,8 +50,8 @@ fn a_failing_random_generator_is_a_start_error_not_a_crash() {
 fn the_stacking_order_of_open_notes_survives_a_restart() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
+    h.new_note_from(0);
     let ids: Vec<_> = (0..3).map(|i| h.note_id(i)).collect();
     // the user brought the first note to the front, then the third: bottom to top is 1, 0, 2
     h.set_stacking(vec![ids[1], ids[0], ids[2]]);

@@ -26,20 +26,20 @@ fn setup_mockup_all_notes() -> Harness {
     h.advance(Duration::from_secs(1));
 
     for title in &closed_titles[1..] {
-        h.right_click(0, Some(&["New note"]));
+        h.new_note_from(0);
         let last = h.open_note_count() - 1;
         h.set_note_text(last, title);
         h.advance(Duration::from_secs(1));
     }
 
     // Create the 2 open notes: "Grocery run" and "Endfield Note"
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     let grocery_idx = h.open_note_count() - 1;
     h.set_note_text(grocery_idx, "# Grocery run\nmilk");
     let grocery_id = h.note_id(grocery_idx);
     h.advance(Duration::from_secs(1));
 
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     let endfield_idx = h.open_note_count() - 1;
     h.set_note_text(endfield_idx, ENDFIELD_CONTENT);
     let endfield_id = h.note_id(endfield_idx);
@@ -47,7 +47,7 @@ fn setup_mockup_all_notes() -> Harness {
 
     // Close the first 4 notes (always closing index 0 four times)
     for _ in 0..4 {
-        h.right_click(0, Some(&["Close"]));
+        h.close_note(0);
     }
     assert_eq!(h.open_note_count(), 2);
 
@@ -209,7 +209,7 @@ fn external_desktop_note_lifecycle_updates_open_all_notes_and_exits_when_all_clo
     assert!(h.all_notes_open_items().iter().any(|i| i.title.as_str() == "Updated Grocery"));
 
     // Creating a new note from a desktop window updates the count and keeps the selection
-    h.right_click(grocery_idx, Some(&["New note"]));
+    h.new_note_from(grocery_idx);
     assert_eq!(h.all_notes_open_count(), Some(3));
     assert_eq!(h.all_notes_selected_id(), Some(endfield_id));
 
@@ -350,7 +350,7 @@ fn two_open_notes() -> (Harness, i64, i64) {
     h.set_note_text(0, "# Host\nbody");
     let g = h.note_geometry(0);
     h.place_note(0, washi::storage::Geometry { x: 600, y: 100, ..g });
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Other\nbody");
     h.place_note(1, washi::storage::Geometry { x: 1400, y: 500, ..g });
     let (host, other) = (h.note_id(0), h.note_id(1));
@@ -483,10 +483,10 @@ fn a_long_list_pins_new_note_to_the_bottom_and_a_short_one_lets_it_follow() {
     let mut h = setup_mockup_all_notes();
 
     for i in 0..12 {
-        h.right_click(0, Some(&["New note"]));
+        h.new_note_from(0);
         let last = h.open_note_count() - 1;
         h.set_note_text(last, &format!("# Extra {i}"));
-        h.right_click(last, Some(&["Close"]));
+        h.close_note(last);
     }
     assert!(h.all_notes_closed_count().unwrap() >= 16);
     let long = dark_button_bottom(&h).expect("button still drawn");
@@ -495,10 +495,10 @@ fn a_long_list_pins_new_note_to_the_bottom_and_a_short_one_lets_it_follow() {
     assert!(long < window_h as usize - 30, "inside the panel, above the window's margin ({long})");
 
     // adding more notes does not move it again
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     let last = h.open_note_count() - 1;
     h.set_note_text(last, "# One more");
-    h.right_click(last, Some(&["Close"]));
+    h.close_note(last);
     assert_eq!(dark_button_bottom(&h), Some(long));
 }
 

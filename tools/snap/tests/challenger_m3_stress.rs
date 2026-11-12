@@ -23,7 +23,7 @@ fn setup_harness_with_open_notes(count: usize) -> Harness {
     h.advance(Duration::from_millis(50));
 
     for i in 1..count {
-        h.right_click(0, Some(&["New note"]));
+        h.new_note_from(0);
         let idx = h.open_note_count() - 1;
         h.set_note_text(idx, &format!("# Note {i}\nInitial body {i}"));
         // Position them so they overlap with the All Notes area (editor at 318 - 282 = 36..765)
@@ -400,7 +400,7 @@ fn test_bidirectional_sync_delete_desktop_vs_sidebar() {
     // --- CASE 1: Delete note from Desktop while All Notes is open ---
     // Note 2 is deleted from desktop
     let idx2 = (0..h.open_note_count()).find(|&i| h.note_id(i) == id2).unwrap();
-    h.right_click(idx2, Some(&["Delete"]));
+    h.delete_note(idx2);
     h.advance(Duration::from_millis(100));
     assert!(h.is_delete_dialog_open());
     h.invoke_confirm_delete();
@@ -578,7 +578,7 @@ fn test_reproduce_host_geometry_save_bug() {
     h.set_note_text(0, "# Host\nbody");
     let g = h.note_geometry(0);
     h.place_note(0, Geometry { x: 600, y: 100, ..g });
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Other\nbody");
     h.place_note(1, Geometry { x: 1400, y: 500, ..g });
     let (host, other) = (h.note_id(0), h.note_id(1));

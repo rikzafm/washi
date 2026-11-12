@@ -23,7 +23,6 @@ fn main() {
         clock: Rc::new(SystemClock::new()),
         signals: Rc::new(Win32Signals::default()),
         power: Rc::new(Win32Power),
-        menu: Rc::new(Win32ContextMenu),
         startup: Rc::new(Win32Startup),
         instance: Rc::new(Win32Instance),
         dialogs: dialogs.clone(),

@@ -14,7 +14,6 @@ pub struct Harness {
     env: Env,
     pub signals: Rc<FakeSignals>,
     pub power: Rc<FakePower>,
-    pub menu: Rc<FakeMenu>,
     pub dialogs: Rc<FakeDialogs>,
     pub clipboard: Rc<FakeClipboard>,
     pub startup: Rc<FakeStartup>,
@@ -24,6 +23,26 @@ pub struct Harness {
     pub shell: Rc<FakeShell>,
     app: Option<App>,
     last_ids: Vec<NoteId>,
+}
+
+/// The Tape color list of the right-click menu, in the order of its index.
+pub const TAPE_COLORS: [&str; 4] = ["Pink + blue", "Yellow + green", "Lavender + peach", "Slate + rose"];
+
+/// What the open right-click menu shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuState {
+    pub can_paste: bool,
+    pub can_paste_image: bool,
+    pub has_selection: bool,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub pinned: bool,
+    pub tape_style: i32,
+    /// Titles in "Recently closed", most recent first.
+    pub closed: Vec<String>,
+    /// The menu window on screen (physical px).
+    pub position: (i32, i32),
+    pub size: (u32, u32),
 }
 
 impl Default for Harness {
@@ -48,7 +67,6 @@ impl Harness {
         let dir = tempfile::tempdir().expect("temp data folder");
         let signals = Rc::new(FakeSignals::default());
         let power = Rc::new(FakePower::default());
-        let menu = Rc::new(FakeMenu::default());
         let dialogs = Rc::new(FakeDialogs::default());
         let clipboard = Rc::new(FakeClipboard::default());
         let startup = Rc::new(FakeStartup::default());
@@ -65,13 +83,12 @@ impl Harness {
             clock: Rc::new(FakeClock::new(platform::time_handle())),
             signals: signals.clone(),
             power: power.clone(),
-            menu: menu.clone(),
             dialogs: dialogs.clone(),
             clipboard: clipboard.clone(),
             startup: startup.clone(),
             instance: instance.clone(),
         };
-        Harness { dir, env, signals, power, menu, dialogs, clipboard, startup, instance, control, stats, shell, app: None, last_ids: Vec::new() }
+        Harness { dir, env, signals, power, dialogs, clipboard, startup, instance, control, stats, shell, app: None, last_ids: Vec::new() }
     }
 
     pub(crate) fn app(&self) -> &App {
@@ -261,20 +278,89 @@ impl Harness {
         self.settle();
     }
 
-    /// Right-click on the paper. The menu answers with `choose` (a label path) or is dismissed.
+    /// Right-click on the paper. With `choose` the item is picked at once (see `pick`); without it the
+    /// menu stays open for the test to look at.
     pub fn right_click(&mut self, note: usize, choose: Option<&[&str]>) {
         self.right_click_at(note, 5.0, 5.0, choose);
     }
 
-    /// Right-click at `(x, y)`. The menu answers with `choose` (a label path) or is dismissed.
+    /// Right-click at `(x, y)`, then pick `choose` if given.
     pub fn right_click_at(&mut self, note: usize, x: f32, y: f32, choose: Option<&[&str]>) {
-        *self.menu.next_path.borrow_mut() = choose.map(|p| p.iter().map(|s| s.to_string()).collect());
-        self.menu.next_choice.set(None);
         self.click_right(note, x, y);
+        self.settle();
+        if let Some(path) = choose {
+            self.pick(path);
+        }
+    }
+
+    /// Press an item of the open right-click menu: "Paste", "Paste image", "Cut", "Copy", "Undo", "Redo",
+    /// "Pin on top", `["Tape color", name]` or `["Recently closed", title]`. A disabled item panics.
+    pub fn pick(&mut self, path: &[&str]) {
+        let menu = self.app().context_menu().expect("no right-click menu is open");
+        let ui = menu.ui();
+        let need = |on: bool, what: &str| assert!(on, "menu item {what} is disabled");
+        match path {
+            ["Paste"] => {
+                need(ui.get_can_paste(), "Paste");
+                ui.invoke_paste();
+            }
+            ["Paste image"] => {
+                need(ui.get_can_paste_image(), "Paste image");
+                ui.invoke_paste_image();
+            }
+            ["Cut"] => {
+                need(ui.get_has_selection(), "Cut");
+                ui.invoke_cut();
+            }
+            ["Copy"] => {
+                need(ui.get_has_selection(), "Copy");
+                ui.invoke_copy();
+            }
+            ["Undo"] => {
+                need(ui.get_can_undo(), "Undo");
+                ui.invoke_undo();
+            }
+            ["Redo"] => {
+                need(ui.get_can_redo(), "Redo");
+                ui.invoke_redo();
+            }
+            ["Pin on top"] => ui.invoke_toggle_pin(),
+            ["Tape color", name] => {
+                let i = TAPE_COLORS.iter().position(|c| c == name).unwrap_or_else(|| panic!("no tape color {name:?}"));
+                ui.invoke_pick_tape(i as i32);
+            }
+            ["Recently closed", title] => {
+                use slint::Model;
+                let item = ui.get_closed().iter().find(|c| c.title == *title).unwrap_or_else(|| panic!("no recently closed note {title:?}"));
+                ui.invoke_reopen(item.id);
+            }
+            _ => panic!("no menu item {path:?}"),
+        }
         self.settle();
     }
 
-    /// Right-click at a window position without queuing any menu answer.
+    /// Make a new note from note `note`, as the dropdown's New button does.
+    pub fn new_note_from(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().new_note_from(id);
+        self.settle();
+    }
+
+    /// Delete note `note` (the delete dialog opens, as from the dropdown's trash button).
+    pub fn delete_note(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().delete_note(id);
+        self.settle();
+    }
+
+    /// "Export as Markdown..." for note `note`.
+    pub fn export_note(&mut self, note: usize) {
+        let id = self.id(note);
+        self.app().export_note(id);
+        self.settle();
+    }
+
+    /// Right-click at a window position.
     pub fn click_right(&mut self, note: usize, x: f32, y: f32) {
         let id = self.id(note);
         self.app().with_note(id, |n| {
@@ -574,9 +660,48 @@ impl Harness {
         self.app().geometry_changed(id);
     }
 
-    /// The items of the most recently shown menu.
-    pub fn last_menu(&self) -> Vec<washi::platform::MenuItem> {
-        self.menu.shown.borrow().last().cloned().expect("no menu was shown")
+    /// Whether a right-click menu is open.
+    pub fn menu_open(&self) -> bool {
+        self.app().context_menu().is_some()
+    }
+
+    /// What the open right-click menu shows (panics when none is open).
+    pub fn last_menu(&self) -> MenuState {
+        use slint::Model;
+        let menu = self.app().context_menu().expect("no right-click menu is open");
+        let ui = menu.ui();
+        MenuState {
+            can_paste: ui.get_can_paste(),
+            can_paste_image: ui.get_can_paste_image(),
+            has_selection: ui.get_has_selection(),
+            can_undo: ui.get_can_undo(),
+            can_redo: ui.get_can_redo(),
+            pinned: ui.get_pinned(),
+            tape_style: ui.get_tape_style(),
+            closed: ui.get_closed().iter().map(|c| c.title.to_string()).collect(),
+            position: menu.position(),
+            size: menu.size(),
+        }
+    }
+
+    /// Dismiss the open right-click menu the way Escape or a click outside it does.
+    pub fn dismiss_menu(&mut self) {
+        let menu = self.app().context_menu().expect("no right-click menu is open");
+        menu.ui().invoke_dismiss();
+        self.settle();
+    }
+
+    /// Open or close the Tape color and Recently closed lists of the open menu.
+    pub fn set_menu_lists(&mut self, tape: bool, closed: bool) {
+        let menu = self.app().context_menu().expect("no right-click menu is open");
+        menu.ui().set_tape_open(tape);
+        menu.ui().set_closed_open(closed);
+        self.settle();
+    }
+
+    /// The Tape color of note `note` (an index into `TAPE_COLORS`).
+    pub fn tape_style(&self, note: usize) -> i32 {
+        self.app().with_note(self.id(note), |n| n.tape_style()).unwrap()
     }
 
     /// Windows that still exist (open notes, plus any not yet released).
@@ -775,9 +900,9 @@ impl Harness {
         self.app().with_note(self.id(note), |n| n.ui().get_toolbar_visible()).unwrap()
     }
 
-    /// Number of context menus shown so far.
+    /// Number of right-click menus opened so far.
     pub fn menus_shown(&self) -> usize {
-        self.menu.shown.borrow().len()
+        self.app().menus_opened()
     }
 
     /// Give a note's window keyboard focus without moving the pointer.

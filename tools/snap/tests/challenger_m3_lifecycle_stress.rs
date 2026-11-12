@@ -300,7 +300,7 @@ fn test_rapid_100_note_switches_document_integrity() {
     note_ids.push(h.note_id(0));
 
     for i in 1..10 {
-        h.right_click(0, Some(&["New note"]));
+        h.new_note_from(0);
         let idx = h.open_note_count() - 1;
         h.set_note_text(idx, &format!("# Master Note {i}\nText {i}"));
         note_ids.push(h.note_id(idx));
@@ -375,9 +375,9 @@ fn test_delete_active_notes_until_empty_and_recreate() {
 
     // Create 3 notes
     h.set_note_text(0, "# Initial A\nBody A");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Initial B\nBody B");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(2, "# Initial C\nBody C");
     h.advance(Duration::from_millis(50));
 

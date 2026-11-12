@@ -2,6 +2,7 @@
 // 1.5 deg at any size), the soft shadow drawn from the same shape, and the two washi tapes.
 // Both components fill the window; the paper sits in the window minus PaperTheme.margin.
 import { PaperTheme } from "paper-theme.slint";
+import { TapePalette, TapeShape, StripedShape } from "settings-widgets.slint";
 
 // Points of the paper, which is turned by the tilt around its own center.
 export global PaperGeometry {
@@ -77,21 +78,46 @@ component Tape {
 }
 
 // The two tapes, pinned at fixed offsets from the paper's top-left and bottom-right corners.
+// Colorway 0 (pink and blue) is the measured image; the others are drawn as striped shapes
+// (`shape`, from `settings/tape.rs`) in the Tape color palette.
 export component Tapes {
+    /// The note's Tape color: an index into `TapePalette`.
+    in property <int> style: 0;
+    in property <TapeShape> shape;
     property <length> cx: root.width / 2;
     property <length> cy: root.height / 2;
     property <length> hw: (root.width - 2 * PaperTheme.margin) / 2;
     property <length> hh: (root.height - 2 * PaperTheme.margin) / 2;
+    property <length> pink-x: PaperGeometry.x(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
+    property <length> pink-y: PaperGeometry.y(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
+    property <length> blue-x: PaperGeometry.x(root.cx, root.cy, root.hw + PaperTheme.tape-blue-offset-u, root.hh + PaperTheme.tape-blue-offset-v);
+    property <length> blue-y: PaperGeometry.y(root.cx, root.cy, root.hw + PaperTheme.tape-blue-offset-u, root.hh + PaperTheme.tape-blue-offset-v);
 
-    Tape {
+    if root.style <= 0 : Tape {
         source: @image-url("assets/tape-pink.png");
-        center-x: PaperGeometry.x(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
-        center-y: PaperGeometry.y(root.cx, root.cy, -root.hw + PaperTheme.tape-pink-offset-u, -root.hh + PaperTheme.tape-pink-offset-v);
+        center-x: root.pink-x;
+        center-y: root.pink-y;
     }
 
-    Tape {
+    if root.style <= 0 : Tape {
         source: @image-url("assets/tape-blue.png");
-        center-x: PaperGeometry.x(root.cx, root.cy, root.hw + PaperTheme.tape-blue-offset-u, root.hh + PaperTheme.tape-blue-offset-v);
-        center-y: PaperGeometry.y(root.cx, root.cy, root.hw + PaperTheme.tape-blue-offset-u, root.hh + PaperTheme.tape-blue-offset-v);
+        center-x: root.blue-x;
+        center-y: root.blue-y;
+    }
+
+    if root.style > 0 : StripedShape {
+        x: root.pink-x - root.shape.w / 2;
+        y: root.pink-y - root.shape.h / 2;
+        shape: root.shape;
+        base: TapePalette.a-light[root.style];
+        stripe: TapePalette.a-deep[root.style];
+    }
+
+    if root.style > 0 : StripedShape {
+        x: root.blue-x - root.shape.w / 2;
+        y: root.blue-y - root.shape.h / 2;
+        shape: root.shape;
+        base: TapePalette.b-light[root.style];
+        stripe: TapePalette.b-deep[root.style];
     }
 }

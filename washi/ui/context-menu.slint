@@ -1,0 +1,460 @@
+// The right-click menu of a note: the Claude Design "Right Click Menu" board.
+//
+// A paper card at the pointer: a row of edit buttons (Paste, Paste image, Cut, Copy, Undo, Redo) and
+// Pin on top, then the Tape color and Recently closed rows, each of which opens a list under it.
+// Like the Dropdown menu it is an upright card (the software renderer draws no tilted text); metrics
+// are the board's, in logical px: card padding 24 / 14, 44px buttons and rows, 42px list options,
+// dotted 2px rules.
+
+import "../../fonts/ShadowsIntoLight.ttf";
+import { TapePalette, TapeShape, StripedShape } from "settings-widgets.slint";
+
+export struct ClosedItem {
+    id: int,
+    title: string,
+    when: string,
+}
+
+component ToolButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> accessible-name;
+    in property <bool> enabled: true;
+    in property <bool> active: false;
+    callback clicked();
+
+    horizontal-stretch: 1;
+    height: 44px;
+    border-radius: 10.8px;
+    background: root.active ? #2B2F36 : (!root.enabled ? transparent : (hit.pressed ? #E4E4E2 : (hit.has-hover ? #F0F0EE : transparent)));
+
+    accessible-role: button;
+    accessible-label: root.accessible-name;
+    accessible-enabled: root.enabled;
+    accessible-checkable: root.active;
+
+    Path {
+        x: (parent.width - 20px) / 2;
+        y: 12px;
+        width: 20px;
+        height: 20px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.icon;
+        fill: transparent;
+        stroke: root.active ? #FFFFFD : (root.enabled ? #2B2F36 : #8B919A);
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        stroke-line-join: round;
+    }
+
+    hit := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+component MenuRow inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <bool> open: false;
+    callback clicked();
+
+    height: 44px;
+    border-radius: 10.8px;
+    background: hit.pressed ? #E4E4E2 : ((hit.has-hover || root.open) ? #F0F0EE : transparent);
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-expanded: root.open;
+
+    hit := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 12px;
+        alignment: stretch;
+
+        Rectangle {
+            width: 20px;
+            Path {
+                y: (parent.height - 20px) / 2;
+                width: 20px;
+                height: 20px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.icon;
+                fill: transparent;
+                stroke: #2B2F36;
+                stroke-width: 1.8px;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+            }
+        }
+
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-family: "Shadows Into Light";
+            font-size: 22px;
+            color: #2B2F36;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        @children
+
+        Rectangle {
+            width: 18px;
+            Path {
+                y: (parent.height - 18px) / 2;
+                width: 18px;
+                height: 18px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                commands: root.open ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6";
+                fill: transparent;
+                stroke: #2B2F36;
+                stroke-width: 2px;
+                stroke-line-cap: round;
+                stroke-line-join: round;
+            }
+        }
+    }
+}
+
+/// The two tape chips of a colorway (each 12 by 22, 2px apart).
+component Chips inherits Rectangle {
+    in property <TapeShape> shape;
+    in property <int> style;
+    width: 26px;
+
+    StripedShape {
+        x: 0px;
+        y: (root.height - self.height) / 2;
+        shape: root.shape;
+        base: TapePalette.a-light[root.style];
+        stripe: TapePalette.a-deep[root.style];
+        shadow: false;
+    }
+
+    StripedShape {
+        x: 14px;
+        y: (root.height - self.height) / 2;
+        shape: root.shape;
+        base: TapePalette.b-light[root.style];
+        stripe: TapePalette.b-deep[root.style];
+        shadow: false;
+    }
+}
+
+component Option inherits Rectangle {
+    in property <bool> selected: false;
+    in property <string> text;
+    in property <string> hint;
+    callback clicked();
+
+    height: 42px;
+    border-radius: 10.8px;
+    background: hit.pressed ? #E4E4E2 : (hit.has-hover ? #F0F0EE : transparent);
+    border-width: root.selected ? 2px : 0px;
+    border-color: #2B2F36;
+
+    accessible-role: list-item;
+    accessible-label: root.text;
+    accessible-checked: root.selected;
+
+    hit := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: stretch;
+        @children
+        Text {
+            horizontal-stretch: 1;
+            text: root.text;
+            font-family: "Shadows Into Light";
+            font-size: 20px;
+            color: #2B2F36;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        if root.hint != "" : Text {
+            text: root.hint;
+            font-family: "Shadows Into Light";
+            font-size: 16px;
+            color: #5B616B;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component ContextMenuWindow inherits Window {
+    title: "Washi Menu";
+    no-frame: true;
+    background: transparent;
+    always-on-top: true;
+
+    out property <float> scale-factor: 1px / 1phx;
+    callback scale-factor-changed();
+    changed scale-factor => { root.scale-factor-changed(); }
+
+    in property <length> card-width: 352px;
+    in property <length> shadow-margin: 16px;
+    /// Rows and options the open list may show before it scrolls.
+    property <int> closed-visible: min(5, root.closed.length);
+    property <length> closed-list-h: root.closed.length == 0 ? 38px : root.closed-visible * 42px;
+    out property <length> card-height: 24px + 44px + 14px + 44px
+        + (root.tape-open ? 2px + 4 * 42px + 4px : 0px)
+        + 44px
+        + (root.closed-open ? 2px + root.closed-list-h + 4px : 0px)
+        + 24px;
+
+    width: root.card-width + 2 * root.shadow-margin;
+    height: root.card-height + 2 * root.shadow-margin;
+
+    /// The card changed height (a list opened or closed): the owner keeps it on screen.
+    callback layout-changed();
+    changed card-height => { root.layout-changed(); }
+
+    callback dismiss();
+    callback paste();
+    callback paste-image();
+    callback cut();
+    callback copy();
+    callback undo();
+    callback redo();
+    callback toggle-pin();
+    callback pick-tape(int);
+    callback reopen(int);
+
+    in property <bool> can-paste: true;
+    in property <bool> can-paste-image: false;
+    in property <bool> has-selection: false;
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in-out property <bool> pinned: false;
+    in-out property <int> tape-style: 0;
+    in-out property <bool> tape-open: false;
+    in-out property <bool> closed-open: false;
+    in property <[ClosedItem]> closed: [];
+    /// A 12 by 22 striped chip (from `settings/tape.rs`).
+    in property <TapeShape> chip;
+
+    // A click outside the card (in the shadow margin) dismisses the menu.
+    background-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.dismiss(); }
+    }
+
+    focus-scope := FocusScope {
+        width: 100%;
+        height: 100%;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.dismiss();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    // The card's shadow: stacked, see-through copies of the card shape (the software renderer cannot
+    // blur), the board's `0 22px 34px -10px` + `0 2px 6px` fitted into the shadow margin.
+    for growth[i] in [11px, 9.5px, 8px, 6.5px, 5px, 3.5px, 2px, 0.5px]: Rectangle {
+        x: root.shadow-margin - growth;
+        y: root.shadow-margin - growth + 5px;
+        width: root.card-width + 2 * growth;
+        height: root.card-height + 2 * growth;
+        border-radius: 10.8px + growth;
+        background: #28324604;
+    }
+
+    card := Rectangle {
+        x: root.shadow-margin;
+        y: root.shadow-margin;
+        width: root.card-width;
+        height: root.card-height;
+        background: #FFFFFD;
+        border-radius: 10.8px;
+        clip: true;
+
+        // Clicks on the card itself must not fall through to the dismissing area behind it.
+        TouchArea { }
+
+        VerticalLayout {
+            padding-top: 24px;
+            padding-bottom: 24px;
+            padding-left: 14px;
+            padding-right: 14px;
+            alignment: start;
+
+            // Edit buttons and Pin on top
+            HorizontalLayout {
+                height: 44px;
+                padding-left: 4px;
+                padding-right: 4px;
+                spacing: 2px;
+
+                ToolButton {
+                    icon: "M8 5h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M9 5V4h6v1";
+                    accessible-name: "Paste";
+                    enabled: root.can-paste;
+                    clicked => { root.paste(); }
+                }
+                ToolButton {
+                    icon: "M6 5h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M7.5 10a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0z M5 18l5-5 4 4 2-2 3 3";
+                    accessible-name: "Paste image";
+                    enabled: root.can-paste-image;
+                    clicked => { root.paste-image(); }
+                }
+                ToolButton {
+                    icon: "M4.5 17a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0z M14.5 17a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0z M8.5 15L18 4M15.5 15L6 4";
+                    accessible-name: "Cut";
+                    enabled: root.has-selection;
+                    clicked => { root.cut(); }
+                }
+                ToolButton {
+                    icon: "M10 8h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2";
+                    accessible-name: "Copy";
+                    enabled: root.has-selection;
+                    clicked => { root.copy(); }
+                }
+                ToolButton {
+                    icon: "M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3";
+                    accessible-name: "Undo";
+                    enabled: root.can-undo;
+                    clicked => { root.undo(); }
+                }
+                ToolButton {
+                    icon: "M15 14l5-5-5-5 M20 9H10a6 6 0 0 0 0 12h3";
+                    accessible-name: "Redo";
+                    enabled: root.can-redo;
+                    clicked => { root.redo(); }
+                }
+
+                // The dotted 2px separator between the edit buttons and Pin
+                Rectangle {
+                    width: 2px + 8px;
+                    for i in 7: Rectangle {
+                        x: 4px;
+                        y: 8px + i * 4px;
+                        width: 2px;
+                        height: 2px;
+                        border-radius: 1px;
+                        background: #C9CCD2;
+                    }
+                }
+
+                ToolButton {
+                    icon: "M9 4h6l-1 6 3 3H7l3-3z M12 13v7";
+                    accessible-name: "Pin on top";
+                    active: root.pinned;
+                    clicked => { root.toggle-pin(); }
+                }
+            }
+
+            // Dotted 2px rule
+            Rectangle {
+                height: 6px + 2px + 6px;
+                for i in 76: Rectangle {
+                    x: 10px + i * 4px;
+                    y: 6px;
+                    width: 2px;
+                    height: 2px;
+                    border-radius: 1px;
+                    background: #C9CCD2;
+                }
+            }
+
+            // Tape color
+            MenuRow {
+                icon: "M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0z M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0z";
+                text: "Tape color";
+                open: root.tape-open;
+                clicked => {
+                    root.tape-open = !root.tape-open;
+                    root.closed-open = false;
+                }
+                Chips {
+                    shape: root.chip;
+                    style: root.tape-style;
+                }
+            }
+
+            if root.tape-open : VerticalLayout {
+                padding-top: 2px;
+                padding-bottom: 4px;
+                padding-left: 34px;
+                for name[i] in TapePalette.names : Option {
+                    text: name;
+                    selected: root.tape-style == i;
+                    clicked => {
+                        root.tape-style = i;
+                        root.tape-open = false;
+                        root.pick-tape(i);
+                    }
+                    Chips {
+                        shape: root.chip;
+                        style: i;
+                    }
+                }
+            }
+
+            // Recently closed
+            MenuRow {
+                icon: "M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0z M12 8v4l3 2";
+                text: "Recently closed";
+                open: root.closed-open;
+                clicked => {
+                    root.closed-open = !root.closed-open;
+                    root.tape-open = false;
+                }
+            }
+
+            if root.closed-open : Rectangle {
+                height: 2px + root.closed-list-h + 4px;
+                clip: true;
+
+                if root.closed.length == 0 : Text {
+                    x: 34px + 12px;
+                    y: 2px;
+                    width: parent.width - 34px - 24px;
+                    height: root.closed-list-h;
+                    text: "No recently closed notes";
+                    font-family: "Shadows Into Light";
+                    font-size: 19px;
+                    color: #5B616B;
+                    vertical-alignment: center;
+                }
+
+                if root.closed.length > 0 : Flickable {
+                    x: 34px;
+                    y: 2px;
+                    width: parent.width - 34px;
+                    height: root.closed-list-h;
+                    content-height: root.closed.length * 42px;
+                    VerticalLayout {
+                        alignment: start;
+                        for item in root.closed : Option {
+                            text: item.title;
+                            hint: item.when;
+                            clicked => { root.reopen(item.id); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

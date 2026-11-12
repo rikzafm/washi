@@ -292,18 +292,32 @@ export component AllNotesSidebar inherits Rectangle {
         f: root.pf;
         u0: SidebarPanel.item-u;
         v0: root.top-v + root.btn-t;
-        w: 124.0;
+        w: 144.0;
         h: 44.0;
         r: 10.8;
         fill: #2B2F36;
     }
 
+    // Hand-drawn "+" (two slightly wobbly pen strokes)
+    Path {
+        x: Tilt.x(root.pf, SidebarPanel.item-u, root.top-v + root.btn-t) * 1px + 16px;
+        y: Tilt.y(root.pf, SidebarPanel.item-u, root.top-v + root.btn-t) * 1px + 12px;
+        width: 20px;
+        height: 20px;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        commands: "M 10.2 3.4 C 10 7 9.8 12 10 16.6 M 3.4 10.3 C 7 10 13 9.8 16.7 10.1";
+        stroke: #FFFFFD;
+        stroke-width: 2.2px;
+        stroke-line-cap: round;
+    }
+
     Text {
-        x: Tilt.x(root.pf, SidebarPanel.item-u, root.top-v + root.btn-t) * 1px;
+        x: Tilt.x(root.pf, SidebarPanel.item-u, root.top-v + root.btn-t) * 1px + 44px;
         y: Tilt.y(root.pf, SidebarPanel.item-u, root.top-v + root.btn-t) * 1px;
-        width: 124px;
+        width: 100px;
         height: 44px;
-        text: "+ New note";
+        text: "New note";
         font-family: "Shadows Into Light";
         font-size: 21px;
         color: #FFFFFD;
@@ -314,7 +328,7 @@ export component AllNotesSidebar inherits Rectangle {
     TouchArea {
         x: Tilt.x(root.pf, SidebarPanel.item-u, root.top-v + root.btn-t) * 1px;
         y: Tilt.y(root.pf, SidebarPanel.item-u, root.top-v + root.btn-t) * 1px;
-        width: 124px;
+        width: 144px;
         height: 44px;
         mouse-cursor: pointer;
         clicked => { root.new-note(); }

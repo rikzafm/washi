@@ -26,7 +26,7 @@ pub mod tape;
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
 use crate::storage::Geometry;
-use anim::{contains, fit_on_screen, screen_limit, grow_pose, logical_areas, paper_of_note, tab_settle, union, window_bounds, lerp_rect, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK};
+use anim::{contains, fit_on_screen, screen_limit, grow_pose, logical_areas, paper_of_note, tab_settle, union, window_bounds, lerp_rect, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK, frame_step};
 use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -122,6 +122,11 @@ pub struct SettingsView {
     _appearance: Rc<appearance::Appearance>,
     /// The window's scale: the monitor's times the UI size.
     scale: crate::ui_scale::WindowScale,
+    /// The animation clock the tweens run on (see `anim_now`), and the real time it was last read.
+    anim: Cell<Duration>,
+    anim_read: Cell<Duration>,
+    /// The next frame is the first one of the open morph: it follows the page's first paint.
+    first_frame: Cell<bool>,
 }
 
 impl SettingsView {
@@ -151,7 +156,7 @@ impl SettingsView {
             canvas: Cell::new(host_window),
             resizes: Cell::new(0),
             phase: RefCell::new(Phase::Swap {
-                then: Box::new(Phase::Morph { tween: Tween::new(0.0, 1.0, now, GROW, Ease::OutCubic), closing: false }),
+                then: Box::new(Phase::Morph { tween: Tween::new(0.0, 1.0, Duration::ZERO, GROW, Ease::OutCubic), closing: false }),
                 closing: false,
             }),
             tick: slint::Timer::default(),
@@ -169,6 +174,9 @@ impl SettingsView {
             general,
             _appearance: appearance,
             scale,
+            anim: Cell::new(Duration::ZERO),
+            anim_read: Cell::new(now),
+            first_frame: Cell::new(false),
         });
         view.wire(Rc::downgrade(&view));
         view.morph_to.set(view.open_paper());
@@ -204,7 +212,13 @@ impl SettingsView {
         if !contains(self.canvas.get(), page) {
             self.place(union(self.canvas.get(), page));
         }
-        self.show_page(page);
+        // The page is drawn where the pose says, not on whole px: rounding its left edge while the
+        // strip slides out (a fraction of a px each frame) made the Paper wobble sideways by a pixel.
+        let c = self.canvas.get();
+        self.ui.set_page_x(pose.paper.x - MARGIN - pose.strip - c.x as f32);
+        self.ui.set_page_y(pose.paper.y - MARGIN - c.y as f32);
+        self.ui.set_page_w(pose.paper.w + 2.0 * MARGIN + pose.strip);
+        self.ui.set_page_h(pose.paper.h + 2.0 * MARGIN);
     }
 
     /// Put the page (Sidebar strip, margin and Paper) at `page`, screen logical px, in the window.
@@ -216,16 +230,14 @@ impl SettingsView {
         self.ui.set_page_h(page.h as f32);
     }
 
-    /// Where the page is on screen (logical px).
+    /// Where the page is on screen (whole logical px: each edge rounded, as `window_bounds` does).
     pub fn page_geometry(&self) -> Geometry {
         let c = self.canvas.get();
         let ui = &self.ui;
-        Geometry {
-            x: c.x + ui.get_page_x().round() as i32,
-            y: c.y + ui.get_page_y().round() as i32,
-            w: ui.get_page_w().round().max(1.0) as u32,
-            h: ui.get_page_h().round().max(1.0) as u32,
-        }
+        let (left, top) = (ui.get_page_x().round() as i32, ui.get_page_y().round() as i32);
+        let right = (ui.get_page_x() + ui.get_page_w()).round() as i32;
+        let bottom = (ui.get_page_y() + ui.get_page_h()).round() as i32;
+        Geometry { x: c.x + left, y: c.y + top, w: (right - left).max(1) as u32, h: (bottom - top).max(1) as u32 }
     }
 
     /// The UI size changed while the page is open: draw it at `ui` at once. The page keeps its top
@@ -424,7 +436,7 @@ impl SettingsView {
         if !matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. }) || to == self.tab.get() {
             return;
         }
-        let now = self.now();
+        let now = self.anim_now();
         self.ui.set_selected_tab(to);
         self.ui.set_shown_tab(to);
         // every Tab starts at its top
@@ -460,8 +472,16 @@ impl SettingsView {
         self.general.set_showing(page_up && self.tab.get() == 0);
     }
 
-    fn now(&self) -> Duration {
-        (self.hooks.now)()
+    /// The time the tweens run on. It follows the real clock, but one frame never moves it by more
+    /// than `MAX_FRAME`, and the first frame of the open morph by more than a tick: a frame that
+    /// took long to draw (the page's first paint above all) then plays late instead of being
+    /// skipped, which showed as the Paper jumping most of the way at once.
+    fn anim_now(&self) -> Duration {
+        let real = (self.hooks.now)();
+        let dt = real.saturating_sub(self.anim_read.replace(real));
+        let t = self.anim.get() + frame_step(dt, self.first_frame.replace(false));
+        self.anim.set(t);
+        t
     }
 
     /// Stop the frame timer and give back the fine timer resolution.
@@ -501,7 +521,7 @@ impl SettingsView {
     }
 
     fn step(&self) {
-        let now = self.now();
+        let now = self.anim_now();
         let phase = self.phase.borrow().clone();
         let next: Option<Phase> = match phase {
             Phase::Swap { then, closing } => {
@@ -517,6 +537,8 @@ impl SettingsView {
                 } else {
                     // the host's paper goes blank at once, the same blank paper Settings starts as
                     (self.hooks.host_content)(self.host, 0.0);
+                    // the page's first paint comes before the next frame: the grow starts after it
+                    self.first_frame.set(true);
                     let (hide, host) = (self.hooks.desktop_visible.clone(), self.host);
                     let me = self.me.clone();
                     slint::Timer::single_shot(crate::all_notes::SWAP_OVERLAP, move || {
@@ -580,7 +602,7 @@ impl SettingsView {
 
     /// X or Esc: play the transition backwards, from wherever it is, and put the host back.
     pub fn close(&self) {
-        let now = self.now();
+        let now = self.anim_now();
         let phase = self.phase.borrow().clone();
         let next = match phase {
             Phase::Morph { closing: true, .. } | Phase::Swap { closing: true, .. } | Phase::NoteFadeIn { .. } | Phase::Done => return,

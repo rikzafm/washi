@@ -35,7 +35,7 @@ fn dropdown_pin_toggle_reflects_and_updates_note_always_on_top() {
 fn dropdown_delete_note_dismisses_and_deletes_current_note() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
 
     let id1 = h.note_id(1);
@@ -66,7 +66,7 @@ fn dropdown_delete_note_dismisses_and_deletes_current_note() {
 fn dropdown_close_note_dismisses_and_closes_current_note_without_deleting_it() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
     let id1 = h.note_id(1);
     h.set_note_text(1, "# Keep me");
@@ -106,7 +106,7 @@ fn dropdown_new_note_dismisses_and_creates_new_note() {
 fn dropdown_populates_notes_list_excluding_active_note() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
 
     let id1 = h.note_id(1);
@@ -131,7 +131,7 @@ fn dropdown_populates_notes_list_excluding_active_note() {
 fn dropdown_select_open_note_raises_to_front_and_dismisses() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     let id1 = h.note_id(1);
 
     h.toggle_dropdown(0);
@@ -151,12 +151,12 @@ fn dropdown_select_open_note_raises_to_front_and_dismisses() {
 fn dropdown_select_closed_note_reopens_and_dismisses() {
     let mut h = Harness::new();
     h.start().unwrap();
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
     let id1 = h.note_id(1);
     h.set_note_text(1, "Closed Note\nWill be reopened");
 
-    h.right_click(1, Some(&["Close"]));
+    h.close_note(1);
     assert_eq!(h.open_note_count(), 1);
 
     h.toggle_dropdown(0);
@@ -395,7 +395,7 @@ fn dropdown_new_note_spawns_near_origin_note_with_multiple_notes() {
     h.start().unwrap();
 
     // Create a second note offset from note 0
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     assert_eq!(h.open_note_count(), 2);
 
     let g0 = h.note_geometry(0);
@@ -425,11 +425,11 @@ fn dropdown_all_notes_dismisses_dropdown_opens_all_notes_and_closes_on_escape() 
     let mut h = Harness::new();
     h.start().unwrap();
     h.set_note_text(0, "First Note\nBody 1");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "Second Note\nBody 2");
-    h.right_click(1, Some(&["New note"]));
+    h.new_note_from(1);
     h.set_note_text(2, "Third Note\nBody 3");
-    h.right_click(2, Some(&["Close"]));
+    h.close_note(2);
 
     assert_eq!(h.open_note_count(), 2);
     let id1 = h.note_id(1);
@@ -455,12 +455,12 @@ fn all_notes_sidebar_selection_and_new_note_button() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.set_note_text(0, "Endfield Note\nThermite Cutter");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "Grocery run\nMilk");
-    h.right_click(1, Some(&["New note"]));
+    h.new_note_from(1);
     h.set_note_text(2, "Meeting ideas\nRoadmap");
     let closed_id = h.note_id(2);
-    h.right_click(2, Some(&["Close"]));
+    h.close_note(2);
 
     let id0 = h.note_id(0);
     let id1 = h.note_id(1);
@@ -526,12 +526,12 @@ fn all_notes_bottom_actions_open_close_export_and_delete_confirmation() {
     let mut h = Harness::new();
     h.start().unwrap();
     h.set_note_text(0, "# Endfield Note\nThermite Cutter");
-    h.right_click(0, Some(&["New note"]));
+    h.new_note_from(0);
     h.set_note_text(1, "# Grocery run\nMilk and eggs");
-    h.right_click(1, Some(&["New note"]));
+    h.new_note_from(1);
     h.set_note_text(2, "# Meeting ideas\nQ4 roadmap");
     let closed_id = h.note_id(2);
-    h.right_click(2, Some(&["Close"]));
+    h.close_note(2);
 
     let id0 = h.note_id(0);
     let id1 = h.note_id(1);

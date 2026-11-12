@@ -373,23 +373,32 @@ export component TextLayer inherits Rectangle {
     for r in root.runs: Rectangle {
         property <length> run-x: r.x + (r.dx + root.shift-x) * root.tilt-scale;
         property <length> run-y: r.y + (r.dy + root.shift-y) * root.tilt-scale;
-        property <length> run-w: word.preferred-width + (r.italic ? r.size * 0.3 : 0px);
+        // The run's width is Rust's (the advances the layout used), not the Text's own preferred
+        // width: asking Slint for that shapes the word again whenever its row changes, which is
+        // every word on every step of a resize (the tilt moves them all), and cost several times
+        // the rest of the frame.
+        property <length> run-w: r.width + (r.italic ? r.size * 0.3 : 0px);
         property <length> cut: max(self.run-y, root.edge-y(self.run-x + self.run-w / 2));
         visible: r.block != root.composing-block && self.run-y + r.pitch >= root.edge-y(self.run-x + self.run-w / 2);
         x: self.run-x;
         y: self.cut;
-        width: self.run-w;
+        // (a little room past the advance: the renderer clips a text to its box)
+        width: self.run-w + r.size * 0.2;
         height: max(0px, self.run-y + r.pitch - self.cut);
         clip: true;
 
         word := Text {
+            // Not in the accessibility tree: the edit fields under the words carry the note's text.
+            // As tree nodes, every word was rebuilt on each step of a resize (they all move), which
+            // took as long as painting the note.
+            accessible-role: none;
             x: 0px;
             y: parent.run-y - parent.cut;
             text: r.text;
             wrap: no-wrap;
             // The software renderer clips a text to its box, and an italic glyph (the top of an L or
             // an I) leans out past its advance: at the end of a run the box needs room for the slant.
-            width: self.preferred-width + (r.italic ? r.size * 0.3 : 0px);
+            width: parent.width;
             font-family: Theme.handwriting;
             font-size: r.size;
             font-weight: r.bold ? 700 : 400;

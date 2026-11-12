@@ -77,20 +77,6 @@ pub trait ProcessPower {
     fn release_memory(&self);
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct MenuItem {
-    pub id: u32,
-    pub label: String,
-    pub checked: bool,
-    pub enabled: bool,
-    pub children: Vec<MenuItem>,
-}
-
-/// The right-click menu. Returns the chosen item id, or `None` if dismissed.
-pub trait ContextMenu {
-    fn show(&self, items: &[MenuItem], at: (i32, i32)) -> Option<u32>;
-}
-
 /// The "Start with Windows" setting: a per-user registration that launches Washi at sign-in
 /// (the `Run` registry value on Windows).
 pub trait StartupRegistration {

@@ -3,7 +3,8 @@
 use crate::all_notes::AllNotesView;
 use crate::settings::SettingsView;
 use crate::delete_dialog::DeleteDialog;
-use crate::document::{Align, IMAGE_PCT_MAX, IMAGE_PCT_MIN};
+
+use crate::context_menu::{ClosedItem, ContextMenu};
 use crate::dropdown::{extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu};
 use crate::images::{self, ImageError, Source, Stored};
 use crate::image_viewer::ImageViewer;
@@ -29,7 +30,6 @@ pub struct Env {
     pub clock: Rc<dyn Clock>,
     pub signals: Rc<dyn WindowSignals>,
     pub power: Rc<dyn ProcessPower>,
-    pub menu: Rc<dyn ContextMenu>,
     pub startup: Rc<dyn StartupRegistration>,
     pub instance: Rc<dyn SingleInstance>,
     pub dialogs: Rc<dyn Dialogs>,
@@ -93,6 +93,10 @@ struct Inner {
     viewers: RefCell<Vec<Rc<ImageViewer>>>,
     /// Currently open dropdown menu floating window, if any.
     dropdown: RefCell<Option<Rc<DropdownMenu>>>,
+    /// Currently open right-click menu window, if any.
+    context_menu: RefCell<Option<Rc<ContextMenu>>>,
+    /// How many right-click menus have been opened (a test hook).
+    menus_opened: Cell<usize>,
     /// Currently open delete confirmation dialog window, if any.
     delete_dialog: RefCell<Option<Rc<DeleteDialog>>>,
     /// Currently open All Notes window, if any.
@@ -118,26 +122,6 @@ pub const EXIT_WINDOW: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct App(Rc<Inner>);
-
-const MENU_NEW: u32 = 1;
-const MENU_OPEN: u32 = 2;
-const MENU_CLOSE: u32 = 3;
-const MENU_DELETE: u32 = 4;
-const MENU_TOP: u32 = 5;
-const MENU_STARTUP: u32 = 6;
-const MENU_EXPORT: u32 = 7;
-const MENU_PASTE: u32 = 8;
-const MENU_PASTE_IMAGE: u32 = 9;
-/// The menu of a picture: cut it, copy it, delete it, align it (`MENU_IMAGE_ALIGN + 0|1|2` for left, center, right),
-/// or show it `n` percent wide (`MENU_IMAGE_SIZE + n`).
-const MENU_IMAGE_CUT: u32 = 18;
-const MENU_IMAGE_COPY: u32 = 19;
-const MENU_IMAGE_DELETE: u32 = 20;
-const MENU_IMAGE_ALIGN: u32 = 21;
-const MENU_IMAGE_SIZE: u32 = 200;
-const IMAGE_SIZES: [u8; 4] = [25, 50, 75, 100];
-/// Closed notes in the "Open note" submenu get `MENU_OPEN_BASE + position`.
-const MENU_OPEN_BASE: u32 = 1000;
 
 /// A new note opens this far (logical px, right and down) from the note it was made from.
 pub const NEW_NOTE_OFFSET: i32 = 30;
@@ -210,6 +194,8 @@ impl App {
             trim_enabled: Cell::new(false),
             viewers: RefCell::new(Vec::new()),
             dropdown: RefCell::new(None),
+            context_menu: RefCell::new(None),
+            menus_opened: Cell::new(0),
             delete_dialog: RefCell::new(None),
             all_notes: RefCell::new(None),
             settings: RefCell::new(None),
@@ -288,9 +274,9 @@ impl App {
                 self.dismiss_dropdown();
                 self.open_viewer(id, block);
             }
-            NoteEvent::ContextMenu { at, image } => {
+            NoteEvent::ContextMenu { at, .. } => {
                 self.dismiss_dropdown();
-                self.show_menu(id, at, image);
+                self.show_menu(id, at);
             }
             NoteEvent::PointerMoved => self.0.suspend.poke(),
             NoteEvent::PointerDown => {
@@ -685,6 +671,7 @@ impl App {
 
     /// Dismiss the open dropdown menu and reset the parent note's button state.
     pub fn dismiss_dropdown(&self) {
+        self.dismiss_context_menu();
         let menu = self.0.dropdown.borrow_mut().take();
         if let Some(m) = menu {
             m.close();
@@ -698,6 +685,9 @@ impl App {
 
     /// Dismiss the open dropdown menu if it belongs to note `id`.
     fn dismiss_dropdown_if(&self, id: NoteId) {
+        if self.context_menu().map(|m| m.note_id()) == Some(id) {
+            self.dismiss_context_menu();
+        }
         if self.dropdown().map(|d| d.note_id()) == Some(id) {
             self.dismiss_dropdown();
         }
@@ -1393,86 +1383,123 @@ impl App {
         }
     }
 
-    fn show_menu(&self, id: NoteId, at: (i32, i32), image: Option<usize>) {
-        let closed = self.0.db.closed_notes().unwrap_or_default();
-        let item = |id, label: &str, enabled, children| MenuItem {
-            id,
-            label: label.into(),
-            checked: false,
-            enabled,
-            children,
+    /// Open the right-click menu of note `id` at `at` (screen px): see `ui/context-menu.slint`.
+    fn show_menu(&self, id: NoteId, at: (i32, i32)) {
+        let Some(note) = self.0.notes.borrow().iter().find(|n| n.id() == id).cloned() else { return };
+        let clipboard = &self.0.env.clipboard;
+        let has_image = clipboard.has_image();
+        let work_areas = self.0.env.window_control.work_areas();
+
+        let weak = Rc::downgrade(&self.0);
+        let on_dismiss = Rc::new(move |_id| {
+            if let Some(inner) = weak.upgrade() {
+                App(inner).dismiss_context_menu();
+            }
+        });
+        let menu = match ContextMenu::open(id, at, &work_areas, note.hwnd(), on_dismiss) {
+            Ok(menu) => menu,
+            Err(e) => {
+                eprintln!("washi: could not open the right-click menu: {e}");
+                return;
+            }
         };
-        let toggle = |id, label: &str, checked| MenuItem { checked, ..item(id, label, true, vec![]) };
-        let pinned = self.with_note(id, |n| n.always_on_top()).unwrap_or(false);
-        let open_children: Vec<MenuItem> = closed
+        let ui = menu.ui();
+        ui.set_can_paste(has_image || clipboard.has_text());
+        ui.set_can_paste_image(has_image);
+        ui.set_has_selection(note.has_selection());
+        ui.set_can_undo(note.can_undo());
+        ui.set_can_redo(note.can_redo());
+        ui.set_pinned(note.always_on_top());
+        ui.set_tape_style(note.tape_style());
+        let now = self.0.env.clock.unix_millis();
+        let closed: Vec<ClosedItem> = self
+            .0
+            .db
+            .closed_notes()
+            .unwrap_or_default()
             .iter()
-            .enumerate()
-            .map(|(i, c)| item(MENU_OPEN_BASE + i as u32, &title_of(&c.preview), true, vec![]))
+            .map(|c| ClosedItem { id: c.id as i32, title: title_of(&c.preview).into(), when: closed_when(c.updated_at, now).into() })
             .collect();
-        let has_image = self.0.env.clipboard.has_image();
-        let has_paste = has_image || self.0.env.clipboard.has_text();
-        let mut items = vec![];
-        // right click on a picture: its own items come first
-        if let Some((pct, align)) = image.and_then(|b| self.with_note(id, |n| n.image_state(b))?) {
-            let aligns = [(Align::Left, "Left"), (Align::Center, "Center"), (Align::Right, "Right")];
-            let align_items = aligns.iter().enumerate().map(|(i, &(a, label))| toggle(MENU_IMAGE_ALIGN + i as u32, label, a == align)).collect();
-            let size_items = IMAGE_SIZES.iter().map(|&s| toggle(MENU_IMAGE_SIZE + s as u32, &format!("{s}%"), s == pct)).collect();
-            items.push(item(MENU_IMAGE_CUT, "Cut image", true, vec![]));
-            items.push(item(MENU_IMAGE_COPY, "Copy image", true, vec![]));
-            items.push(item(MENU_IMAGE_DELETE, "Delete image", true, vec![]));
-            items.push(item(0, "Align image", true, align_items));
-            items.push(item(0, "Resize image", true, size_items));
-        }
-        items.extend([
-            item(MENU_PASTE, "Paste", has_paste, vec![]),
-            item(MENU_PASTE_IMAGE, "Paste image", has_image, vec![]),
-            item(MENU_NEW, "New note", true, vec![]),
-            item(MENU_OPEN, "Open note", !open_children.is_empty(), open_children),
-            item(MENU_CLOSE, "Close", true, vec![]),
-            item(MENU_DELETE, "Delete", true, vec![]),
-            toggle(MENU_TOP, "Always on top", pinned),
-            toggle(MENU_STARTUP, "Start with Windows", self.0.env.startup.is_enabled()),
-            item(MENU_EXPORT, "Export as Markdown\u{2026}", true, vec![]),
-        ]);
-        let picture = image;
-        match self.0.env.menu.show(&items, at) {
-            Some(MENU_IMAGE_CUT) if picture.is_some() => {
-                self.with_note(id, |n| n.cut_image(picture.unwrap()));
-            }
-            Some(MENU_IMAGE_COPY) if picture.is_some() => {
-                self.with_note(id, |n| n.copy_image(picture.unwrap()));
-            }
-            Some(MENU_IMAGE_DELETE) if picture.is_some() => {
-                self.with_note(id, |n| n.delete_image(picture.unwrap()));
-            }
-            Some(c @ MENU_IMAGE_ALIGN..=23) if picture.is_some() => {
-                let align = [Align::Left, Align::Center, Align::Right][(c - MENU_IMAGE_ALIGN) as usize];
-                self.with_note(id, |n| n.set_image_align(picture.unwrap(), align));
-            }
-            Some(c) if (MENU_IMAGE_SIZE + IMAGE_PCT_MIN as u32..=MENU_IMAGE_SIZE + IMAGE_PCT_MAX as u32).contains(&c) && picture.is_some() => {
-                self.with_note(id, |n| n.set_image_pct(picture.unwrap(), (c - MENU_IMAGE_SIZE) as u8));
-            }
-            Some(MENU_PASTE) => {
-                self.with_note(id, |n| n.paste());
-            }
-            Some(MENU_PASTE_IMAGE) => {
-                self.with_note(id, |n| n.paste_image());
-            }
-            Some(MENU_NEW) => self.new_note_from(id),
-            Some(MENU_CLOSE) => self.close_note(id),
-            Some(MENU_DELETE) => self.delete_note(id),
-            Some(MENU_TOP) => self.set_always_on_top(id, !pinned),
-            Some(MENU_EXPORT) => self.export_note(id),
-            Some(MENU_STARTUP) => {
-                let startup = &self.0.env.startup;
-                startup.set_enabled(!startup.is_enabled());
-            }
-            Some(c) if c >= MENU_OPEN_BASE => {
-                if let Some(note) = closed.get((c - MENU_OPEN_BASE) as usize) {
-                    self.reopen_note(note.id);
+        ui.set_closed(slint::ModelRc::from(Rc::new(slint::VecModel::from(closed))));
+
+        // an action that takes the menu away, then does its work on the note
+        let then = |work: fn(&Note)| {
+            let weak = Rc::downgrade(&self.0);
+            move || {
+                if let Some(inner) = weak.upgrade() {
+                    let app = App(inner);
+                    app.dismiss_context_menu();
+                    app.with_note(id, |n| work(n));
                 }
             }
-            _ => {}
+        };
+        ui.on_paste(then(|n| {
+            n.paste();
+        }));
+        ui.on_paste_image(then(|n| {
+            n.paste_image();
+        }));
+        ui.on_cut(then(|n| {
+            n.cut();
+        }));
+        ui.on_copy(then(|n| {
+            n.copy();
+        }));
+        ui.on_undo(then(|n| n.undo()));
+        ui.on_redo(then(|n| n.redo()));
+        {
+            let weak = Rc::downgrade(&self.0);
+            ui.on_toggle_pin(move || {
+                let Some(inner) = weak.upgrade() else { return };
+                let app = App(inner);
+                let on = !app.with_note(id, |n| n.always_on_top()).unwrap_or(false);
+                app.set_always_on_top(id, on);
+                if let Some(m) = app.context_menu() {
+                    m.ui().set_pinned(on);
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&self.0);
+            ui.on_pick_tape(move |style| {
+                if let Some(inner) = weak.upgrade() {
+                    let app = App(inner);
+                    app.with_note(id, |n| n.set_tape_style(style));
+                    if let Some(m) = app.context_menu() {
+                        m.ui().set_tape_style(style);
+                    }
+                }
+            });
+        }
+        {
+            let weak = Rc::downgrade(&self.0);
+            ui.on_reopen(move |closed_id| {
+                if let Some(inner) = weak.upgrade() {
+                    let app = App(inner);
+                    app.dismiss_context_menu();
+                    app.reopen_note(closed_id as NoteId);
+                }
+            });
+        }
+        self.0.menus_opened.set(self.0.menus_opened.get() + 1);
+        *self.0.context_menu.borrow_mut() = Some(Rc::new(menu));
+    }
+
+    /// How many right-click menus have been opened.
+    pub fn menus_opened(&self) -> usize {
+        self.0.menus_opened.get()
+    }
+
+    /// The open right-click menu, if any.
+    pub fn context_menu(&self) -> Option<Rc<ContextMenu>> {
+        self.0.context_menu.borrow().clone()
+    }
+
+    /// Close the right-click menu.
+    pub fn dismiss_context_menu(&self) {
+        let menu = self.0.context_menu.borrow_mut().take();
+        if let Some(m) = menu {
+            m.close();
         }
     }
 
@@ -1653,6 +1680,14 @@ impl SuspendHost for Inner {
             n.resume(self.env.signals.window_state(n.id()).focused);
         }
     }
+}
+
+/// When a closed note was last edited, as the right-click menu says it: "Today", "Yesterday", "Oct 14".
+fn closed_when(updated_at_ms: i64, now_ms: i64) -> String {
+    let when = format_relative_timestamp(updated_at_ms, now_ms);
+    let when = when.trim_start_matches(|c: char| !c.is_alphanumeric());
+    let mut chars = when.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
 /// Menu title of a note: its first line, cut to about 40 characters.
