@@ -596,6 +596,11 @@ impl Document {
         self.blocks.len()
     }
 
+    /// Whether `block` exists and is an image.
+    pub fn is_image(&self, block: usize) -> bool {
+        self.blocks.get(block).is_some_and(|b| b.kind == Kind::Image)
+    }
+
     /// Nothing written yet: a lone empty title (the note shows its hint).
     pub fn is_empty(&self) -> bool {
         self.blocks.len() == 1 && self.blocks[0].text.is_empty()

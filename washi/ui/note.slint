@@ -202,7 +202,9 @@ export component NoteWindow inherits Window {
     in-out property <int> text-resync: 0;
     /// Block `i` was edited to this text.
     callback block-edited(int, string, int);
-    /// Enter, Backspace, Delete, Up or Down in block `i` at the caret offset; true when taken.
+    /// Any key the field of block `i` did not take itself, with its modifiers and the field's caret
+    /// offset: arrows, Home and End (caret motion), Enter, Backspace and Delete (edits). True when
+    /// the note took it.
     callback block-key(int, string, KeyMods, int) -> bool;
     /// Undo (false) or redo (true) from a field.
     callback block-history(bool);

@@ -15,7 +15,7 @@ use crate::history::History;
 use crate::images::{Rgba, Stored};
 use crate::note_images::NoteImages;
 use crate::note_window::{
-    window_title, BlockData, BlockKind, MarkerData, NoteWindow, PaletteEntry, PickerPalette, RuleData, RunData,
+    window_title, BlockData, BlockKind, KeyMods, MarkerData, NoteWindow, PaletteEntry, PickerPalette, RuleData, RunData,
     SelRect, Theme,
 };
 use crate::platform::{Clock, ImageClipboard, NoteId};
@@ -408,14 +408,14 @@ impl Editor {
             ui.on_block_key(move |i, key, mods, offset| {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return false };
                 let (block, offset) = (i.max(0) as usize, offset.max(0) as usize);
-                if editor.navigate(&ui, key.as_str(), (mods.shift, mods.control), block, offset) {
+                if editor.try_move(&ui, key.as_str(), &mods, block, offset) {
                     return true;
                 }
                 if mods.control || mods.selecting {
                     // Ctrl+Backspace and the like, or a selection inside the field: the field's own
                     return false;
                 }
-                let Some(caret) = editor.key(block, key.as_str(), offset) else { return false };
+                let Some(caret) = editor.edit_key(block, key.as_str(), offset) else { return false };
                 changed(Some(caret));
                 true
             });
@@ -978,15 +978,20 @@ impl Editor {
         self.range.get().is_some()
     }
 
+    /// Make `range` the selection, wash it and focus its field: the entry point for a selection
+    /// change that has a window. Caret motions that carry what the caret holds (the side of a wrap, the
+    /// goal column) and the pointer go through [`Self::select_with`], the same code with that
+    /// state added.
     pub fn set_selection(&self, ui: &NoteWindow, range: Range) {
-        self.select(ui, range, false);
+        self.select_with(ui, range, caret_motion::Held::default());
     }
 
-    /// Make `range` the selection. With `line_end` (a caret only), the caret sits at the end of a
-    /// line whose next line starts at the same offset.
-    pub fn select(&self, ui: &NoteWindow, range: Range, line_end: bool) {
+    /// [`Self::set_selection`] with what the new caret holds: with `held.line_end` (a caret only),
+    /// the caret sits at the end of a line whose next line starts at the same offset; `held.goal_x`
+    /// is the column the next vertical move keeps.
+    fn select_with(&self, ui: &NoteWindow, range: Range, held: caret_motion::Held) {
         let range = self.clamp(range);
-        self.line_end.set((line_end && range.anchor == range.focus).then_some(range.focus));
+        self.line_end.set((held.line_end && range.anchor == range.focus).then_some(range.focus));
         self.goal_x.set(None);
         let (start, end) = range.ordered();
         let across = start.block != end.block;
@@ -1006,6 +1011,8 @@ impl Editor {
         self.typing_paint.set(None);
         self.show_formats(ui);
         self.show_caret(ui);
+        // after the field has reported its own caret, which forgets a goal column
+        self.goal_x.set(held.goal_x.map(|x| (range.focus, x)));
     }
 
     pub fn select_all(&self, ui: &NoteWindow) {
@@ -1041,84 +1048,52 @@ impl Editor {
         self.fill_handles(doc, tokens);
     }
 
-    /// Up or Down pressed with the selection's focus at `focus` (the caret a plain key moves, or
-    /// the focus end of the range Shift extends). False when the key goes nowhere (the note's ends for a plain key, or an image at them).
-    fn apply_vertical(&self, ui: &NoteWindow, motion: caret_motion::Vertical, extend: bool, sel: Range) -> bool {
-        let focus = sel.focus;
-        let line_end = self.line_end.get() == Some(focus);
-        let goal_x = self.goal_x.get().filter(|(c, _)| *c == focus).map(|(_, x)| x);
-        let moved = {
-            let doc = self.doc.borrow();
-            if doc.blocks().get(focus.block).is_none() {
-                return false;
-            }
-            let tokens = self.tokens(ui);
-            let lines = NoteLines { doc: &doc, width: self.paper.get().0, tokens: &tokens };
-            caret_motion::vertical(&doc, &lines, sel, motion, extend, line_end, goal_x)
-        };
-        let on_image = self.doc.borrow().blocks().get(focus.block).is_some_and(|b| b.kind == Kind::Image);
-        if moved.range == sel && (!extend || on_image) {
+    /// What the caret at `focus` held after the last move, for the next one.
+    fn held_at(&self, focus: Caret) -> caret_motion::Held {
+        caret_motion::Held {
+            line_end: self.line_end.get() == Some(focus),
+            goal_x: self.goal_x.get().filter(|(c, _)| *c == focus).map(|(_, x)| x),
+        }
+    }
+
+    /// A key forwarded from block `i`, its field's caret at `offset`, with `mods` held. True when it
+    /// is a motion the note made (it moved the caret or the selection, and the field does nothing).
+    /// False when the note leaves the key to the field: it is no motion (typing, Enter and the
+    /// edits), the field moves itself (a step inside its paragraph, Ctrl with an arrow), or the key
+    /// goes nowhere (see `caret_motion`).
+    fn try_move(&self, ui: &NoteWindow, key: &str, mods: &KeyMods, i: usize, offset: usize) -> bool {
+        use caret_motion::{Edge, Horizontal, Moved, Vertical};
+        use slint::platform::Key;
+        if !matches!(
+            caret_motion::decode_key(key),
+            Some(Key::LeftArrow | Key::RightArrow | Key::UpArrow | Key::DownArrow | Key::Home | Key::End)
+        ) {
             return false;
         }
-        self.select(ui, moved.range, moved.line_end);
-        // `select` forgets the goal column; a vertical move keeps it for the next one
-        self.goal_x.set(moved.goal_x.map(|x| (moved.range.focus, x)));
-        true
-    }
-
-    /// Home, End, Ctrl+Home or Ctrl+End pressed with the selection `sel`. False on an image, which
-    /// has no line to go to the edge of.
-    fn apply_edge(&self, ui: &NoteWindow, edge: caret_motion::Edge, extend: bool, sel: Range) -> bool {
-        use caret_motion::Edge::{LineEnd, LineStart};
-        let focus = sel.focus;
-        let line_end = self.line_end.get() == Some(focus);
-        let moved = {
-            let doc = self.doc.borrow();
-            let Some(block) = doc.blocks().get(focus.block) else { return false };
-            if block.kind == Kind::Image && matches!(edge, LineStart | LineEnd) {
-                return false;
-            }
-            let tokens = self.tokens(ui);
-            let lines = NoteLines { doc: &doc, width: self.paper.get().0, tokens: &tokens };
-            caret_motion::to_edge(&doc, &lines, sel, edge, extend, line_end)
-        };
-        self.select(ui, moved.range, moved.line_end);
-        true
-    }
-
-    /// A key pressed in block `i` with its field's caret at `offset`, with (Shift, Ctrl) held: true
-    /// when it moved the caret or the selection (the field then does nothing), false when it is no
-    /// motion of the note's or the field is to move itself (a step inside its paragraph, Ctrl with
-    /// an arrow).
-    fn navigate(&self, ui: &NoteWindow, key: &str, (shift, ctrl): (bool, bool), i: usize, offset: usize) -> bool {
+        let (shift, ctrl) = (mods.shift, mods.control);
         let here = Caret { block: i, offset };
         let held = self.selection.get();
         // the range the note holds, or else the caret the field reports
         let sel = if shift || held.anchor != held.focus { held } else { Range { anchor: here, focus: here } };
-        if let Some(edge) = caret_motion::Edge::from_key(key, ctrl) {
-            return self.apply_edge(ui, edge, shift, sel);
-        }
-        if ctrl {
-            return false;
-        }
-        if let Some(m) = caret_motion::Vertical::from_key(key) {
-            return self.apply_vertical(ui, m, shift, sel);
-        }
-        let Some(m) = caret_motion::Horizontal::from_key(key) else { return false };
-        self.apply_horizontal(ui, m, shift, sel)
-    }
-
-    /// Left or Right pressed with the selection `sel`. False when the field is to move the caret
-    /// itself (or there is nowhere to go from an image).
-    fn apply_horizontal(&self, ui: &NoteWindow, motion: caret_motion::Horizontal, extend: bool, sel: Range) -> bool {
-        let i = sel.focus.block;
-        let moved = caret_motion::horizontal(&self.doc.borrow(), sel, motion, extend);
-        let Some(range) = moved else { return false };
-        let on_image = self.doc.borrow().blocks().get(i).is_some_and(|b| b.kind == Kind::Image);
-        if on_image && range == sel {
-            return false;
-        }
-        self.set_selection(ui, range);
+        let moved = {
+            let doc = self.doc.borrow();
+            let tokens = self.tokens(ui);
+            let lines = NoteLines { doc: &doc, width: self.paper.get().0, tokens: &tokens };
+            let held = self.held_at(sel.focus);
+            if let Some(edge) = Edge::from_key(key, ctrl) {
+                caret_motion::to_edge(&doc, &lines, sel, edge, shift, held.line_end)
+            } else if ctrl {
+                None
+            } else if let Some(m) = Vertical::from_key(key) {
+                caret_motion::vertical(&doc, &lines, sel, m, shift, held)
+            } else if let Some(m) = Horizontal::from_key(key) {
+                caret_motion::horizontal(&doc, sel, m, shift).map(|range| Moved { range, held: caret_motion::Held::default() })
+            } else {
+                None
+            }
+        };
+        let Some(Moved { range, held }) = moved else { return false };
+        self.select_with(ui, range, held);
         true
     }
 
@@ -1196,8 +1171,9 @@ impl Editor {
         self.store(range);
     }
 
-    /// The only assignment of the selection: everything else reaches it through `set_selection`,
-    /// `set_range` or `caret_moved` (the field's own report).
+    /// The only assignment of the selection: `set_selection` (with a window), `set_range` (without
+    /// one) and `caret_moved` (the field's own report) all end here. The last two skip the wash and
+    /// the focus on purpose, so they cannot be `set_selection` (see ADR-0002).
     fn store(&self, range: Range) {
         self.selection.set(range);
     }
@@ -1314,14 +1290,11 @@ impl Editor {
 
     /// Enter, Backspace or Delete pressed in block `i` with its field's caret at `offset`: the caret
     /// after the edit, or None when the key is no edit of the note's.
-    pub fn key(&self, i: usize, key: &str, offset: usize) -> Option<Caret> {
+    pub fn edit_key(&self, i: usize, key: &str, offset: usize) -> Option<Caret> {
         use slint::platform::Key;
-        let is = |k: Key| key == char::from(k).to_string();
-        if !(is(Key::Return) || is(Key::Backspace) || is(Key::Delete)) {
-            return None;
-        }
+        let pressed = caret_motion::decode_key(key).filter(|k| matches!(k, Key::Return | Key::Backspace | Key::Delete))?;
         let before = self.doc.borrow().clone();
-        if before.blocks().get(i).is_some_and(|b| b.kind == Kind::Image) {
+        if before.is_image(i) {
             return self.image_key(i, key, before);
         }
         let carried = if self.typing.get().is_some_and(|(c, _)| c == (Caret { block: i, offset })) {
@@ -1330,14 +1303,14 @@ impl Editor {
             before.blocks().get(i).map(|b| b.style_for_insert(offset))
         };
         let mut doc = self.doc.borrow_mut();
-        let edit = if is(Key::Return) {
-            let c = doc.split(i, offset);
-            self.typing.set(carried.filter(|&s| s != Flags::NONE).map(|s| (c, s)));
-            Some(c)
-        } else if is(Key::Backspace) {
-            doc.backspace(i, offset)
-        } else {
-            doc.delete(i, offset)
+        let edit = match pressed {
+            Key::Return => {
+                let c = doc.split(i, offset);
+                self.typing.set(carried.filter(|&s| s != Flags::NONE).map(|s| (c, s)));
+                Some(c)
+            }
+            Key::Backspace => doc.backspace(i, offset),
+            _ => doc.delete(i, offset),
         };
         let caret = edit?;
         drop(doc);
@@ -1465,7 +1438,7 @@ impl Editor {
 
     pub fn selected_image(&self, doc: &Document) -> Option<usize> {
         let r = self.selection.get();
-        (r.anchor == r.focus && doc.blocks().get(r.focus.block).is_some_and(|b| b.kind == Kind::Image)).then_some(r.focus.block)
+        (r.anchor == r.focus && doc.is_image(r.focus.block)).then_some(r.focus.block)
     }
 
     pub fn grip_rect(b: &Block, r: textflow::Rect) -> textflow::Rect {
@@ -1548,8 +1521,7 @@ impl Editor {
 
     pub fn image_key(&self, i: usize, key: &str, before: Document) -> Option<Caret> {
         use slint::platform::Key;
-        let is = |k: Key| key == char::from(k).to_string();
-        if is(Key::Backspace) || is(Key::Delete) {
+        if matches!(caret_motion::decode_key(key), Some(Key::Backspace | Key::Delete)) {
             let range = Range { anchor: Caret { block: i, offset: 0 }, focus: Caret { block: i + 1, offset: 0 } };
             let caret = self.doc.borrow_mut().replace_range(range, "");
             self.structural(before);
@@ -1672,7 +1644,7 @@ impl Editor {
         };
         p.origin = range;
         self.pointer.set(p);
-        self.select(ui, range, line_end);
+        self.select_with(ui, range, caret_motion::Held { line_end, goal_x: None });
     }
 
     pub fn pointer_drag(&self, ui: &NoteWindow, at: (f32, f32)) {
