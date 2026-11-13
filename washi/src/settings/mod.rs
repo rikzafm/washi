@@ -21,6 +21,7 @@ pub mod appearance;
 pub mod shortcuts;
 pub mod general;
 pub mod stats;
+pub mod style;
 pub mod tape;
 
 use crate::note_window::{app_icon, SettingsWindow};
@@ -59,6 +60,8 @@ pub struct Hooks {
     pub sidebar_themes_changed: Rc<dyn Fn()>,
     /// The UI size changed (already saved): redraw every window at it, this page included.
     pub ui_scale_changed: Rc<dyn Fn(f32)>,
+    /// The Letter spacing changed (already saved), to this many em: every note lays its text out again.
+    pub letter_spacing_changed: Rc<dyn Fn(f32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -146,6 +149,7 @@ impl SettingsView {
             hooks.sidebar_themes_changed.clone(),
             hooks.ui_scale_changed.clone(),
         );
+        style::wire(&ui, hooks.general.env.clone(), hooks.general.db.clone(), hooks.letter_spacing_changed.clone());
         let scale = crate::ui_scale::WindowScale::attach(ui.window());
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,

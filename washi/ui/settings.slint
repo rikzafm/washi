@@ -335,6 +335,9 @@ export component SettingsWindow inherits Window {
     in-out property <int> style-font <=> style.font;
     in-out property <int> style-size <=> style.size;
     in-out property <int> style-tape <=> style.tape;
+    /// Letter spacing (0 Tight, 1 Normal, 2 Loose): set from the saved choice, saved by Rust.
+    in-out property <int> style-spacing <=> style.spacing;
+    callback set-letter-spacing(int);
     in-out property <int> style-open-list <=> style.open-list;
     out property <length> style-preview-font-size: style.preview-font-size;
     /// The lowest point the open Font or Tape color list can reach, from the Paper's top edge.
@@ -615,6 +618,7 @@ export component SettingsWindow inherits Window {
                     pf: root.content-pf;
                     top: SettingsMetrics.content-top + root.content-dy;
                     tapes: root.preview-tapes;
+                    set-spacing(i) => { root.set-letter-spacing(i); }
                 }
 
                 shortcuts := ShortcutsPage {

@@ -45,6 +45,13 @@ impl Harness {
         self.settle();
     }
 
+    /// Lay every note's text out with `em` of extra space after each letter, as Settings › Font &
+    /// Style › Letter spacing does once it has saved the choice.
+    pub fn set_letter_spacing(&mut self, em: f32) {
+        self.app().set_letter_spacing(em);
+        self.settle();
+    }
+
     pub fn settings_press_open_install(&mut self) {
         self.general_ui().invoke_open_install_dir();
     }

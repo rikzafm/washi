@@ -28,6 +28,10 @@ export global Theme {
     // The "Note Something...." hint of an empty note: light, subtle gray.
     out property <color> ink-hint: #B4B9C0;
     out property <string> handwriting: "Shadows Into Light";
+    // Extra space after every character of a note's text, in em of its size (Settings › Font &
+    // Style › Letter spacing; 0 is the font's own). The app sets it from the saved choice, and
+    // src/textflow.rs lays the lines out with the same spacing.
+    in-out property <float> letter-spacing-em: 0;
     // The edit fields' face: the handwriting's advances, no outlines, a lower ascent and descent
     // (made with `tools/fonts.py blank`; see `caret-line-em`). The fields only place the caret and the selection.
     out property <string> caret-font: "Washi Caret";

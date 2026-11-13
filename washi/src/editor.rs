@@ -328,6 +328,7 @@ impl Editor {
 
         self.tilted.set(self.db.tilted_editing());
         ui.set_tilted_editing(self.tilted.get());
+        ui.global::<Theme>().set_letter_spacing_em(self.db.letter_spacing().em());
         self.relayout(ui);
         self.show_formats(ui);
         ui.set_text(self.text().as_str().into());
@@ -864,6 +865,7 @@ impl Editor {
             body: style(th.get_body_size(), th.get_body_pitch()),
             tilt_deg: th.get_text_tilt() as f64,
             max_run: th.get_step_width() as f64,
+            letter_spacing: th.get_letter_spacing_em() as f64,
         }
     }
 
@@ -884,6 +886,7 @@ impl Editor {
             body: style(22.65, 29.1),
             tilt_deg: 1.45,
             max_run: 28.0,
+            letter_spacing: 0.0,
         }
     }
 
@@ -998,6 +1001,13 @@ impl Editor {
         if let Ok(doc) = self.doc.try_borrow() {
             self.fill_sel_rects(&doc, &self.tokens(ui));
         }
+    }
+
+    /// The letters now stand `em` apart (Settings › Font & Style, already saved): the lines break
+    /// again, in the words and in the edit fields alike.
+    pub fn set_letter_spacing(&self, ui: &NoteWindow, em: f32) {
+        ui.global::<Theme>().set_letter_spacing_em(em);
+        self.relayout(ui);
     }
 
     /// The selection the note washes itself: one across blocks always, and with tilted editing one

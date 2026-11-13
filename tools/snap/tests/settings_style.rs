@@ -1,5 +1,5 @@
 //! The Settings page's Font & Style tab: every control works and moves the preview, and nothing leaves
-//! the page.
+//! the page but Letter spacing, which is saved and lays out every note's text again.
 
 use snap::{tab, Harness};
 use std::time::Duration;
@@ -22,6 +22,9 @@ const fn tape_item(i: i32) -> i32 {
     11 + i
 }
 const BLANK_PAPER: i32 = 20;
+const fn spacing_seg(i: i32) -> i32 {
+    21 + i
+}
 
 /// Settings open on the Font & Style tab, with the transition and tab switch finished.
 fn open_style_tab(h: &mut Harness) {
@@ -133,6 +136,33 @@ fn choices_survive_a_tab_switch_but_not_reopening_settings() {
 }
 
 #[test]
+fn letter_spacing_is_saved_and_widens_every_note() {
+    let mut h = started();
+    h.set_note_text(0, "# Host\njpg jpg jpg");
+    let before = h.text_runs(0);
+    let end = |runs: &[(String, f32, f32, f32, f32, f32)]| runs.iter().map(|r| r.1 + r.5).fold(0.0, f32::max);
+    open_style_tab(&mut h);
+    assert_eq!(h.settings_style_spacing(), 1, "Normal until chosen");
+    h.settings_style_click(spacing_seg(2));
+    assert_eq!(h.settings_style_spacing(), 2);
+    h.settings_close();
+    h.advance_frames(ms(600));
+    let loose = h.text_runs(0);
+    assert!(end(&loose) > end(&before) + 10.0, "the words moved apart: {} against {}", end(&loose), end(&before));
+
+    // Saved: Settings shows it again, and Normal brings the words back where they were.
+    open_style_tab(&mut h);
+    assert_eq!(h.settings_style_spacing(), 2);
+    h.settings_style_click(spacing_seg(1));
+    h.settings_close();
+    h.advance_frames(ms(600));
+    // (the level layout: the offsets onto the tilted baseline follow the note's size, which Settings
+    // opening and closing leaves a fraction of a pixel off)
+    let level = |runs: Vec<(String, f32, f32, f32, f32, f32)>| runs.into_iter().map(|r| (r.0, r.1, r.2, r.5)).collect::<Vec<_>>();
+    assert_eq!(level(h.text_runs(0)), level(before), "Normal is the font's own spacing");
+}
+
+#[test]
 fn nothing_the_tab_does_reaches_any_note() {
     // Open the tab and close Settings again, with or without using the controls; the host note
     // must come back the same either way.
@@ -164,8 +194,9 @@ fn nothing_the_tab_does_reaches_any_note() {
 /// Where the mockup's Font & Style content ends (its 603.2 Paper less the 44px bottom padding), less
 /// the two rows taken out of it since: Fade text edge (80px, its hint on two lines, and its 2px rule)
 /// and UI size (the 56px minimum, the last row, so no rule; the Tape color row above it loses its rule
-/// instead).
-const STYLE_CONTENT_BOTTOM: f32 = 603.2 - 44.0 - 82.0 - 56.0 - 2.0;
+/// instead), plus the Letter spacing row added under Tape color since (58px with the rule Tape color
+/// has again).
+const STYLE_CONTENT_BOTTOM: f32 = 603.2 - 44.0 - 82.0 - 56.0 - 2.0 + 58.0 + 2.0;
 
 #[test]
 fn the_tab_has_no_fade_or_ui_size_row_and_its_rows_close_up() {

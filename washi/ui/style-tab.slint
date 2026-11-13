@@ -1,9 +1,11 @@
 // The Font & Style tab of the Settings page (UI only).
 //
-// Every control here updates the preview note and nothing else: the state lives in properties of this
-// component (bound to the Settings window, which is created fresh each time Settings opens, so the
-// defaults come back), and no callback leaves it. Rust never reads these properties except in tests.
-// Laid out like the mockup's CSS in the Paper's tilted frame `pf`: the preview card, then three rows;
+// Font, Text size and Tape color update the preview note and nothing else: their state lives in
+// properties of this component (bound to the Settings window, which is created fresh each time Settings
+// opens, so the defaults come back). Rust never reads these properties except in tests. Letter spacing
+// is the exception: Rust sets `spacing` from the saved choice and saves a new one (`set-spacing`), and
+// every note follows it.
+// Laid out like the mockup's CSS in the Paper's tilted frame `pf`: the preview card, then four rows;
 // `bottom` (paper coordinates) is where the last row ends.
 //
 // Only Shadows Into Light is bundled, so the other fonts in the list are labels: the preview and
@@ -22,10 +24,13 @@ export component StyleTab inherits Rectangle {
     in-out property <int> font: 0;
     in-out property <int> size: 1;
     in-out property <int> tape: 0;
+    /// Letter spacing: 0 Tight, 1 Normal, 2 Loose (as `LetterSpacing` in src/storage/db.rs).
+    in-out property <int> spacing: 1;
+    callback set-spacing(int);
     /// -1 none, 0 the font list, 1 the tape list.
     in-out property <int> open-list: -1;
     out property <length> preview-font-size: [19px, 24px, 30px][root.size];
-    out property <float> bottom: root.tape-row-y + tape-row.total;
+    out property <float> bottom: root.spacing-row-y + spacing-row.total;
 
     property <[string]> fonts: ["Shadows Into Light", "Patrick Hand", "Caveat", "Gloria Hallelujah", "Indie Flower", "Kalam"];
 
@@ -39,6 +44,10 @@ export component StyleTab inherits Rectangle {
     out property <float> font-row-y: root.rows-y;
     out property <float> size-row-y: root.rows-y + root.row-pitch;
     out property <float> tape-row-y: root.rows-y + 2.0 * root.row-pitch;
+    // Letter spacing comes last, under the rows the mockup has.
+    out property <float> spacing-row-y: root.rows-y + 3.0 * root.row-pitch;
+    /// The extra space after each letter, in em, for each choice (the values of src/storage/db.rs).
+    property <[float]> spacing-em: [-0.03, 0.0, 0.08];
     /// The lowest point either open list reaches (paper coordinates): the lists hang 48px under their
     /// button, 6px of padding around six or four 42px entries.
     out property <float> lists-bottom: max(root.font-row-y + 6.0 + 48.0 + 12.0 + 6 * 42.0, root.tape-row-y + 6.0 + 48.0 + 12.0 + 4 * 42.0);
@@ -50,7 +59,7 @@ export component StyleTab inherits Rectangle {
 
     /// Where the control `id` is, in the Paper frame's px, for tests: 0 font button, 1 to 6 font
     /// options, 7 to 9 text sizes, 10 tape button, 11 to 14 tape options, 20 the Text size label (a
-    /// blank part of the paper).
+    /// blank part of the paper), 21 to 23 letter spacings.
     public pure function hit-x(id: int) -> length {
         return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
     }
@@ -60,6 +69,9 @@ export component StyleTab inherits Rectangle {
     pure function hit-a(id: int) -> float {
         if (id >= 7 && id <= 9) {
             return 484.0 - 226.4 + (id - 7 + 0.5) * 226.4 / 3.0;
+        }
+        if (id >= 21 && id <= 23) {
+            return 484.0 - 226.4 + (id - 21 + 0.5) * 226.4 / 3.0;
         }
         if (id == 20) {
             return 140.0;
@@ -78,6 +90,9 @@ export component StyleTab inherits Rectangle {
         }
         if ((id >= 7 && id <= 9) || id == 20) {
             return root.size-row-y + 28.0;
+        }
+        if (id >= 21 && id <= 23) {
+            return root.spacing-row-y + 28.0;
         }
         if (id == 10) {
             return root.tape-row-y + 28.0;
@@ -127,6 +142,7 @@ export component StyleTab inherits Rectangle {
         width: 380px;
         text: "Currently POG no Weapon : Ideal for him are Never Rest or White Night Nova.";
         font-size: root.preview-font-size;
+        letter-spacing: root.preview-font-size * root.spacing-em[root.spacing];
         wrap: word-wrap;
         line-height-factor: 1.4 / TextMetrics.natural;
     }
@@ -163,6 +179,19 @@ export component StyleTab inherits Rectangle {
         }
     }
 
+    spacing-row := SettingRow {
+        pf: root.pf;
+        dots: root.tapes[3];
+        row-y: root.spacing-row-y;
+        rule: false;
+        label: "Letter spacing";
+        for label[i] in ["Tight", "Normal", "Loose"] : PillButton {
+            text: label;
+            chosen: i == root.spacing;
+            clicked => { root.spacing = i; root.open-list = -1; root.set-spacing(i); }
+        }
+    }
+
     // An outside click closes the open list. The Font and Tape color rows come after it, so pressing
     // the other button switches lists instead.
     if root.open-list >= 0 : TouchArea {
@@ -189,7 +218,6 @@ export component StyleTab inherits Rectangle {
         pf: root.pf;
         dots: root.tapes[3];
         row-y: root.tape-row-y;
-        rule: false;
         label: "Tape color";
         PickerButton {
             text: TapePalette.names[root.tape];

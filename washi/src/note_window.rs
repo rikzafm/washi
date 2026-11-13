@@ -496,6 +496,10 @@ impl Note {
         self.editor.set_tilted(&self.ui, on);
     }
 
+    pub fn set_letter_spacing(&self, em: f32) {
+        self.editor.set_letter_spacing(&self.ui, em);
+    }
+
     pub fn geometry(&self) -> Geometry {
         self.geometry.current().unwrap_or(Geometry { x: 0, y: 0, w: 0, h: 0 })
     }

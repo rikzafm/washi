@@ -359,12 +359,14 @@ export component BlockView inherits Rectangle {
         font-size: root.size;
         font-weight: root.composing && root.bold ? 700 : 400;
         font-italic: root.composing && root.italic;
+        // the same spacing as the words, or the field would break its lines elsewhere
+        letter-spacing: root.size * Theme.letter-spacing-em;
         // the factor is of the face's own line height, and the two faces differ in it
         line-height-factor: root.pitch / (root.size * (root.composing ? Theme.handwriting-line-em : Theme.caret-line-em));
         color: Theme.ink;
         // the note draws the caret (see TextLayer); the field's own shows only inside the text an
         // input method is composing
-        text-cursor-width: root.composing ? Theme.caret-width : 0px;
+        text-cursor-width: root.composing ? max(Theme.caret-width, 1phx) : 0px;
         // see-through: the words under it stay readable
         selection-background-color: root.wash && !root.tilted ? Theme.selection-over : transparent;
         selection-foreground-color: Theme.ink;
@@ -427,7 +429,8 @@ export component BlockView inherits Rectangle {
         property <length> cut: max(self.y0, root.edge-y(Theme.text-inset-left + self.x0) - Theme.text-inset-top - root.y);
         x: self.x0;
         y: self.cut;
-        width: Theme.caret-width;
+        // never thinner than a screen pixel: below 100% a 1px bar covers no pixel centre at some x and is not drawn
+        width: max(Theme.caret-width, 1phx);
         height: max(0px, self.y0 + root.caret.height - self.cut);
         background: Theme.ink;
     }

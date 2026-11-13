@@ -2,6 +2,7 @@
 //! of mixed styles with a picture in the middle of the text, at every monitor scale.
 
 use snap::Harness;
+use washi::storage::db::Choice;
 use washi::images::{encode_png, Rgba};
 
 /// A note as exported (its stored text), without the line of its picture.
@@ -34,7 +35,16 @@ fn note_with_picture(scale: f32) -> Harness {
 /// Every `step`th caret position of the note (and the end of every paragraph): the caret as drawn
 /// against the line box of the layout, both in screen px.
 fn check_carets(scale: f32, step: usize) {
+    check_carets_spaced(scale, step, 0.0);
+}
+
+/// [`check_carets`] with `em` of letter spacing: the edit fields must break their lines where the
+/// app's layout does, or every block under a mismatched one is drawn off its words.
+fn check_carets_spaced(scale: f32, step: usize, em: f32) {
     let mut h = note_with_picture(scale);
+    if em != 0.0 {
+        h.set_letter_spacing(em);
+    }
     let mut checked = 0;
     for (block, (kind, text)) in h.blocks(0).iter().enumerate() {
         if kind == "image" {
@@ -152,7 +162,17 @@ fn home_end_and_the_arrows_move_along_the_lines_the_note_lays_out() {
 }
 
 #[test]
+fn the_caret_is_the_box_of_its_line_at_every_letter_spacing() {
+    for em in washi::storage::LetterSpacing::ALL.iter().map(|s| s.em()) {
+        check_carets_spaced(1.0, 16, em);
+        check_carets_spaced(1.25, 40, em);
+    }
+}
+
+#[test]
 fn the_caret_is_the_box_of_its_line_at_fractional_monitor_scales() {
+    check_carets(0.75, 40);
+    check_carets(0.8, 40);
     check_carets(1.25, 40);
     check_carets(1.5, 40);
 }

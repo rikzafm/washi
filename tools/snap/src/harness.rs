@@ -1627,6 +1627,11 @@ impl Harness {
         (ui.get_style_font(), ui.get_style_size(), ui.get_style_tape(), ui.get_style_open_list())
     }
 
+    /// The Letter spacing chosen: 0 Tight, 1 Normal, 2 Loose.
+    pub fn settings_style_spacing(&self) -> i32 {
+        self.settings_ui().get_style_spacing()
+    }
+
     /// The preview note's text size, logical px.
     pub fn settings_style_preview_font_size(&self) -> f32 {
         self.settings_ui().get_style_preview_font_size()

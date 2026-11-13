@@ -48,9 +48,17 @@ pub struct Tokens {
     /// Words wider than this are drawn in pieces, so that each piece is within a fraction of a
     /// pixel of the tilted baseline (a whole word would be off by half its width times tan).
     pub max_run: f64,
+    /// Extra space after every character, in em of the text's size (Settings › Font & Style ›
+    /// Letter spacing; 0 is the font's own spacing). The note's `Text`s and edit fields add the
+    /// same `letter-spacing` after every character, so the lines break in the same places.
+    pub letter_spacing: f64,
 }
 
 impl Tokens {
+    fn measure<'a>(&self, size: f64) -> Measure<'a> {
+        Measure { spacing: self.letter_spacing * size, ..Measure::new(false, false, size) }
+    }
+
     fn style(&self, kind: Kind) -> Style {
         match kind {
             Kind::Title => self.title,
@@ -87,6 +95,8 @@ pub struct Run {
 struct Measure<'a> {
     face: Face<'a>,
     scale: f64,
+    /// Added to every character's advance (letter spacing), logical px.
+    spacing: f64,
 }
 
 impl<'a> Measure<'a> {
@@ -99,12 +109,12 @@ impl<'a> Measure<'a> {
         };
         let face = Face::parse(data, 0).expect("embedded font parses");
         let scale = size / face.units_per_em() as f64;
-        Measure { face, scale }
+        Measure { face, scale, spacing: 0.0 }
     }
 
     fn advance(&self, c: char) -> f64 {
         let g = self.face.glyph_index(c).unwrap_or(ttf_parser::GlyphId(0));
-        self.face.glyph_hor_advance(g).unwrap_or(0) as f64 * self.scale
+        self.face.glyph_hor_advance(g).unwrap_or(0) as f64 * self.scale + self.spacing
     }
 
     fn width(&self, s: &str) -> f64 {
@@ -299,7 +309,7 @@ pub fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLi
 /// a line (other than the first) is the end of the line before it.
 pub fn caret_line_on(b: &Block, offset: usize, line_end: bool, paper_w: f64, t: &Tokens) -> CaretLine {
     let avail = paper_w - t.inset_left - t.inset_right;
-    let m = Measure::new(false, false, t.style(b.kind).size);
+    let m = t.measure(t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
     let mut offset = offset.min(b.text.len());
@@ -323,7 +333,7 @@ pub fn offset_at(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> us
 /// next (the `line_end` of [`caret_line_on`]).
 pub fn offset_on_line(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> (usize, bool) {
     let avail = paper_w - t.inset_left - t.inset_right;
-    let m = Measure::new(false, false, t.style(b.kind).size);
+    let m = t.measure(t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
     let line = line.min(lines.len() - 1);
@@ -437,7 +447,7 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
             top += image_size(b).map_or(st.pitch, |px| b.image_box(avail, px).2);
             continue;
         }
-        let m = Measure::new(false, false, st.size);
+        let m = t.measure(st.size);
         let lines = wrap(&b.text, avail, &m);
         let base = baseline(&m, st.pitch);
         let thick = (st.size / 20.0).max(1.0);
@@ -527,7 +537,7 @@ pub fn extent_with_images(blocks: &[Block], paper_w: f64, t: &Tokens, image_size
             top += image_size(b).map_or(st.pitch, |px| b.image_box(avail, px).2);
             continue;
         }
-        let m = Measure::new(false, false, st.size);
+        let m = t.measure(st.size);
         top += wrap(&b.text, avail, &m).len() as f64 * st.pitch;
     }
     (tops, top)
@@ -619,7 +629,7 @@ pub fn selection_rects(blocks: &[Block], range: Range, paper_w: f64, t: &Tokens,
         }
         let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
         let to = if bi == end.block { end.offset.min(b.text.len()) } else { b.text.len() };
-        let m = Measure::new(false, false, st.size);
+        let m = t.measure(st.size);
         let lines = wrap(&b.text, avail, &m);
         let starts = line_starts(&lines);
         for (li, &ls) in starts.iter().enumerate() {
@@ -669,6 +679,7 @@ mod tests {
         body: Style { size: 22.65, pitch: 29.1 },
         tilt_deg: 1.45,
         max_run: f64::MAX,
+        letter_spacing: 0.0,
     };
 
     const MOCKUP: &str = "# Endfield Note\n## **Thermite Cutter : POG & Akekuri**\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";

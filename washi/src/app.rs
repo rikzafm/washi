@@ -509,6 +509,14 @@ impl App {
                     }
                 }
             }),
+            letter_spacing_changed: Rc::new({
+                let app = app.clone();
+                move |em| {
+                    if let Some(a) = app() {
+                        a.set_letter_spacing(em);
+                    }
+                }
+            }),
         };
         match SettingsView::open(host, geometry, pinned, hooks) {
             Ok(view) => {
@@ -560,6 +568,18 @@ impl App {
         }
         if let Some(v) = self.all_notes() {
             v.set_tilted_editing(on);
+        }
+    }
+
+    /// The letters of every note's text now stand `em` apart, from now on (Settings › Font & Style;
+    /// the value is already saved).
+    pub fn set_letter_spacing(&self, em: f32) {
+        let notes: Vec<Rc<Note>> = self.0.notes.borrow().clone();
+        for n in &notes {
+            n.set_letter_spacing(em);
+        }
+        if let Some(v) = self.all_notes() {
+            v.set_letter_spacing(em);
         }
     }
 

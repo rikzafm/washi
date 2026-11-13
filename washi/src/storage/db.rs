@@ -292,6 +292,16 @@ impl Db {
         self.set_meta("settings_height", h.key())
     }
 
+    /// The extra space between the letters of every note's text (Settings › Font & Style). Normal
+    /// (the font's own spacing) when never set or when the stored value is not one of the choices.
+    pub fn letter_spacing(&self) -> LetterSpacing {
+        self.choice("letter_spacing").unwrap_or(LetterSpacing::Normal)
+    }
+
+    pub fn set_letter_spacing(&self, spacing: LetterSpacing) -> Result<(), DbError> {
+        self.set_meta("letter_spacing", spacing.key())
+    }
+
     /// The Theme a Sidebar is drawn with (each Sidebar's is stored, even while they are shared).
     /// Default when never set or not one of the themes.
     pub fn sidebar_theme(&self, sidebar: Sidebar) -> SidebarTheme {
@@ -609,6 +619,37 @@ impl Choice for SettingsHeight {
     }
 }
 
+/// The Letter spacing choices (Settings › Font & Style), in the order the row shows them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LetterSpacing {
+    Tight,
+    /// The font's own spacing.
+    Normal,
+    Loose,
+}
+
+impl LetterSpacing {
+    /// The space added after every character, in em of the text's size.
+    pub fn em(self) -> f32 {
+        match self {
+            LetterSpacing::Tight => -0.03,
+            LetterSpacing::Normal => 0.0,
+            LetterSpacing::Loose => 0.08,
+        }
+    }
+}
+
+impl Choice for LetterSpacing {
+    const ALL: &'static [LetterSpacing] = &[LetterSpacing::Tight, LetterSpacing::Normal, LetterSpacing::Loose];
+    fn key(self) -> &'static str {
+        match self {
+            LetterSpacing::Tight => "tight",
+            LetterSpacing::Normal => "normal",
+            LetterSpacing::Loose => "loose",
+        }
+    }
+}
+
 /// How a Sidebar's panel is drawn (Settings › Appearance › Theme), in dropdown order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarTheme {
@@ -694,6 +735,19 @@ mod tests {
         db.set_tilted_editing(true).unwrap();
         assert!(db.tilted_editing());
     }
+
+    #[test]
+    fn letter_spacing_is_normal_until_set_survives_reopening_and_falls_back_on_nonsense() {
+        let (dir, db) = test_db();
+        assert_eq!(db.letter_spacing(), LetterSpacing::Normal, "never set: the font's own spacing");
+        db.set_letter_spacing(LetterSpacing::Loose).unwrap();
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert_eq!(db.letter_spacing(), LetterSpacing::Loose);
+        db.set_meta("letter_spacing", "wide").unwrap();
+        assert_eq!(db.letter_spacing(), LetterSpacing::Normal);
+    }
+
 
     #[test]
     fn ui_scale_is_large_until_set_survives_reopening_and_falls_back_on_nonsense() {
