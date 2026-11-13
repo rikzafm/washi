@@ -164,3 +164,33 @@ Same machine, benchmark and method as the baseline above, release build. The edi
 | 50 paragraphs | 10 px resize | 6.473 | 7.113 | 50 | 7.029 / 151 |
 
 What is left of a keystroke is the single build (still wraps every block; ticket 05 would cut that to the edited block) plus the draw-list rows.
+
+
+### After ticket 04 (edit-path cleanups)
+
+Same machine and method, release build. A typed character no longer copies the `Document` (only an auto-formatting one does), `apply_change` computes the caret box once, and `sync_model` builds a window row only for the changed block and loads pictures only when the note's set of pictures changed (pinned in `tools/snap/tests/edit_path.rs`). On a 50 paragraph note that is 50 rows built before and 1 now, and no picture reload; the wrap counts are unchanged.
+
+| note | operation | median ms | p95 ms | wraps | after ticket 03 (median ms) |
+|---|---|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.116 | 0.152 | 3 | 0.119 |
+| mockup.md | Down arrow | 0.052 | 0.059 | 0 | 0.053 |
+| mockup.md | pointer over image | 0.015 | 0.015 | 0 | 0.015 |
+| mockup.md | 10 px resize | 0.049 | 0.067 | 3 | 0.048 |
+| long.md | typed character | 0.852 | 1.013 | 15 | 0.870 |
+| long.md | Down arrow | 0.140 | 0.171 | 0 | 0.141 |
+| long.md | pointer over image | 0.045 | 0.051 | 0 | 0.046 |
+| long.md | 10 px resize | 0.475 | 0.585 | 15 | 0.470 |
+| 50 paragraphs | typed character | 6.700 | 7.418 | 50 | 6.627 |
+| 50 paragraphs | Down arrow | 0.674 | 0.824 | 0 | 0.679 |
+| 50 paragraphs | pointer over image | 0.236 | 0.285 | 0 | 0.237 |
+| 50 paragraphs | 10 px resize | 6.557 | 7.432 | 50 | 6.473 |
+
+The keystroke time did not move: the work removed (a document copy, a second caret box, 49 row builds) is microseconds next to the rest of the keystroke, which this benchmark shows is not the layout either. `layout_bench` now also times one `Layout::build` against the typed character it is part of:
+
+| note | Layout::build median ms | typed character median ms | share |
+|---|---|---|---|
+| mockup.md | 0.012 | 0.117 | 10% |
+| long.md | 0.136 | 0.848 | 16% |
+| 50 paragraphs | 0.928 | 6.665 | 14% |
+
+So a wrap cache (ticket 05) could save at most about 10 to 16% of a keystroke here (less, as it would still lay out the edited block).
