@@ -144,3 +144,23 @@ Baseline before the layout cache work (.scratch/layout-cache, ticket 01). Commit
 | 50 paragraphs | Down arrow | 2.433 | 2.710 | 306 |
 | 50 paragraphs | pointer over image | 1.102 | 1.513 | 153 |
 | 50 paragraphs | 10 px resize | 7.029 | 8.365 | 151 |
+### After ticket 03 (editor owns one cached `Layout`)
+
+Same machine, benchmark and method as the baseline above, release build. The editor keeps one `Layout` keyed by document revision, paper size, tokens and picture sizes, so one input costs at most one build (one `wrap` per text block: mockup.md 3, long.md 15, 50 paragraphs 50) and caret motion and the pointer cost none.
+
+| note | operation | median ms | p95 ms | wraps | before (median ms / wraps) |
+|---|---|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.119 | 0.148 | 3 | 0.167 / 36 |
+| mockup.md | Down arrow | 0.053 | 0.069 | 0 | 0.079 / 24 |
+| mockup.md | pointer over image | 0.015 | 0.016 | 0 | 0.028 / 12 |
+| mockup.md | 10 px resize | 0.048 | 0.050 | 3 | 0.053 / 10 |
+| long.md | typed character | 0.870 | 1.006 | 15 | 1.251 / 156 |
+| long.md | Down arrow | 0.141 | 0.170 | 0 | 0.405 / 96 |
+| long.md | pointer over image | 0.046 | 0.047 | 0 | 0.169 / 48 |
+| long.md | 10 px resize | 0.470 | 0.579 | 15 | 0.516 / 46 |
+| 50 paragraphs | typed character | 6.627 | 7.432 | 50 | 9.155 / 506 |
+| 50 paragraphs | Down arrow | 0.679 | 0.830 | 0 | 2.433 / 306 |
+| 50 paragraphs | pointer over image | 0.237 | 0.275 | 0 | 1.102 / 153 |
+| 50 paragraphs | 10 px resize | 6.473 | 7.113 | 50 | 7.029 / 151 |
+
+What is left of a keystroke is the single build (still wraps every block; ticket 05 would cut that to the edited block) plus the draw-list rows.
