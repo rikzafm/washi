@@ -1,10 +1,12 @@
 //! Confirmation dialog for deleting a note.
 //!
 //! Replaces the native Windows confirmation dialog with a themed Slint window
-//! featuring washi tape, handwriting font, and tactile text actions.
+//! featuring washi tape, handwriting font, and tactile text actions. The window's lifecycle is the
+//! [`Popup`]'s; this module is its content and its centred placement.
 
 use crate::note_window::DeleteNoteDialog;
 use crate::platform::{NoteId, ScreenRect};
+use crate::popup::{hwnd_of, Popup};
 use slint::ComponentHandle;
 use std::rc::Rc;
 
@@ -12,22 +14,10 @@ use std::rc::Rc;
 pub const DIALOG_WIDTH: f32 = 392.0;
 pub const DIALOG_HEIGHT: f32 = 252.0;
 
-fn hwnd_of(ui: &DeleteNoteDialog) -> Option<isize> {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    let window_handle = ui.window().window_handle();
-    let handle = window_handle.window_handle().ok()?;
-    match handle.as_raw() {
-        RawWindowHandle::Win32(w) => Some(w.hwnd.get()),
-        _ => None,
-    }
-}
-
 /// Controller managing a live `DeleteNoteDialog` window.
 pub struct DeleteDialog {
     note_id: NoteId,
-    ui: DeleteNoteDialog,
-    /// The window's scale: the monitor's times the UI size.
-    scale: Rc<crate::ui_scale::WindowScale>,
+    popup: Popup<DeleteNoteDialog>,
 }
 
 impl DeleteDialog {
@@ -40,18 +30,9 @@ impl DeleteDialog {
         on_confirm: Rc<dyn Fn(NoteId)>,
         on_start_move: Rc<dyn Fn(Option<isize>)>,
     ) -> Result<Self, slint::PlatformError> {
-        let ui = DeleteNoteDialog::new()?;
-        let scale = Rc::new(crate::ui_scale::WindowScale::attach(ui.window()));
-        {
-            // moved to a monitor with another DPI: put the UI size back on top
-            let (weak, scale) = (ui.as_weak(), scale.clone());
-            ui.on_scale_factor_changed(move || {
-                if let Some(ui) = weak.upgrade() {
-                    scale.resync(ui.window(), false);
-                }
-            });
-        }
-        let scale_factor = scale.factor();
+        let popup = Popup::new(DeleteNoteDialog::new()?);
+        let ui = popup.ui();
+        let scale_factor = popup.scale().factor();
         let dw = (DIALOG_WIDTH * scale_factor).round() as i32;
         let dh = (DIALOG_HEIGHT * scale_factor).round() as i32;
         let rect = crate::placement::center_over(target, (dw, dh), work_areas);
@@ -59,46 +40,21 @@ impl DeleteDialog {
 
         {
             let on_keep = on_keep.clone();
-            ui.on_keep(move || {
-                on_keep(note_id);
-            });
+            ui.on_keep(move || on_keep(note_id));
         }
-        {
-            let on_confirm = on_confirm.clone();
-            ui.on_confirm_delete(move || {
-                on_confirm(note_id);
-            });
-        }
-        {
-            let on_keep = on_keep.clone();
-            ui.window().on_close_requested(move || {
-                on_keep(note_id);
-                slint::CloseRequestResponse::HideWindow
-            });
-        }
-
-        let dialog = Self { note_id, ui, scale };
-
+        ui.on_confirm_delete(move || on_confirm(note_id));
         {
             // Look the handle up at drag time: it does not exist until the window is shown.
-            let weak = dialog.ui.as_weak();
-            dialog.ui.on_start_move(move || {
+            let weak = ui.as_weak();
+            ui.on_start_move(move || {
                 if let Some(ui) = weak.upgrade() {
-                    on_start_move(hwnd_of(&ui));
+                    on_start_move(hwnd_of(ui.window()));
                 }
             });
         }
 
-        dialog.ui.show()?;
-        dialog.scale.resync(dialog.ui.window(), true);
-
-        #[cfg(target_os = "windows")]
-        if let Some(owner) = owner_hwnd {
-            dialog.set_owner(owner);
-        }
-        dialog.ensure_on_top();
-
-        Ok(dialog)
+        popup.show(owner_hwnd, move || on_keep(note_id))?;
+        Ok(Self { note_id, popup })
     }
 
     pub fn note_id(&self) -> NoteId {
@@ -106,68 +62,31 @@ impl DeleteDialog {
     }
 
     pub fn ui(&self) -> &DeleteNoteDialog {
-        &self.ui
+        self.popup.ui()
     }
 
     pub fn confirm(&self) {
-        self.ui.invoke_confirm_delete();
+        self.popup.ui().invoke_confirm_delete();
     }
 
     pub fn cancel(&self) {
-        self.ui.invoke_keep();
+        self.popup.ui().invoke_keep();
     }
 
     pub fn dispatch_event(&self, event: slint::platform::WindowEvent) {
-        self.ui.window().dispatch_event(event);
+        self.popup.dispatch_event(event);
     }
 
     pub fn hwnd(&self) -> Option<isize> {
-        hwnd_of(&self.ui)
+        self.popup.hwnd()
+    }
+
+    pub fn close(&self) {
+        self.popup.close();
     }
 
     pub fn position(&self) -> (f32, f32) {
-        let pos = self.ui.window().position();
-        let scale = self.ui.window().scale_factor();
-        (pos.x as f32 / scale, pos.y as f32 / scale)
-    }
-
-    pub fn set_owner(&self, owner_hwnd: isize) {
-        #[cfg(target_os = "windows")]
-        if let Some(hwnd) = self.hwnd() {
-            use windows_sys::Win32::Foundation::HWND;
-            use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_HWNDPARENT};
-            unsafe {
-                SetWindowLongPtrW(
-                    hwnd as HWND,
-                    GWLP_HWNDPARENT,
-                    owner_hwnd as isize,
-                );
-            }
-        }
-    }
-
-    pub fn ensure_on_top(&self) {
-        #[cfg(target_os = "windows")]
-        if let Some(hwnd) = self.hwnd() {
-            use windows_sys::Win32::Foundation::HWND;
-            use windows_sys::Win32::UI::WindowsAndMessaging::{
-                IsWindowVisible, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            };
-            unsafe {
-                let hwnd = hwnd as HWND;
-                if IsWindowVisible(hwnd) != 0 {
-                    SetWindowPos(
-                        hwnd,
-                        HWND_TOPMOST,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    );
-                }
-            }
-        }
+        self.popup.logical_position()
     }
 }
 

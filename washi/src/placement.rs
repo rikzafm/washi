@@ -134,6 +134,21 @@ pub fn center_over(
     ScreenRect::new(x, y, size.0, size.1)
 }
 
+/// Where a pointer menu's card goes (physical px): its top-left corner at `at` unless it would leave
+/// `areas`. `card` is the card's size without any shadow margin. Like a Windows menu, near the right or
+/// bottom edge it opens to the left of or above the pointer when it fits there, else against the edge.
+pub fn place_card(at: (i32, i32), card: (i32, i32), areas: &[ScreenRect]) -> (i32, i32) {
+    let Some(area) = find_work_area(at, areas) else { return at };
+    let (mut x, mut y) = at;
+    if x + card.0 > area.right() {
+        x = if at.0 - card.0 >= area.x { at.0 - card.0 } else { area.right() - card.0 };
+    }
+    if y + card.1 > area.bottom() {
+        y = if at.1 - card.1 >= area.y { at.1 - card.1 } else { area.bottom() - card.1 };
+    }
+    (x.max(area.x), y.max(area.y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +387,33 @@ mod tests {
     #[test]
     fn find_work_area_empty_returns_none() {
         assert_eq!(find_work_area((100, 100), &[]), None);
+    }
+
+    const PLACE_SCREEN: ScreenRect = ScreenRect { x: 0, y: 0, w: 1920, h: 1080 };
+
+    #[test]
+    fn place_card_the_card_opens_at_the_pointer() {
+        assert_eq!(place_card((300, 200), (352, 194), &[PLACE_SCREEN]), (300, 200));
+    }
+
+    #[test]
+    fn place_card_near_the_right_edge_it_opens_to_the_left_of_the_pointer() {
+        assert_eq!(place_card((1800, 200), (352, 194), &[PLACE_SCREEN]), (1448, 200));
+    }
+
+    #[test]
+    fn place_card_near_the_bottom_edge_it_opens_above_the_pointer() {
+        assert_eq!(place_card((300, 1000), (352, 194), &[PLACE_SCREEN]), (300, 806));
+    }
+
+    #[test]
+    fn place_card_on_a_screen_too_small_it_is_pushed_against_the_edge() {
+        let small = ScreenRect::new(0, 0, 300, 150);
+        assert_eq!(place_card((100, 100), (352, 194), &[small]), (0, 0));
+    }
+
+    #[test]
+    fn place_card_without_a_work_area_it_stays_at_the_pointer() {
+        assert_eq!(place_card((-40, 900), (352, 194), &[]), (-40, 900));
     }
 }

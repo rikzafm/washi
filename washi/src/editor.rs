@@ -1983,7 +1983,7 @@ mod tests {
     }
 
     fn test_editor_with_ui(content: &str) -> (tempfile::TempDir, Rc<Editor>, NoteWindow) {
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let (dir, editor) = test_editor(content);
         let ui = NoteWindow::new().expect("NoteWindow");
         ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));
@@ -2161,7 +2161,7 @@ mod tests {
         let image_id = db.add_image(note_id, "image/png", 200, 100, &png).expect("add image");
 
         let content = format!("# Title\n![](img:{image_id})\nAfter text");
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let clipboard = Rc::new(DummyClipboard::default());
         let editor = Rc::new(Editor::new(note_id, &content, db, clipboard));
         let ui = NoteWindow::new().expect("NoteWindow");
@@ -2320,7 +2320,7 @@ mod tests {
         let png = crate::images::encode_png(&rgba).expect("encode png");
         let img = db.add_image(note_id, "image/png", 200, 100, &png).expect("add image");
         let content = format!("First\n![](img:{img})\nMiddle");
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let editor = Rc::new(Editor::new(note_id, &content, db, Rc::new(DummyClipboard::default())));
         let ui = NoteWindow::new().expect("NoteWindow");
         ui.window().set_size(slint::LogicalSize::new(447.0, 468.0));

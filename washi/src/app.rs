@@ -3,6 +3,7 @@
 use crate::all_notes::AllNotesView;
 use crate::settings::SettingsView;
 use crate::delete_dialog::DeleteDialog;
+use crate::popups::Popups;
 
 use crate::context_menu::{ClosedItem, ContextMenu};
 use crate::dropdown::{extract_title_and_preview, format_relative_timestamp, shorten_preview, DropdownMenu};
@@ -91,14 +92,10 @@ struct Inner {
     trim_enabled: Cell<bool>,
     /// Open picture viewers (double click on a picture).
     viewers: RefCell<Vec<Rc<ImageViewer>>>,
-    /// Currently open dropdown menu floating window, if any.
-    dropdown: RefCell<Option<Rc<DropdownMenu>>>,
-    /// Currently open right-click menu window, if any.
-    context_menu: RefCell<Option<Rc<ContextMenu>>>,
+    /// The open Dropdown menu, right-click menu and Delete dialog.
+    popups: Popups,
     /// How many right-click menus have been opened (a test hook).
     menus_opened: Cell<usize>,
-    /// Currently open delete confirmation dialog window, if any.
-    delete_dialog: RefCell<Option<Rc<DeleteDialog>>>,
     /// Currently open All Notes window, if any.
     all_notes: RefCell<Option<Rc<AllNotesView>>>,
     /// Currently open Settings page, if any.
@@ -193,10 +190,8 @@ impl App {
             trim_timer: slint::Timer::default(),
             trim_enabled: Cell::new(false),
             viewers: RefCell::new(Vec::new()),
-            dropdown: RefCell::new(None),
-            context_menu: RefCell::new(None),
+            popups: Popups::default(),
             menus_opened: Cell::new(0),
-            delete_dialog: RefCell::new(None),
             all_notes: RefCell::new(None),
             settings: RefCell::new(None),
         });
@@ -358,7 +353,7 @@ impl App {
 
     /// Clone the handle to the open dropdown menu, if any.
     pub fn dropdown(&self) -> Option<Rc<DropdownMenu>> {
-        self.0.dropdown.borrow().clone()
+        self.0.popups.dropdown()
     }
 
     /// Clone the handle to the open Settings page, if any.
@@ -539,8 +534,8 @@ impl App {
         }
         crate::ui_scale::set_app_scale(scale);
         let k = old / scale;
-        self.dismiss_dropdown();
-        self.dismiss_delete_dialog();
+        let closed = self.0.popups.dismiss_for_ui_scale();
+        self.dropdown_closed(closed);
         let notes: Vec<Rc<Note>> = self.0.notes.borrow().clone();
         for n in &notes {
             n.set_ui_scale(scale, k);
@@ -691,26 +686,23 @@ impl App {
 
     /// Dismiss the open dropdown menu and reset the parent note's button state.
     pub fn dismiss_dropdown(&self) {
-        self.dismiss_context_menu();
-        let menu = self.0.dropdown.borrow_mut().take();
-        if let Some(m) = menu {
-            m.close();
-            let note_id = m.note_id();
-            self.with_note(note_id, |n| n.set_dropdown_open(false));
-            if let Some(v) = self.all_notes() {
-                v.ui().set_dropdown_open(false);
-            }
+        let closed = self.0.popups.dismiss_dropdown();
+        self.dropdown_closed(closed);
+    }
+
+    /// Give the menu button of the Note whose Dropdown menu just closed back to it.
+    fn dropdown_closed(&self, note_id: Option<NoteId>) {
+        let Some(note_id) = note_id else { return };
+        self.with_note(note_id, |n| n.set_dropdown_open(false));
+        if let Some(v) = self.all_notes() {
+            v.ui().set_dropdown_open(false);
         }
     }
 
     /// Dismiss the open dropdown menu if it belongs to note `id`.
     fn dismiss_dropdown_if(&self, id: NoteId) {
-        if self.context_menu().map(|m| m.note_id()) == Some(id) {
-            self.dismiss_context_menu();
-        }
-        if self.dropdown().map(|d| d.note_id()) == Some(id) {
-            self.dismiss_dropdown();
-        }
+        let closed = self.0.popups.dismiss_menus_of(id);
+        self.dropdown_closed(closed);
     }
 
     /// Toggle the dropdown menu for note `id`.
@@ -818,7 +810,7 @@ impl App {
             });
         }
         v.ui().set_dropdown_open(true);
-        *self.0.dropdown.borrow_mut() = Some(Rc::new(menu));
+        self.0.popups.show_dropdown(menu);
     }
 
     /// Open the dropdown menu for note `id`.
@@ -929,7 +921,7 @@ impl App {
                 });
 
                 note.set_dropdown_open(true);
-                *self.0.dropdown.borrow_mut() = Some(Rc::new(menu));
+                self.0.popups.show_dropdown(menu);
             }
             Err(e) => eprintln!("washi: could not open dropdown menu: {e}"),
         }
@@ -1114,21 +1106,17 @@ impl App {
 
     /// Clone the handle to the open delete dialog, if any.
     pub fn delete_dialog(&self) -> Option<Rc<DeleteDialog>> {
-        self.0.delete_dialog.borrow().clone()
+        self.0.popups.delete_dialog()
     }
 
     /// Dismiss the open delete dialog if any.
     pub fn dismiss_delete_dialog(&self) {
-        if let Some(dialog) = self.0.delete_dialog.borrow_mut().take() {
-            let _ = dialog.ui().hide();
-        }
+        self.0.popups.dismiss_delete_dialog();
     }
 
     /// Dismiss the open delete dialog if it belongs to note `id`.
     pub fn dismiss_delete_dialog_if(&self, id: NoteId) {
-        if self.delete_dialog().map(|d| d.note_id()) == Some(id) {
-            self.dismiss_delete_dialog();
-        }
+        self.0.popups.dismiss_delete_dialog_of(id);
     }
 
     /// Delete a note for good, after asking with the themed delete dialog.
@@ -1178,7 +1166,7 @@ impl App {
 
         match DeleteDialog::open(id, target, &work_areas, note.hwnd(), on_keep, on_confirm, on_start_move) {
             Ok(dialog) => {
-                *self.0.delete_dialog.borrow_mut() = Some(Rc::new(dialog));
+                self.0.popups.show_delete_dialog(dialog);
             }
             Err(e) => eprintln!("washi: could not open delete dialog: {e}"),
         }
@@ -1502,7 +1490,7 @@ impl App {
             });
         }
         self.0.menus_opened.set(self.0.menus_opened.get() + 1);
-        *self.0.context_menu.borrow_mut() = Some(Rc::new(menu));
+        self.0.popups.show_context_menu(menu);
     }
 
     /// How many right-click menus have been opened.
@@ -1512,22 +1500,19 @@ impl App {
 
     /// The open right-click menu, if any.
     pub fn context_menu(&self) -> Option<Rc<ContextMenu>> {
-        self.0.context_menu.borrow().clone()
+        self.0.popups.context_menu()
     }
 
     /// Close the right-click menu.
     pub fn dismiss_context_menu(&self) {
-        let menu = self.0.context_menu.borrow_mut().take();
-        if let Some(m) = menu {
-            m.close();
-        }
+        self.0.popups.dismiss_context_menu();
     }
 
     /// Take a note out of the app. Its window is released on the next turn of the event loop,
     /// because this may run inside one of that window's own callbacks.
     fn remove_note(&self, id: NoteId) {
-        self.dismiss_dropdown_if(id);
-        self.dismiss_delete_dialog_if(id);
+        let closed = self.0.popups.dismiss_all_of(id);
+        self.dropdown_closed(closed);
         let (note, now_empty) = {
             let mut notes = self.0.notes.borrow_mut();
             let at = notes.iter().position(|n| n.id() == id);

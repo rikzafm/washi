@@ -6,6 +6,7 @@
 use crate::document::Document;
 use crate::note_window::DropdownMenuWindow;
 use crate::platform::{NoteId, ScreenRect};
+use crate::popup::Popup;
 use crate::ui_scale::WindowScale;
 use slint::ComponentHandle;
 use std::rc::Rc;
@@ -118,8 +119,7 @@ impl Default for DropdownMetrics {
 /// Controller managing a live `DropdownMenuWindow`.
 pub struct DropdownMenu {
     note_id: NoteId,
-    ui: DropdownMenuWindow,
-    scale: Rc<WindowScale>,
+    popup: Popup<DropdownMenuWindow>,
 }
 
 impl DropdownMenu {
@@ -152,16 +152,8 @@ impl DropdownMenu {
         on_dismiss: Rc<dyn Fn(NoteId)>,
         compact: bool,
     ) -> Result<Self, slint::PlatformError> {
-        let ui = DropdownMenuWindow::new()?;
-        let scale = Rc::new(WindowScale::attach(ui.window()));
-        {
-            let (weak, scale) = (ui.as_weak(), scale.clone());
-            ui.on_scale_factor_changed(move || {
-                if let Some(ui) = weak.upgrade() {
-                    scale.resync(ui.window(), false);
-                }
-            });
-        }
+        let popup = Popup::new(DropdownMenuWindow::new()?);
+        let ui = popup.ui();
         let metrics = if compact {
             ui.set_compact(true);
             ui.set_card_height(COMPACT_CARD_HEIGHT);
@@ -170,7 +162,7 @@ impl DropdownMenu {
             DropdownMetrics::default()
         };
 
-        let sf = scale.factor();
+        let sf = popup.scale().factor();
         let win_w = ((metrics.card_width + 2.0 * metrics.shadow_margin) * sf).round() as i32;
         let win_h = ((metrics.card_height + 2.0 * metrics.shadow_margin) * sf).round() as i32;
         let gap = (metrics.gap * sf).round() as i32;
@@ -181,68 +173,16 @@ impl DropdownMenu {
 
         {
             let on_dismiss = on_dismiss.clone();
-            ui.on_dismiss(move || {
-                on_dismiss(note_id);
-            });
-        }
-        {
-            let on_dismiss = on_dismiss.clone();
-            ui.window().on_close_requested(move || {
-                on_dismiss(note_id);
-                slint::CloseRequestResponse::HideWindow
-            });
+            ui.on_dismiss(move || on_dismiss(note_id));
         }
 
-        ui.show()?;
-        scale.resync(ui.window(), true);
-        let menu = Self { note_id, ui, scale };
-
-        #[cfg(target_os = "windows")]
-        if let Some(owner) = owner_hwnd {
-            menu.set_owner(owner);
-        }
-        menu.ensure_on_top();
-
-        Ok(menu)
+        popup.show(owner_hwnd, move || on_dismiss(note_id))?;
+        Ok(Self { note_id, popup })
     }
 
-    pub fn set_owner(&self, owner_hwnd: isize) {
-        #[cfg(target_os = "windows")]
-        if let Some(hwnd) = self.hwnd() {
-            use windows_sys::Win32::Foundation::HWND;
-            use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_HWNDPARENT};
-            unsafe {
-                SetWindowLongPtrW(
-                    hwnd as HWND,
-                    GWLP_HWNDPARENT,
-                    owner_hwnd as isize,
-                );
-            }
-        }
-    }
-
+    /// Put the card above other windows again (after its Note changed whether it is always on top).
     pub fn ensure_on_top(&self) {
-        #[cfg(target_os = "windows")]
-        if let Some(hwnd) = self.hwnd() {
-            use windows_sys::Win32::Foundation::HWND;
-            use windows_sys::Win32::UI::WindowsAndMessaging::{
-                IsWindowVisible, SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            };
-            unsafe {
-                let hwnd = hwnd as HWND;
-                if IsWindowVisible(hwnd) != 0 {
-                    SetWindowPos(
-                        hwnd,
-                        HWND_TOPMOST,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                    );
-                }
-            }
-        }
+        self.popup.raise();
     }
 
     pub fn note_id(&self) -> NoteId {
@@ -250,180 +190,88 @@ impl DropdownMenu {
     }
 
     pub fn ui(&self) -> &DropdownMenuWindow {
-        &self.ui
+        self.popup.ui()
     }
 
     pub fn scale(&self) -> &Rc<WindowScale> {
-        &self.scale
+        self.popup.scale()
     }
 
     pub fn is_pinned(&self) -> bool {
-        self.ui.get_pinned()
+        self.ui().get_pinned()
     }
 
     pub fn set_pinned(&self, pinned: bool) {
-        self.ui.set_pinned(pinned);
+        self.ui().set_pinned(pinned);
     }
 
     pub fn hwnd(&self) -> Option<isize> {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-        let window_handle = self.ui.window().window_handle();
-        let handle = window_handle.window_handle().ok()?;
-        match handle.as_raw() {
-            RawWindowHandle::Win32(w) => Some(w.hwnd.get()),
-            _ => None,
-        }
+        self.popup.hwnd()
     }
 
     pub fn close(&self) {
-        let _ = self.ui.hide();
+        self.popup.close();
     }
 
     pub fn toggle_pin(&self) {
-        self.ui.invoke_toggle_pin();
+        self.ui().invoke_toggle_pin();
     }
 
     pub fn delete_note(&self) {
-        self.ui.invoke_delete_note();
+        self.ui().invoke_delete_note();
     }
 
     pub fn close_note(&self) {
-        self.ui.invoke_close_note();
+        self.ui().invoke_close_note();
     }
 
     pub fn new_note(&self) {
-        self.ui.invoke_new_note();
+        self.ui().invoke_new_note();
     }
 
     pub fn all_notes(&self) {
-        self.ui.invoke_all_notes();
+        self.ui().invoke_all_notes();
     }
 
     pub fn settings(&self) {
-        self.ui.invoke_settings();
+        self.ui().invoke_settings();
     }
 
     /// Whether the card offers Settings (not the compact one).
     pub fn settings_visible(&self) -> bool {
-        self.ui.get_settings_visible()
+        self.ui().get_settings_visible()
     }
 
     pub fn select_note(&self, id: NoteId) {
-        self.ui.invoke_select_note(id as i32);
+        self.ui().invoke_select_note(id as i32);
     }
 
     pub fn dismiss(&self) {
-        self.ui.invoke_dismiss();
+        self.ui().invoke_dismiss();
     }
 
     pub fn notes(&self) -> Vec<crate::note_window::DropdownNoteItem> {
         use slint::Model;
-        self.ui.get_notes().iter().collect()
+        self.ui().get_notes().iter().collect()
     }
 
     pub fn position(&self) -> (f32, f32) {
-        let pos = self.ui.window().position();
-        let scale = self.ui.window().scale_factor();
-        (pos.x as f32 / scale, pos.y as f32 / scale)
+        self.popup.logical_position()
     }
 
     pub fn size(&self) -> (f32, f32) {
-        let size = self.ui.window().size();
-        let scale = self.ui.window().scale_factor();
-        (size.width as f32 / scale, size.height as f32 / scale)
+        self.popup.logical_size()
     }
 
     pub fn dispatch_event(&self, event: slint::platform::WindowEvent) {
-        self.ui.window().dispatch_event(event);
+        self.popup.dispatch_event(event);
     }
-}
-
-impl Drop for DropdownMenu {
-    fn drop(&mut self) {
-        let _ = self.ui.hide();
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn init_test_platform() {
-    use std::cell::Cell;
-    use std::rc::Weak;
-    use slint::platform::{Platform, WindowAdapter, WindowProperties, Renderer};
-    use slint::platform::software_renderer::{RepaintBufferType, SoftwareRenderer};
-    use slint::{WindowPosition, WindowSize};
-
-    struct TestWindow {
-        window: slint::Window,
-        renderer: SoftwareRenderer,
-        pos: Cell<slint::PhysicalPosition>,
-        size: Cell<slint::PhysicalSize>,
-    }
-
-    impl TestWindow {
-        fn new() -> Rc<Self> {
-            Rc::new_cyclic(|w: &Weak<Self>| TestWindow {
-                window: slint::Window::new(w.clone()),
-                renderer: SoftwareRenderer::new_with_repaint_buffer_type(RepaintBufferType::NewBuffer),
-                pos: Cell::new(slint::PhysicalPosition::new(0, 0)),
-                size: Cell::new(slint::PhysicalSize::new(0, 0)),
-            })
-        }
-    }
-
-    impl WindowAdapter for TestWindow {
-        fn window(&self) -> &slint::Window {
-            &self.window
-        }
-        fn renderer(&self) -> &dyn Renderer {
-            &self.renderer
-        }
-        fn position(&self) -> Option<slint::PhysicalPosition> {
-            Some(self.pos.get())
-        }
-        fn set_position(&self, position: WindowPosition) {
-            let sf = self.window.scale_factor();
-            self.pos.set(match position {
-                WindowPosition::Logical(l) => slint::PhysicalPosition::new((l.x * sf).round() as i32, (l.y * sf).round() as i32),
-                WindowPosition::Physical(p) => p,
-            });
-        }
-        fn size(&self) -> slint::PhysicalSize {
-            self.size.get()
-        }
-        fn set_size(&self, size: WindowSize) {
-            let sf = self.window.scale_factor();
-            let p = match size {
-                WindowSize::Logical(l) => slint::PhysicalSize::new((l.width * sf).round() as u32, (l.height * sf).round() as u32),
-                WindowSize::Physical(p) => p,
-            };
-            self.size.set(p);
-            self.window.dispatch_event(slint::platform::WindowEvent::Resized { size: p.to_logical(sf) });
-        }
-        fn set_visible(&self, _visible: bool) -> Result<(), slint::PlatformError> {
-            Ok(())
-        }
-        fn request_redraw(&self) {}
-        fn update_window_properties(&self, properties: WindowProperties<'_>) {
-            let c = properties.layout_constraints();
-            let sf = self.window.scale_factor();
-            let p = slint::PhysicalSize::new((c.preferred.width * sf).round() as u32, (c.preferred.height * sf).round() as u32);
-            self.size.set(p);
-            self.window.dispatch_event(slint::platform::WindowEvent::Resized { size: p.to_logical(sf) });
-        }
-    }
-
-    struct TestPlatform;
-    impl Platform for TestPlatform {
-        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-            Ok(TestWindow::new())
-        }
-    }
-    let _ = slint::platform::set_platform(Box::new(TestPlatform));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::popup::init_test_platform;
     use std::cell::Cell;
 
     #[test]
@@ -575,7 +423,7 @@ mod tests {
         assert!(menu.is_pinned());
         menu.set_pinned(false);
         assert!(!menu.is_pinned());
-        menu.set_owner(0);
+        menu.popup.set_owner(0);
         menu.ensure_on_top();
     }
 

@@ -20,6 +20,8 @@ pub mod note_window;
 pub mod occlusion;
 pub mod placement;
 pub mod platform;
+pub mod popup;
+pub mod popups;
 pub mod settings;
 pub mod sidebar_panel;
 pub mod textflow;

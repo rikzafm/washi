@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn image_viewer_opens_and_centers_over_target() {
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let wc = Rc::new(TestWindowControl {
             areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
             ..Default::default()
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn image_viewer_centers_on_primary_work_area_when_target_is_none() {
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let wa = ScreenRect::new(0, 0, 1920, 1040);
         let wc = Rc::new(TestWindowControl {
             areas: vec![wa],
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn image_viewer_target_on_secondary_monitor_places_on_secondary_monitor() {
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let primary = ScreenRect::new(0, 0, 800, 600);
         let secondary = ScreenRect::new(1920, 0, 2560, 1440);
         let wc = Rc::new(TestWindowControl {
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn image_viewer_copy_invokes_clipboard() {
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let wc = Rc::new(TestWindowControl {
             areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
             ..Default::default()
@@ -421,7 +421,7 @@ mod tests {
 
     #[test]
     fn image_viewer_close_invokes_on_close_callback() {
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let wc = Rc::new(TestWindowControl {
             areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
             ..Default::default()
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn image_viewer_drag_and_resize_invokes_window_control() {
-        crate::dropdown::init_test_platform();
+        crate::popup::init_test_platform();
         let wc = Rc::new(TestWindowControl {
             areas: vec![ScreenRect::new(0, 0, 1920, 1040)],
             ..Default::default()
