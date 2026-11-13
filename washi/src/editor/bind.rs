@@ -30,6 +30,7 @@ impl Editor {
         ui.set_blocks(slint::ModelRc::from(self.model.clone()));
         ui.set_runs(slint::ModelRc::from(self.runs.clone()));
         ui.set_rules(slint::ModelRc::from(self.rules.clone()));
+        ui.set_checks(slint::ModelRc::from(self.checks.clone()));
         ui.set_sel_rects(slint::ModelRc::from(self.sel_rects.clone()));
         ui.set_image_handles(slint::ModelRc::from(self.handles.clone()));
         ui.set_markers(slint::ModelRc::from(self.marker_data.clone()));
@@ -279,12 +280,17 @@ impl Editor {
             let weak_ui = ui.as_weak();
             let on_pointer_down = on_pointer_down.clone();
             let on_open_image = on_open_image.clone();
+            let changed = changed.clone();
             ui.on_pointer_down(move |x, y, shift| {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return };
                 if let Some(cb) = on_pointer_down.as_ref() {
                     cb();
                 }
                 if editor.grab_grip(&ui, (x, y)) {
+                    return;
+                }
+                if editor.toggle_check_at(&ui, (x, y)) {
+                    changed(None);
                     return;
                 }
                 let now = editor.monotonic_time();

@@ -21,6 +21,12 @@ export global Theme {
     out property <length> step-width: 16px;
 
     out property <color> ink: #2B2F36;
+    // The text and strike-through of a ticked check item, and its tick.
+    out property <color> ink-done: #6B6F76;
+    out property <color> check-tick: #1F9D55;
+    out property <color> check-box: #8B919A;
+    // How far a check item's text is indented for its box (the same as CHECK_INDENT in src/textflow.rs).
+    out property <length> check-indent: 26px;
     // Select all: the wash over every word of the note.
     out property <color> selection: #BAD3FC;
     // A selection in a field: the same blue, see-through, over the words (drawn under the field).

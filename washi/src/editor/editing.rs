@@ -79,6 +79,17 @@ impl Editor {
         Some(caret)
     }
 
+    /// A press on a check box ticks or unticks its item (one undo step). False when the point is no box.
+    pub fn toggle_check_at(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
+        let Some(block) = self.layout(ui).check_at((at.0 as f64, at.1 as f64)) else { return false };
+        let before = self.doc().clone();
+        let done = self.doc_mut().toggle_checked(block);
+        if done {
+            self.structural(before);
+        }
+        done
+    }
+
     pub fn typing_style(&self) -> Flags {
         let i = self.caret_block();
         let cursor = self.selection.get().focus.offset;
@@ -104,6 +115,14 @@ impl Editor {
             FORMAT_ITALIC => Flags::ITALIC,
             FORMAT_UNDERLINE => Flags::UNDERLINE,
             FORMAT_STRIKE => Flags::STRIKE,
+            FORMAT_CHECK => {
+                let before = self.doc().clone();
+                let done = self.doc_mut().toggle_check_range(self.selection.get());
+                if done {
+                    self.structural(before);
+                }
+                return done;
+            }
             FORMAT_LIST => {
                 let before = self.doc().clone();
                 let done = self.doc_mut().toggle_list_range(self.selection.get());
@@ -180,6 +199,7 @@ impl Editor {
         ui.set_fmt_underline(style.contains(Flags::UNDERLINE));
         ui.set_fmt_strike(style.contains(Flags::STRIKE));
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
+        ui.set_fmt_check(b.is_some_and(|b| b.kind.is_check()));
         self.fill_handles(&doc, &self.layout(ui));
         let sel = self.selection.get();
         let (ink, marker) = if b.is_none() {

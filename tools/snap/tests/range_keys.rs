@@ -148,8 +148,22 @@ fn the_list_button_toggles_every_paragraph_in_the_range() {
     across(&mut h);
     h.press_ctrl_shift(0, 'l');
     assert_eq!(h.note_text(0), "# Title\n- first paragraph here\n- second one\n- third paragraph words");
-    assert!(h.toolbar_active(0)[4]);
+    assert!(!h.toolbar_active(0)[4], "bullets are no check items");
     h.press_ctrl_shift(0, 'l');
+    assert_eq!(h.note_text(0), TEXT);
+}
+
+#[test]
+fn the_check_button_toggles_every_paragraph_in_the_range() {
+    let mut h = note(TEXT);
+    across(&mut h);
+    h.press_ctrl_shift(0, 'c');
+    assert_eq!(h.note_text(0), "# Title
+- [ ] first paragraph here
+- [ ] second one
+- [ ] third paragraph words");
+    assert!(h.toolbar_active(0)[4]);
+    h.press_ctrl_shift(0, 'c');
     assert_eq!(h.note_text(0), TEXT);
 }
 

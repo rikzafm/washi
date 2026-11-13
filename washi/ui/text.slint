@@ -3,6 +3,7 @@ import {
     BlockData,
     BlockKind,
     BlockView,
+    CheckData,
     MarkerData,
     RuleData,
     KeyMods,
@@ -152,6 +153,90 @@ component HandleShape inherits Path {
     Close { }
 }
 
+// The box of a check item and its tick. Like the frame of a picture, they follow the paper's tilt
+// (`ts` is how much of it is on: 1 at rest, 0 while editing), as Paths whose corners are moved onto
+// the tilted baseline.
+component CheckShape inherits Path {
+    in property <CheckData> c;
+    in property <float> ts;
+    in property <length> shift-x;
+    in property <length> shift-y;
+    in property <length> paper-w;
+    in property <length> paper-h;
+    property <float> sn: Theme.text-tilt.sin();
+    property <float> cs: Theme.text-tilt.cos();
+    property <float> u0: root.c.x / 1px;
+    property <float> v0: root.c.y / 1px;
+    property <float> s: root.c.size / 1px;
+    pure function px(u: float, v: float) -> float {
+        return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
+    }
+    pure function py(u: float, v: float) -> float {
+        return v + ((u - root.paper-w / 2px) * root.sn + (v - root.paper-h / 2px) * (root.cs - 1) + root.shift-y / 1px) * root.ts;
+    }
+    property <float> pad: 6;
+    property <float> ox: min(root.px(root.u0, root.v0), root.px(root.u0, root.v0 + root.s)) - root.pad;
+    property <float> oy: min(root.py(root.u0, root.v0), root.py(root.u0 + root.s, root.v0)) - root.pad;
+    x: root.ox * 1px;
+    y: root.oy * 1px;
+    width: (max(root.px(root.u0 + root.s, root.v0), root.px(root.u0 + root.s, root.v0 + root.s)) - root.ox + root.pad) * 1px;
+    height: (max(root.py(root.u0, root.v0 + root.s), root.py(root.u0 + root.s, root.v0 + root.s)) - root.oy + root.pad) * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    fill: root.c.checked ? #E6F4EA : transparent;
+    stroke: root.c.checked ? Theme.check-tick : Theme.check-box;
+    stroke-width: 1.6px;
+    stroke-line-join: round;
+    MoveTo { x: px(root.u0, root.v0) - root.ox; y: py(root.u0, root.v0) - root.oy; }
+    LineTo { x: px(root.u0 + root.s, root.v0) - root.ox; y: py(root.u0 + root.s, root.v0) - root.oy; }
+    LineTo { x: px(root.u0 + root.s, root.v0 + root.s) - root.ox; y: py(root.u0 + root.s, root.v0 + root.s) - root.oy; }
+    LineTo { x: px(root.u0, root.v0 + root.s) - root.ox; y: py(root.u0, root.v0 + root.s) - root.oy; }
+    Close { }
+}
+
+component TickShape inherits Path {
+    in property <CheckData> c;
+    in property <float> ts;
+    in property <length> shift-x;
+    in property <length> shift-y;
+    in property <length> paper-w;
+    in property <length> paper-h;
+    property <float> sn: Theme.text-tilt.sin();
+    property <float> cs: Theme.text-tilt.cos();
+    property <float> u0: root.c.x / 1px;
+    property <float> v0: root.c.y / 1px;
+    property <float> s: root.c.size / 1px;
+    pure function px(u: float, v: float) -> float {
+        return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
+    }
+    pure function py(u: float, v: float) -> float {
+        return v + ((u - root.paper-w / 2px) * root.sn + (v - root.paper-h / 2px) * (root.cs - 1) + root.shift-y / 1px) * root.ts;
+    }
+    // the three points of the tick, as fractions of the box; it overshoots the box's top right
+    property <float> ax: root.u0 + 0.16 * root.s;
+    property <float> ay: root.v0 + 0.52 * root.s;
+    property <float> bx: root.u0 + 0.42 * root.s;
+    property <float> by: root.v0 + 0.84 * root.s;
+    property <float> cx: root.u0 + 1.12 * root.s;
+    property <float> cy: root.v0 - 0.18 * root.s;
+    property <float> pad: 6;
+    property <float> ox: min(min(root.px(root.ax, root.ay), root.px(root.bx, root.by)), root.px(root.cx, root.cy)) - root.pad;
+    property <float> oy: min(min(root.py(root.ax, root.ay), root.py(root.bx, root.by)), root.py(root.cx, root.cy)) - root.pad;
+    x: root.ox * 1px;
+    y: root.oy * 1px;
+    width: (max(max(root.px(root.ax, root.ay), root.px(root.bx, root.by)), root.px(root.cx, root.cy)) - root.ox + root.pad) * 1px;
+    height: (max(max(root.py(root.ax, root.ay), root.py(root.bx, root.by)), root.py(root.cx, root.cy)) - root.oy + root.pad) * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    stroke: Theme.check-tick;
+    stroke-width: 2.2px;
+    stroke-line-join: round;
+    stroke-line-cap: round;
+    MoveTo { x: px(root.ax, root.ay) - root.ox; y: py(root.ax, root.ay) - root.oy; }
+    LineTo { x: px(root.bx, root.by) - root.ox; y: py(root.bx, root.by) - root.oy; }
+    LineTo { x: px(root.cx, root.cy) - root.ox; y: py(root.cx, root.cy) - root.oy; }
+}
+
 // The note's text, in the paper's frame (fixed insets, not proportions of the size). `width` and
 // `height` are the paper's.
 //
@@ -168,6 +253,8 @@ export component TextLayer inherits Rectangle {
     in property <[BlockData]> blocks;
     in property <[RunData]> runs;
     in property <[RuleData]> rules;
+    /// The boxes of the check items (Rust).
+    in property <[CheckData]> checks;
     /// Highlights behind the words, and the boxes where the selection's wash meets them (Rust).
     in property <[MarkerData]> markers;
     in property <[SelRect]> marker-wash;
@@ -421,7 +508,7 @@ export component TextLayer inherits Rectangle {
             font-weight: r.bold ? 700 : 400;
             font-italic: r.italic;
             line-height-factor: r.pitch / (r.size * Theme.handwriting-line-em);
-            color: r.hint ? Theme.ink-hint : r.ink;
+            color: r.hint ? Theme.ink-hint : r.done ? Theme.ink-done : r.ink;
         }
     }
 
@@ -434,7 +521,34 @@ export component TextLayer inherits Rectangle {
         // never thinner than a screen pixel: below 100% a bar can cover no pixel centre and vanish
         height: max(r.height, 1phx);
         border-radius: min(r.width, r.height) / 2;
-        background: Theme.ink;
+        background: r.done ? Theme.ink-done : Theme.ink;
+    }
+
+    // the boxes (and ticks) of the check items
+    for c in root.checks: CheckShape {
+        c: c;
+        ts: root.tilt-scale;
+        shift-x: root.shift-x;
+        shift-y: root.shift-y;
+        paper-w: root.paper-w;
+        paper-h: root.paper-h;
+        visible: c.block != root.composing-block && c.y + c.size >= root.edge-y(c.x + c.size / 2);
+    }
+
+    for c in root.checks: TickShape {
+        c: c;
+        ts: root.tilt-scale;
+        shift-x: root.shift-x;
+        shift-y: root.shift-y;
+        paper-w: root.paper-w;
+        paper-h: root.paper-h;
+        visible: c.checked && c.block != root.composing-block && c.y + c.size >= root.edge-y(c.x + c.size / 2);
+    }
+
+    /// Blocks of one rhythm (line pitch) have no gap between them; a change opens one (the same
+    /// groups as `group` in src/textflow.rs).
+    pure function rhythm(k: BlockKind) -> int {
+        return k == BlockKind.title ? 0 : k == BlockKind.heading ? 1 : k == BlockKind.image ? 3 : 2;
     }
 
     /// Where the edit fields actually end (the bottom of the last one), in this layer. The note
@@ -508,7 +622,7 @@ export component TextLayer inherits Rectangle {
             show-input: !root.hide-inputs && (root.tilted-editing ? root.editing : root.flat >= 0.99);
             resync: root.resync;
             // A run of the same kind is one rhythm (line pitch); a change of kind opens a gap.
-            gap-before: i == 0 || root.blocks[i - 1].kind == b.kind || (root.blocks[i - 1].kind == BlockKind.list-item && b.kind == BlockKind.body) || (root.blocks[i - 1].kind == BlockKind.body && b.kind == BlockKind.list-item) ? 0px
+            gap-before: i == 0 || root.rhythm(root.blocks[i - 1].kind) == root.rhythm(b.kind) ? 0px
                 : b.kind == BlockKind.heading ? Theme.heading-gap : Theme.body-gap;
             wanted: i == root.focus-block;
             focus-serial: root.focus-serial;
@@ -551,7 +665,7 @@ export component TextLayer inherits Rectangle {
         y: 0;
         width: root.width;
         height: root.height;
-        mouse-cursor: root.text-cursor-kind == 1 ? MouseCursor.default : (root.text-cursor-kind == 2 ? MouseCursor.nwse-resize : MouseCursor.text);
+        mouse-cursor: root.text-cursor-kind == 1 ? MouseCursor.default : (root.text-cursor-kind == 2 ? MouseCursor.nwse-resize : (root.text-cursor-kind == 3 ? MouseCursor.pointer : MouseCursor.text));
         pointer-event(e) => {
             if (e.kind == PointerEventKind.move) {
                 root.pointer-motion(root.level-x(self.mouse-x, self.mouse-y), root.level-y(self.mouse-x, self.mouse-y));

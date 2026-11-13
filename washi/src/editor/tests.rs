@@ -410,3 +410,35 @@ fn a_block_forwards_navigation_keys_to_the_note() {
     assert!(!press(&key(Key::LeftArrow), false, true, 0, 2), "ctrl+arrow is the field's");
     assert!(!press("a", false, false, 0, 2), "typing is the field's");
 }
+
+#[test]
+fn a_press_on_a_check_box_ticks_the_item_once_and_undo_unticks_it() {
+    let (_dir, editor, ui) = test_editor_with_ui("# Jadwal\n- [ ] Selasa\n- [x] Rabu\nplain");
+    editor.relayout(&ui);
+    assert_eq!(editor.model.row_count(), 4);
+    assert_eq!(editor.model.row_data(1).unwrap().kind, BlockKind::Check);
+    assert_eq!(editor.checks.row_count(), 2, "a box for each check item");
+    let box1 = editor.checks.row_data(0).unwrap();
+    let at = (box1.x + box1.size / 2.0, box1.y + box1.size / 2.0);
+    assert_eq!(editor.cursor_kind_at(&ui, at), CURSOR_POINTER);
+    assert!(editor.toggle_check_at(&ui, at));
+    assert_eq!(editor.text(), "# Jadwal\n- [x] Selasa\n- [x] Rabu\nplain");
+    // a press on the text of the item, or on a plain paragraph, is no tick
+    assert!(!editor.toggle_check_at(&ui, (box1.x + 120.0, box1.y)));
+    assert!(editor.step(false).is_some());
+    assert_eq!(editor.text(), "# Jadwal\n- [ ] Selasa\n- [x] Rabu\nplain");
+}
+
+#[test]
+fn the_check_button_and_its_state_follow_the_paragraph_holding_the_caret() {
+    let (_dir, editor, ui) = test_editor_with_ui("# t\nbuy milk");
+    editor.set_caret(Caret { block: 1, offset: 0 });
+    assert!(editor.format(FORMAT_CHECK));
+    editor.show_formats(&ui);
+    assert!(ui.get_fmt_check());
+    assert_eq!(editor.text(), "# t\n- [ ] buy milk");
+    assert!(editor.format(FORMAT_CHECK));
+    editor.show_formats(&ui);
+    assert!(!ui.get_fmt_check());
+    assert_eq!(editor.text(), "# t\nbuy milk");
+}

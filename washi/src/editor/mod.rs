@@ -40,7 +40,7 @@ use crate::history::History;
 use crate::images::{Rgba, Stored};
 use crate::note_images::NoteImages;
 use crate::note_window::{
-    window_title, BlockData, BlockKind, KeyMods, MarkerData, NoteWindow, PaletteEntry, PickerPalette, RuleData, RunData,
+    window_title, BlockData, BlockKind, CheckData, KeyMods, MarkerData, NoteWindow, PaletteEntry, PickerPalette, RuleData, RunData,
     SelRect, Theme,
 };
 use crate::platform::{Clock, ImageClipboard, NoteId};
@@ -54,12 +54,15 @@ use std::time::Duration;
 pub const CURSOR_TEXT: i32 = 0;
 pub const CURSOR_DEFAULT: i32 = 1;
 pub const CURSOR_RESIZE: i32 = 2;
+/// Over a check box: the pointing hand.
+pub const CURSOR_POINTER: i32 = 3;
 
 pub const FORMAT_BOLD: i32 = 0;
 pub const FORMAT_ITALIC: i32 = 1;
 pub const FORMAT_UNDERLINE: i32 = 2;
 pub const FORMAT_STRIKE: i32 = 3;
 pub const FORMAT_LIST: i32 = 4;
+pub const FORMAT_CHECK: i32 = 5;
 
 /// Typing is snapshotted once it pauses this long; structural changes are snapshotted at once.
 pub const HISTORY_PAUSE: Duration = Duration::from_millis(500);
@@ -116,6 +119,8 @@ fn block_kind(kind: Kind) -> BlockKind {
         Kind::Heading => BlockKind::Heading,
         Kind::Body => BlockKind::Body,
         Kind::ListItem => BlockKind::ListItem,
+        Kind::Check => BlockKind::Check,
+        Kind::Checked => BlockKind::Checked,
         Kind::Image => BlockKind::Image,
     }
 }
@@ -158,11 +163,12 @@ struct NoteLines<'a> {
 impl caret_motion::Lines for NoteLines<'_> {
     fn line_at(&self, block: usize, offset: usize, line_end: bool) -> caret_motion::LineAt {
         let at = self.layout.caret_line(block, offset, line_end).expect("the caret's block exists");
-        caret_motion::LineAt { line: at.line, lines: at.lines, x: at.x }
+        // x counts from the text area's left edge, so Up and Down keep their column across an indented item
+        caret_motion::LineAt { line: at.line, lines: at.lines, x: at.x + self.layout.indent(block) }
     }
 
     fn offset_on(&self, block: usize, line: usize, x: f64) -> (usize, bool) {
-        self.layout.offset_on_line(block, line, x).expect("the caret's block exists")
+        self.layout.offset_on_line(block, line, x - self.layout.indent(block)).expect("the caret's block exists")
     }
 }
 
@@ -248,6 +254,7 @@ pub struct Editor {
     pub model: Rc<VecModel<BlockData>>,
     pub runs: Rc<VecModel<RunData>>,
     pub rules: Rc<VecModel<RuleData>>,
+    pub checks: Rc<VecModel<CheckData>>,
     pub sel_rects: Rc<VecModel<SelRect>>,
     pub handles: Rc<VecModel<SelRect>>,
     markers: RefCell<Vec<textflow::Marker>>,
@@ -318,6 +325,7 @@ impl Editor {
         let model = Rc::new(VecModel::default());
         let runs = Rc::new(VecModel::default());
         let rules = Rc::new(VecModel::default());
+        let checks = Rc::new(VecModel::default());
         let sel_rects = Rc::new(VecModel::default());
         let handles = Rc::new(VecModel::default());
         let marker_data = Rc::new(VecModel::default());
@@ -338,6 +346,7 @@ impl Editor {
             model,
             runs,
             rules,
+            checks,
             sel_rects,
             handles,
             markers: RefCell::new(vec![]),

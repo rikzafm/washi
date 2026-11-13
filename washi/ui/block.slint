@@ -6,7 +6,7 @@ import "../../fonts/ShadowsIntoLight-BoldItalic.ttf";
 import "../../fonts/WashiCaret.ttf";
 import { Theme } from "theme.slint";
 
-export enum BlockKind { title, heading, body, list-item, image }
+export enum BlockKind { title, heading, body, list-item, check, checked, image }
 
 export struct BlockData {
     kind: BlockKind,
@@ -46,6 +46,20 @@ export struct RunData {
     hint: bool,
     /// The run's ink (the palette's, `Theme.ink` for the default).
     ink: color,
+    /// The text of a ticked check item: drawn in `Theme.ink-done`.
+    done: bool,
+}
+
+/// The box of a check item: a level box in the paper's frame (Rust lays it out, src/textflow.rs).
+/// Drawn by the note on the tilted baseline at rest; a click on it ticks the item (Rust).
+export struct CheckData {
+    block: int,
+    x: length,
+    y: length,
+    size: length,
+    dx: length,
+    dy: length,
+    checked: bool,
 }
 
 /// A marker (highlight) behind one line's stretch of one color: a level box in the paper's frame
@@ -83,6 +97,8 @@ export struct RuleData {
     dy: length,
     width: length,
     height: length,
+    /// Part of a ticked check item: drawn in `Theme.ink-done`.
+    done: bool,
 }
 
 // One paragraph: an editable text field styled by its kind.
@@ -345,9 +361,10 @@ export component BlockView inherits Rectangle {
     }
 
     input := TextInput {
-        x: 0;
+        // a check item's text is indented to leave room for its box (src/textflow.rs CHECK_INDENT)
+        x: root.kind == BlockKind.check || root.kind == BlockKind.checked ? Theme.check-indent : 0px;
         y: root.gap-before;
-        width: parent.width;
+        width: parent.width - self.x;
         height: root.lines * root.pitch;
         wrap: word-wrap;
         single-line: false;

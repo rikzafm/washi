@@ -72,6 +72,22 @@ impl Editor {
                     dy: r.dy as f32,
                     width: r.width as f32,
                     height: r.height as f32,
+                    done: r.done,
+                })
+                .collect::<Vec<_>>(),
+        );
+        sync_rows(&self.checks,
+            layout
+                .checks()
+                .iter()
+                .map(|c| CheckData {
+                    block: c.block as i32,
+                    x: c.x as f32,
+                    y: c.y as f32,
+                    size: c.size as f32,
+                    dx: c.dx as f32,
+                    dy: c.dy as f32,
+                    checked: c.checked,
                 })
                 .collect::<Vec<_>>(),
         );
@@ -108,6 +124,7 @@ impl Editor {
                     bold: r.bold,
                     italic: r.italic,
                     ink: ink_color(r.ink),
+                    done: r.done,
                     hint,
                 })
                 .collect::<Vec<_>>(),

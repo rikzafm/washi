@@ -23,7 +23,7 @@ fn note(text: &str) -> Harness {
     h
 }
 
-/// The center of toolbar button `k` (0 B, 1 I, 2 U, 3 ab, 4 A, 5 list, 6 image) in window coordinates: the
+/// The center of toolbar button `k` (0 B, 1 I, 2 U, 3 ab, 4 A, 5 check, 6 image) in window coordinates: the
 /// button row sits in the paper's frame, which is turned 1.5 degrees about the paper's center.
 fn button(h: &Harness, k: usize) -> (f32, f32) {
     let (w, hh) = h.note_size(0);
@@ -88,7 +88,7 @@ fn a_heading_shows_b_active() {
 
 #[test]
 fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
-    let cases = [(1, "*body*"), (2, "<u>body</u>"), (3, "~~body~~"), (5, "- body")];
+    let cases = [(1, "*body*"), (2, "<u>body</u>"), (3, "~~body~~"), (5, "- [ ] body")];
     for (k, stored) in cases {
         let mut h = note("title\nbody");
         h.press(0, Key::DownArrow);
@@ -96,7 +96,7 @@ fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
         click_button(&mut h, k);
         assert_eq!(h.note_text(0), format!("# title\n{stored}"), "button {k}");
         let mut active = [false; 5];
-        active[if k == 5 { 4 } else { k }] = true;
+        active[if k == 5 { 4 } else { k }] = true; // the fifth shows the check item
         assert_eq!(h.toolbar_active(0), active, "button {k}");
         click_button(&mut h, k);
         assert_eq!(h.note_text(0), "# title\nbody", "button {k} again");
@@ -121,7 +121,13 @@ fn the_shortcuts_format_the_selection_with_the_toolbar_hidden() {
     assert_eq!(h.toolbar_active(0), [true, true, true, true, false]);
     h.press_ctrl_shift(0, 'l');
     assert_eq!(h.note_text(0), "# title\n- <u>~~***body***~~</u>");
+    assert_eq!(h.toolbar_active(0), [true, true, true, true, false], "a bullet is no check item");
+    h.press_ctrl_shift(0, 'c');
+    assert_eq!(h.note_text(0), "# title\n- [ ] <u>~~***body***~~</u>");
     assert_eq!(h.toolbar_active(0), [true, true, true, true, true]);
+    h.press_ctrl_shift(0, 'c');
+    assert_eq!(h.note_text(0), "# title\n<u>~~***body***~~</u>");
+    h.press_ctrl_shift(0, 'l');
     assert_eq!(h.toolbar_opacity(0), 0.0, "the toolbar never showed");
     // all off again
     h.press_ctrl(0, 'b');
@@ -243,7 +249,7 @@ fn formats_are_saved_and_come_back_after_a_restart() {
     h.press_shift(0, Key::Home, 1);
     h.press_ctrl(0, 'i');
     h.advance(ms(500));
-    let want = "# title\n<u>**body**</u>\n- *more*";
+    let want = "# title\n<u>**body**</u>\n- [ ] *more*";
     assert_eq!(h.note_text(0), want);
     assert_eq!(h.saved_text(0), want);
     h.restart().unwrap();

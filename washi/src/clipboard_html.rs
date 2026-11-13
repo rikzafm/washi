@@ -1,7 +1,7 @@
 //! Serializes and parses lightweight HTML for the clipboard (`CF_HTML`).
 //!
 //! Restricts formatting to Washi's tool menu:
-//! - Blocks: Title (h1), Heading (h2), ListItem (li), Body (p), Image (img).
+//! - Blocks: Title (h1), Heading (h2), ListItem (li), Check item (li with a checkbox input), Body (p), Image (img).
 //! - Inline marks: Bold (b), Italic (i), Underline (u), Strike (s).
 //! - Paints: Ink color and Marker highlight via inline CSS.
 //! - Images: Embedded PNG/JPEG data URIs (`data:image/...;base64,...`).
@@ -16,6 +16,8 @@ pub enum ParsedBlock {
     Heading { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     Body { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     ListItem { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
+    Check { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
+    Checked { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     Image { rgba: Rgba },
 }
 
@@ -25,7 +27,9 @@ impl ParsedBlock {
             ParsedBlock::Title { text, .. }
             | ParsedBlock::Heading { text, .. }
             | ParsedBlock::Body { text, .. }
-            | ParsedBlock::ListItem { text, .. } => text.is_empty(),
+            | ParsedBlock::ListItem { text, .. }
+            | ParsedBlock::Check { text, .. }
+            | ParsedBlock::Checked { text, .. } => text.is_empty(),
             ParsedBlock::Image { .. } => false,
         }
     }
@@ -85,7 +89,7 @@ pub fn to_html_and_text(
         let slice = &text[from_offset..to_offset.max(from_offset)];
         plain_lines.push(slice.to_string());
 
-        if b.kind == Kind::ListItem {
+        if b.kind == Kind::ListItem || b.kind.is_check() {
             if !in_list {
                 html.push_str("<ul>\n");
                 in_list = true;
@@ -98,7 +102,7 @@ pub fn to_html_and_text(
         let tag = match b.kind {
             Kind::Title => "h1",
             Kind::Heading => "h2",
-            Kind::ListItem => "li",
+            Kind::ListItem | Kind::Check | Kind::Checked => "li",
             Kind::Body => "p",
             Kind::Image => unreachable!(),
         };
@@ -106,6 +110,11 @@ pub fn to_html_and_text(
         html.push('<');
         html.push_str(tag);
         html.push('>');
+        match b.kind {
+            Kind::Check => html.push_str(r#"<input type="checkbox">"#),
+            Kind::Checked => html.push_str(r#"<input type="checkbox" checked>"#),
+            _ => {}
+        }
 
         if from_offset >= to_offset {
             html.push_str("<br>");
@@ -283,6 +292,8 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                 Kind::Title => blocks.push(ParsedBlock::Title { text, marks, paints }),
                 Kind::Heading => blocks.push(ParsedBlock::Heading { text, marks, paints }),
                 Kind::ListItem => blocks.push(ParsedBlock::ListItem { text, marks, paints }),
+                Kind::Check => blocks.push(ParsedBlock::Check { text, marks, paints }),
+                Kind::Checked => blocks.push(ParsedBlock::Checked { text, marks, paints }),
                 Kind::Body | Kind::Image => blocks.push(ParsedBlock::Body { text, marks, paints }),
             }
             if let Some(f) = block_stack.last_mut() {
@@ -298,6 +309,8 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
             Kind::Title => blocks.push(ParsedBlock::Title { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::Heading => blocks.push(ParsedBlock::Heading { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::ListItem => blocks.push(ParsedBlock::ListItem { text: String::new(), marks: vec![], paints: vec![] }),
+            Kind::Check => blocks.push(ParsedBlock::Check { text: String::new(), marks: vec![], paints: vec![] }),
+            Kind::Checked => blocks.push(ParsedBlock::Checked { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::Body | Kind::Image => blocks.push(ParsedBlock::Body { text: String::new(), marks: vec![], paints: vec![] }),
         }
         if let Some(f) = block_stack.last_mut() {
@@ -367,6 +380,15 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                                 }
                             }
                             style_stack.push((ink, marker));
+                        }
+                    }
+                    "input" => {
+                        // a check box in a list item makes it a check item
+                        let t = tag_str.to_lowercase().replace(|c| c == '"' || c == '\'', "");
+                        if !is_close && t.contains("type=checkbox") {
+                            if let Some(f) = block_stack.last_mut().filter(|f| matches!(f.kind, Kind::ListItem | Kind::Check | Kind::Checked)) {
+                                f.kind = if t.split_whitespace().any(|w| w == "checked" || w.starts_with("checked=")) { Kind::Checked } else { Kind::Check };
+                            }
                         }
                     }
                     "mark" => {

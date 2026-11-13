@@ -551,12 +551,12 @@ impl Harness {
         self.app().with_note(self.id(note), |n| n.ui().get_picker_open()).unwrap()
     }
 
-    /// Which toolbar buttons show as active: B, I, U, ab, list.
+    /// Which toolbar buttons show as active: B, I, U, ab, check.
     pub fn toolbar_active(&self, note: usize) -> [bool; 5] {
         self.app()
             .with_note(self.id(note), |n| {
                 let ui = n.ui();
-                [ui.get_fmt_bold(), ui.get_fmt_italic(), ui.get_fmt_underline(), ui.get_fmt_strike(), ui.get_fmt_list()]
+                [ui.get_fmt_bold(), ui.get_fmt_italic(), ui.get_fmt_underline(), ui.get_fmt_strike(), ui.get_fmt_check()]
             })
             .unwrap()
     }

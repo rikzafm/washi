@@ -57,6 +57,17 @@ pub struct Style {
     pub pitch: f64,
 }
 
+/// How far a check item's text is indented from the text area's left edge (its box takes the room).
+/// The same value as `Theme.check-indent` in `ui/theme.slint`, where the edit field is moved by it.
+pub const CHECK_INDENT: f64 = 26.0;
+/// The side of a check box, logical px.
+pub const CHECK_BOX: f64 = 17.0;
+
+/// The indent of a block's text from the text area's left edge.
+fn indent(kind: Kind) -> f64 {
+    if kind.is_check() { CHECK_INDENT } else { 0.0 }
+}
+
 /// Fixed logical values from `ui/theme.slint`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
@@ -88,7 +99,7 @@ impl Tokens {
         match kind {
             Kind::Title => self.title,
             Kind::Heading => self.heading,
-            Kind::Body | Kind::ListItem | Kind::Image => self.body,
+            Kind::Body | Kind::ListItem | Kind::Check | Kind::Checked | Kind::Image => self.body,
         }
     }
 }
@@ -103,6 +114,8 @@ pub struct Run {
     /// Palette indices of the run's ink and marker (0: default ink, no marker); one value per run.
     pub ink: u8,
     pub marker: u8,
+    /// The text of a ticked check item: drawn grey.
+    pub done: bool,
     /// Line within the block (0 first).
     pub line: usize,
     pub text: String,
@@ -300,7 +313,7 @@ fn look_runs(b: &Block, start: usize, end: usize) -> Vec<(usize, usize)> {
 
 /// Blocks of one group share a rhythm (line pitch); a change of group opens a gap.
 fn group(kind: Kind) -> Kind {
-    if kind == Kind::ListItem { Kind::Body } else { kind }
+    if kind == Kind::ListItem || kind.is_check() { Kind::Body } else { kind }
 }
 
 /// Where the caret is within a block's wrapped lines.
@@ -383,6 +396,20 @@ pub struct Rule {
     pub height: f64,
     pub dx: f64,
     pub dy: f64,
+    /// Part of a ticked check item: drawn grey.
+    pub done: bool,
+}
+
+/// The box of a check item, level in the paper's frame, with the offset onto the tilted baseline.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CheckBox {
+    pub block: usize,
+    pub x: f64,
+    pub y: f64,
+    pub size: f64,
+    pub dx: f64,
+    pub dy: f64,
+    pub checked: bool,
 }
 
 /// A marker (highlight) behind one line's stretch of one color: a rounded rect, level, in the paper's
@@ -433,16 +460,18 @@ pub fn image_height(width: f64, pixels: (u32, u32)) -> f64 {
 
 /// The words, bars and markers of one text block whose lines start at `top`, pushed onto the lists.
 #[allow(clippy::too_many_arguments)]
-fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, paper: (f64, f64), t: &Tokens, runs: &mut Vec<Run>, rules: &mut Vec<Rule>, markers: &mut Vec<Marker>) {
+fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, paper: (f64, f64), t: &Tokens, runs: &mut Vec<Run>, rules: &mut Vec<Rule>, markers: &mut Vec<Marker>, checks: &mut Vec<CheckBox>) {
     let st = t.style(b.kind);
     let base = baseline(m, st.pitch);
     let thick = (st.size / 20.0).max(1.0);
+    let left = t.inset_left + indent(b.kind);
+    let done = b.kind == Kind::Checked;
     let bar = |rules: &mut Vec<Rule>, x: f64, y: f64, width: f64, height: f64| {
         let mut at = 0.0;
         while at < width - 1e-9 {
             let w = (width - at).min(t.max_run);
             let (dx, dy) = tilt_offset(x + at + w / 2.0, y + height / 2.0, paper, t.tilt_deg);
-            rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy });
+            rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy, done });
             at += w;
         }
     };
@@ -450,10 +479,15 @@ fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, 
         let d = (st.size / 4.0).max(3.0);
         bar(rules, t.inset_left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
     }
+    if b.kind.is_check() {
+        let (x, y) = (t.inset_left, top + base - 0.3 * st.size - CHECK_BOX / 2.0);
+        let (dx, dy) = tilt_offset(x + CHECK_BOX / 2.0, y + CHECK_BOX / 2.0, paper, t.tilt_deg);
+        checks.push(CheckBox { block: bi, x, y, size: CHECK_BOX, dx, dy, checked: done });
+    }
     for (li, line) in lines.iter().enumerate() {
         let y = top + li as f64 * st.pitch;
         for Word { text: word, at, off } in line {
-            let mut x = t.inset_left + at;
+            let mut x = left + at;
             for (s, e) in look_runs(b, *off, *off + word.len()) {
                 let shown = b.shown_at(s);
                 let (bold, italic) = (shown.contains(Flags::BOLD), shown.contains(Flags::ITALIC));
@@ -461,7 +495,7 @@ fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, 
                 for piece in pieces(&b.text[s..e], t.max_run, m) {
                     let width = m.width(&piece);
                     let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
-                    runs.push(Run { block: bi, kind: b.kind, bold, italic, ink, marker, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                    runs.push(Run { block: bi, kind: b.kind, bold, italic, ink, marker, done, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
                     x += width;
                 }
             }
@@ -470,7 +504,7 @@ fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, 
             // from the line's first word to the end of its last (the spaces between words
             // included, those after the last left out)
             let (from, to) = (first.off, last.off + last.text.len());
-            let x_of = |i: usize| t.inset_left + first.at + m.width(&b.text[from..i]);
+            let x_of = |i: usize| left + first.at + m.width(&b.text[from..i]);
             // a marker per stretch of one color, from the stretch's first character to its last
             let mut i = from;
             while i < to {
@@ -480,6 +514,10 @@ fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, 
                     markers.push(Marker { block: bi, marker: color, x: x_of(i), y: y + MARKER_INSET, width: x_of(j) - x_of(i), height: st.pitch - 2.0 * MARKER_INSET });
                 }
                 i = j;
+            }
+            if done {
+                // a ticked item is struck through, line by line
+                bar(rules, x_of(from), y + base - 0.3 * st.size, x_of(to) - x_of(from), thick);
             }
             for (flag, lift) in [(Flags::UNDERLINE, -0.1), (Flags::STRIKE, 0.3)] {
                 let mut i = from;
@@ -563,6 +601,7 @@ pub struct Layout {
     runs: Vec<Run>,
     rules: Vec<Rule>,
     markers: Vec<Marker>,
+    checks: Vec<CheckBox>,
 }
 
 impl Layout {
@@ -572,7 +611,7 @@ impl Layout {
     pub fn build(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Layout {
         count(Count::LayoutBuild);
         let avail = paper.0 - t.inset_left - t.inset_right;
-        let (mut runs, mut rules, mut markers) = (vec![], vec![], vec![]);
+        let (mut runs, mut rules, mut markers, mut checks) = (vec![], vec![], vec![], vec![]);
         let mut laid = Vec::with_capacity(blocks.len());
         let mut top = t.inset_top;
         for (bi, b) in blocks.iter().enumerate() {
@@ -590,15 +629,15 @@ impl Layout {
                 continue;
             }
             let m = t.measure(st.size);
-            let lines = wrap(&b.text, avail, &m);
-            draw_block(b, bi, top, &lines, &m, paper, t, &mut runs, &mut rules, &mut markers);
+            let lines = wrap(&b.text, avail - indent(b.kind), &m);
+            draw_block(b, bi, top, &lines, &m, paper, t, &mut runs, &mut rules, &mut markers, &mut checks);
             let starts = line_starts(&lines);
             let count = lines.len();
             laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(Wrapped { lines, starts }), image: None });
             // every block takes at least one line, even when empty
             top += count as f64 * st.pitch;
         }
-        Layout { paper, tokens: *t, blocks: laid, bottom: top, runs, rules, markers }
+        Layout { paper, tokens: *t, blocks: laid, bottom: top, runs, rules, markers, checks }
     }
 
     /// The paper size this was laid out in.
@@ -619,6 +658,25 @@ impl Layout {
     /// The bars: underlines, strike-throughs and list bullets.
     pub fn rules(&self) -> &[Rule] {
         &self.rules
+    }
+
+    /// The boxes of the check items.
+    pub fn checks(&self) -> &[CheckBox] {
+        &self.checks
+    }
+
+    /// The check item whose box is under `point` (level paper frame), a few px of slack around it.
+    pub fn check_at(&self, point: (f64, f64)) -> Option<usize> {
+        const SLACK: f64 = 3.0;
+        self.checks
+            .iter()
+            .find(|c| point.0 >= c.x - SLACK && point.0 <= c.x + c.size + SLACK && point.1 >= c.y - SLACK && point.1 <= c.y + c.size + SLACK)
+            .map(|c| c.block)
+    }
+
+    /// How far block `block`'s text is indented from the text area's left edge.
+    pub fn indent(&self, block: usize) -> f64 {
+        self.blocks.get(block).map_or(0.0, |b| indent(b.kind))
     }
 
     /// The markers behind colored text.
@@ -668,7 +726,7 @@ impl Layout {
         let pitch = self.tokens.style(b.kind).pitch;
         let at = caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, line_end);
         let y = b.top + at.line as f64 * pitch;
-        Some((self.tokens.inset_left + at.x, y, y + pitch))
+        Some((self.tokens.inset_left + indent(b.kind) + at.x, y, y + pitch))
     }
 
     /// The top and bottom of the line holding the caret (byte `offset` of block `block`).
@@ -700,7 +758,7 @@ impl Layout {
         }
         let pitch = self.tokens.style(b.kind).pitch;
         let line = ((point.1 - b.top) / pitch).floor().max(0.0) as usize;
-        let (offset, line_end) = offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, point.0 - self.tokens.inset_left);
+        let (offset, line_end) = offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, point.0 - self.tokens.inset_left - indent(b.kind));
         (Caret { block, offset }, line_end)
     }
 
@@ -723,7 +781,7 @@ impl Layout {
             }
             let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
             let to = if bi == end.block { end.offset.min(b.text.len()) } else { b.text.len() };
-            wash_block(&b.text, &b.lines.starts, &self.measure(b), t.style(b.kind), t.inset_left, b.top, (from, to), bi < end.block, &mut out);
+            wash_block(&b.text, &b.lines.starts, &self.measure(b), t.style(b.kind), t.inset_left + indent(b.kind), b.top, (from, to), bi < end.block, &mut out);
         }
         out
     }
@@ -783,6 +841,53 @@ mod tests {
     /// The offset nearest to `x` on `line` of `b`.
     fn offset_at(b: &Block, line: usize, x: f64) -> usize {
         one(b).offset_on_line(0, line, x).unwrap().0
+    }
+
+    #[test]
+    fn a_check_item_is_indented_has_a_box_and_hits_its_box() {
+        let t = Block::new(Kind::Title, "t");
+        let plain = Block::new(Kind::Body, "milk");
+        let open = Block::new(Kind::Check, "milk");
+        let l = lay(&[t, plain, open], PAPER, &TOKENS);
+        let first = |bi: usize| l.runs().iter().find(|r| r.block == bi).unwrap().x;
+        assert!((first(1) - TOKENS.inset_left).abs() < 1e-9);
+        assert!((first(2) - (TOKENS.inset_left + CHECK_INDENT)).abs() < 1e-9, "the text leaves room for the box");
+        let c = &l.checks()[0];
+        assert_eq!((c.block, c.checked), (2, false));
+        assert!((c.x - TOKENS.inset_left).abs() < 1e-9 && c.x + c.size <= first(2));
+        // a press on the box is a hit, one on the text or on a plain paragraph is not
+        let (cx, cy) = (c.x + c.size / 2.0, c.y + c.size / 2.0);
+        assert_eq!(l.check_at((cx, cy)), Some(2));
+        assert_eq!(l.check_at((first(2) + 20.0, cy)), None);
+        assert_eq!(l.check_at((cx, l.block_top(1).unwrap() + 10.0)), None);
+        // the caret and a click agree with the indent
+        let (x, top, _) = l.caret_box(2, 0, false).unwrap();
+        assert!((x - first(2)).abs() < 1e-9);
+        let (hit, _) = l.hit_on_line((x + 0.1, top + 5.0));
+        assert_eq!(hit, Caret { block: 2, offset: 0 });
+    }
+
+    #[test]
+    fn a_check_item_wraps_in_the_room_the_indent_leaves() {
+        let text = "word ".repeat(30);
+        let open = Block::new(Kind::Check, text.trim_end());
+        let body = Block::new(Kind::Body, text.trim_end());
+        let (check, plain) = (one(&open), one(&body));
+        let lines = |l: &Layout| l.caret_line(0, l.blocks[0].text.len(), false).unwrap().lines;
+        assert!(lines(&check) >= lines(&plain));
+        let right = |l: &Layout| l.runs().iter().map(|r| r.x + r.width).fold(0.0, f64::max);
+        assert!(right(&check) <= PAPER.0 - TOKENS.inset_right + 1e-6);
+    }
+
+    #[test]
+    fn a_ticked_item_is_grey_and_struck_through_on_every_line() {
+        let b = Block::new(Kind::Checked, "milk and eggs");
+        let l = one(&b);
+        assert!(l.runs().iter().all(|r| r.done));
+        assert!(l.rules().iter().all(|r| r.done) && !l.rules().is_empty());
+        assert!(l.checks()[0].checked);
+        let open = one(&Block::new(Kind::Check, "milk"));
+        assert!(open.runs().iter().all(|r| !r.done) && open.rules().is_empty());
     }
 
     const MOCKUP: &str = "# Endfield Note\n## **Thermite Cutter : POG & Akekuri**\nCurrently POG no Weapon : Ideal for him are Never Rest or White Night Nova. The last can be get in a box";

@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { BlockData, KeyMods, MarkerData, RuleData, RunData, SelRect } from "block.slint";
+import { BlockData, CheckData, KeyMods, MarkerData, RuleData, RunData, SelRect } from "block.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { Paper, Tapes } from "paper.slint";
 import { TextLayer } from "text.slint";
@@ -14,6 +14,7 @@ import { SidebarPanel } from "sidebar-panel.slint";
 export {
     BlockData,
     BlockKind,
+    CheckData,
     KeyMods,
     MarkerData,
     RuleData,
@@ -118,6 +119,8 @@ export component NoteWindow inherits Window {
     in property <[RunData]> runs;
     /// Underlines, strike-throughs and list bullets, to be drawn with the words.
     in property <[RuleData]> rules;
+    /// The boxes of the check items (Rust).
+    in property <[CheckData]> checks;
     /// The wash of the selection (Rust): a level box for each line it touches.
     in property <[SelRect]> sel-rects;
     /// A selected picture's frame and its resize grip (Rust): two level boxes, or none.
@@ -142,8 +145,9 @@ export component NoteWindow inherits Window {
     in property <bool> fmt-underline: false;
     in property <bool> fmt-strike: false;
     in property <bool> fmt-list: false;
+    in property <bool> fmt-check: false;
     /// Format the selected text (0 bold, 1 italic, 2 underline, 3 strike), or the paragraph holding
-    /// the caret (4 list): a toolbar button or its shortcut.
+    /// the caret (4 list, 5 check item): a toolbar button or its shortcut.
     callback format(int);
     /// The ink and marker index of the selection (marker -1 mixed); drive the "A" button and the rings.
     in property <int> fmt-ink: 0;
@@ -434,6 +438,7 @@ export component NoteWindow inherits Window {
                     if (e.modifiers.control && e.modifiers.shift && !e.modifiers.alt) {
                         if (e.text == "x" || e.text == "X" || e.text == "\u{18}") { root.format(3); return accept; }
                         if (e.text == "l" || e.text == "L" || e.text == "\u{c}") { root.format(4); return accept; }
+                        if (e.text == "c" || e.text == "C" || e.text == "\u{3}") { root.format(5); return accept; }
                     }
                     reject
                 }
@@ -468,6 +473,7 @@ export component NoteWindow inherits Window {
                         blocks: root.blocks;
                         runs: root.runs;
                         rules: root.rules;
+                        checks: root.checks;
                         sel-rects: root.sel-rects;
                         caret: root.caret;
                         caret-block: root.caret-block;
@@ -579,7 +585,7 @@ export component NoteWindow inherits Window {
                 italic-active: root.fmt-italic;
                 underline-active: root.fmt-underline;
                 strike-active: root.fmt-strike;
-                list-active: root.fmt-list;
+                check-active: root.fmt-check;
                 picker-open: root.picker-open;
                 color-active: root.fmt-ink != 0 || root.fmt-marker != 0;
                 ink-color: PickerPalette.ink(root.fmt-ink);
@@ -587,7 +593,7 @@ export component NoteWindow inherits Window {
                 activated(k) => {
                     if (k == 4) { root.picker-open = !root.picker-open; return; }
                     root.picker-open = false;
-                    if (k < 4) { root.format(k); } else if (k == 5) { root.format(4); } else { root.insert-image(); }
+                    if (k < 4) { root.format(k); } else if (k == 5) { root.format(5); } else { root.insert-image(); }
                 }
                 property <bool> wanted: paper-touch.has-hover || self.any-pressed || root.dropdown-open;
                 opacity: root.content-opacity * (self.wanted ? 1 : 0);

@@ -82,6 +82,9 @@ impl Editor {
         if self.image_at(ui, at).is_some() {
             return CURSOR_DEFAULT;
         }
+        if self.layout(ui).check_at((at.0 as f64, at.1 as f64)).is_some() {
+            return CURSOR_POINTER;
+        }
         CURSOR_TEXT
     }
 

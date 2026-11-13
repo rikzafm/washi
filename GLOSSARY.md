@@ -16,6 +16,10 @@ _Avoid_: Card, page
 How a Note's text is edited: by default it stays on the Paper's tilted baseline while you type, with the caret and the selection tilted too. Turned off (Settings › General, "Keep text tilted while editing"), the text settles flat for editing and tilts again at rest. One setting for every Note.
 _Avoid_: Slanted editing (slant is the italic style)
 
+**Check item**:
+A paragraph of a Note with a box in front of it. Pressing the box ticks it: the box gets a green tick and the text turns grey and struck through. Made with the toolbar's check button, Ctrl+Shift+C, or by typing `[] ` at the start of a paragraph. Stored as `- [ ] text` and `- [x] text`.
+_Avoid_: Todo, task, checkbox (the box is only the item's marker)
+
 **Dropdown menu**:
 The popup opened from a Note's menu button. It lists notes to jump to and holds the New, All notes and Settings actions.
 _Avoid_: Context menu (that is the separate right-click menu), overflow menu
