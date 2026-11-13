@@ -124,3 +124,23 @@ second, but it is not zero, and the repainting window wakes the event loop every
 while General is on screen (a deliberate, user-opened view); the CPU figure it shows includes its own
 cost. Idle CPU of Washi with Settings open on General has NOT been measured, and the transition frame
 cost (above) is still NOT yet measured.
+
+
+## Layout cache
+
+Baseline before the layout cache work (.scratch/layout-cache, ticket 01). Commit 992e711 (plus the wrap counter and `layout_bench`), release build (`cargo run --release -p snap --bin layout_bench`, 200 inputs per cell), Windows 11, Intel i5-13600K, 32 GB. Headless: this is layout and the app's reaction to one input, not Slint's repaint. `wraps` is `textflow::wrap` calls per input (one per text block per whole-note wrap); the same counts are pinned in `tools/snap/tests/layout_wraps.rs`. The pointer row runs on the fixture plus a pasted 300x150 picture, selected.
+
+| note | operation | median ms | p95 ms | wraps |
+|---|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.167 | 0.251 | 36 |
+| mockup.md | Down arrow | 0.079 | 0.087 | 24 |
+| mockup.md | pointer over image | 0.028 | 0.035 | 12 |
+| mockup.md | 10 px resize | 0.053 | 0.056 | 10 |
+| long.md | typed character | 1.251 | 1.428 | 156 |
+| long.md | Down arrow | 0.405 | 0.474 | 96 |
+| long.md | pointer over image | 0.169 | 0.189 | 48 |
+| long.md | 10 px resize | 0.516 | 0.624 | 46 |
+| 50 paragraphs | typed character | 9.155 | 10.380 | 506 |
+| 50 paragraphs | Down arrow | 2.433 | 2.710 | 306 |
+| 50 paragraphs | pointer over image | 1.102 | 1.513 | 153 |
+| 50 paragraphs | 10 px resize | 7.029 | 8.365 | 151 |

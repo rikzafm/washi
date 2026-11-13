@@ -17,6 +17,23 @@
 use crate::document::{Block, Caret, Kind, Paint, Range, Style as Flags};
 use ttf_parser::Face;
 
+/// How many times `wrap` has run (a whole block's text broken into lines). Counted only in tests and
+/// with the `trace` feature, so a release build pays nothing for it.
+#[cfg(any(test, feature = "trace"))]
+static WRAP_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Calls to `wrap` since the last [`reset_wrap_calls`].
+#[cfg(any(test, feature = "trace"))]
+pub fn wrap_calls() -> usize {
+    WRAP_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Start counting `wrap` calls from zero.
+#[cfg(any(test, feature = "trace"))]
+pub fn reset_wrap_calls() {
+    WRAP_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// A marker is a line pitch tall less this much at its top and bottom, so marked lines do not touch.
 const MARKER_INSET: f64 = 1.0;
 
@@ -153,6 +170,8 @@ fn push_word(lines: &mut [Vec<Word>], word: Word) {
 /// fewer lines here than the edit fields show for text such as paths, and the note would then
 /// scroll short of its end and move the caret to the wrong lines.
 fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
+    #[cfg(any(test, feature = "trace"))]
+    WRAP_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut lines: Vec<Vec<Word>> = vec![vec![]];
     let mut x = 0.0;
     let mut pending = 0.0; // trailing spaces since the last word

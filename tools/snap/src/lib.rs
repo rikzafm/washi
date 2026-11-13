@@ -7,6 +7,7 @@ pub mod caret;
 pub mod fakes;
 mod harness;
 mod images;
+pub mod layout_bench;
 mod settings_appearance;
 mod settings_general;
 mod settings_height;

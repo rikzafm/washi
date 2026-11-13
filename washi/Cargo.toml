@@ -18,6 +18,8 @@ path = "src/main.rs"
 [features]
 default = ["accessibility"]
 accessibility = ["slint/accessibility"]
+# Counts `textflow::wrap` calls (for tools/snap's layout benchmark and its pinned counts).
+trace = []
 
 [dependencies]
 # Software renderer on winit (ADR 0001). No GPU renderer features, ever (CI-checked).
