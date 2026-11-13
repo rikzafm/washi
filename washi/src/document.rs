@@ -304,8 +304,7 @@ pub struct Document {
 
 impl Clone for Document {
     fn clone(&self) -> Self {
-        #[cfg(any(test, feature = "trace"))]
-        crate::trace::counts::bump(crate::trace::counts::Count::DocumentClone);
+        crate::trace::count(crate::trace::counts::Count::DocumentClone);
         Document { blocks: self.blocks.clone() }
     }
 }
@@ -646,8 +645,7 @@ impl Document {
 
     /// The stored text (inverse of [`Document::parse`]).
     pub fn to_text(&self) -> String {
-        #[cfg(any(test, feature = "trace"))]
-        crate::trace::counts::bump(crate::trace::counts::Count::ToText);
+        crate::trace::count(crate::trace::counts::Count::ToText);
         // a note nobody wrote in is stored as before: no content at all
         if self.is_empty() {
             return String::new();
@@ -785,7 +783,9 @@ impl Document {
     /// (it was `old`) with the caret at `cursor`: asked before the edit, so that only an edit that
     /// formats needs the document as it was.
     pub fn would_auto_format(&self, block: usize, old: &str, new: &str, cursor: usize) -> bool {
-        self.blocks.get(block).is_some_and(|b| b.is_text() && auto_format_kind(b.kind, old, new, cursor).is_some())
+        // the text as `edit_text` writes it, so the two cannot disagree
+        let new = one_line(new);
+        self.blocks.get(block).is_some_and(|b| b.is_text() && auto_format_kind(b.kind, old, &new, cursor).is_some())
     }
 
     /// Toggle one style flag over `start..end` of a block: off if every character there has it,
@@ -1295,6 +1295,15 @@ mod tests {
         let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "* eggs")]);
         assert_eq!(d.auto_format(1, "*eggs", 2), Some(Caret { block: 1, offset: 0 }));
         assert_eq!((d.blocks()[1].kind, d.blocks()[1].text.as_str()), (Kind::ListItem, "eggs"));
+    }
+
+    #[test]
+    fn auto_format_is_predicted_from_the_text_as_edit_text_writes_it() {
+        // `edit_text` turns a line break into a space, so "-" + line break at the caret 2 is "- "
+        let mut d = Document::parse("");
+        assert!(d.would_auto_format(0, "", "-\n", 2));
+        d.edit_text(0, "-\n", 2, None, None);
+        assert_eq!(d.auto_format(0, "", 2), Some(Caret { block: 0, offset: 0 }));
     }
 
     #[test]

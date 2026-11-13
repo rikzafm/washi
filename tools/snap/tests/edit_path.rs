@@ -77,6 +77,17 @@ fn pictures_load_when_the_set_of_pictures_changes_and_not_otherwise() {
 }
 
 #[test]
+fn a_picture_that_failed_to_load_is_tried_again_on_the_next_sync() {
+    // picture 987654 is not in the database, so loading it leaves the id unresolved: the next
+    // change asks again (as before the id check), where a note whose pictures resolved does not
+    let mut h = open("title\n![](img:987654)\nbody");
+    focus(&h, 0, 5);
+    reset();
+    h.type_text(0, "x");
+    assert_eq!(get(Count::ImagesLoad), 1, "an unresolved picture is loaded again");
+}
+
+#[test]
 fn auto_format_records_the_text_before_the_space_as_its_undo_step() {
     let mut h = Harness::new();
     h.start().unwrap();

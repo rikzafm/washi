@@ -42,3 +42,14 @@ fn wraps_per_operation() {
         assert_eq!((median, max), (want, want), "{name} / {}", op.name());
     }
 }
+
+#[test]
+fn layout_builds_per_operation_on_the_three_block_mockup() {
+    // mockup.md is a 3-block note. A typed character builds the layout exactly once, a resize step once,
+    // and the Down arrow and the pointer move none: they are answered from the cached layout.
+    let f = fixtures().into_iter().find(|f| f.name == "mockup.md").unwrap();
+    for (op, want) in [(Op::Keystroke, 1), (Op::Down, 0), (Op::PointerOverImage, 0), (Op::ResizeStep, 1)] {
+        let s = run(&f.text, op, 5);
+        assert_eq!((s.min_builds(), s.max_builds()), (want, want), "{}", op.name());
+    }
+}

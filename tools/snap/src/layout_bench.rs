@@ -9,6 +9,7 @@ use slint::platform::Key;
 use std::time::{Duration, Instant};
 use washi::images::Rgba;
 use washi::textflow;
+use washi::trace::counts::{self, Count};
 
 /// One kind of input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +73,8 @@ pub fn generated_note() -> String {
 pub struct Sample {
     pub times: Vec<Duration>,
     pub wraps: Vec<usize>,
+    /// `Layout::build` calls per input.
+    pub builds: Vec<usize>,
 }
 
 impl Sample {
@@ -86,6 +89,15 @@ impl Sample {
     /// The wrap count of the median input.
     pub fn median_wraps(&self) -> usize {
         percentile(&self.wraps, 50)
+    }
+
+    /// The most `Layout::build` calls any input caused.
+    pub fn max_builds(&self) -> usize {
+        self.builds.iter().copied().max().unwrap_or(0)
+    }
+
+    pub fn min_builds(&self) -> usize {
+        self.builds.iter().copied().min().unwrap_or(0)
     }
 
     pub fn max_wraps(&self) -> usize {
@@ -137,13 +149,14 @@ impl Harness {
 /// Run `op` `iterations` times on a note holding `text`.
 pub fn run(text: &str, op: Op, iterations: usize) -> Sample {
     let mut h = open(text);
-    let mut sample = Sample { times: vec![], wraps: vec![] };
+    let mut sample = Sample { times: vec![], wraps: vec![], builds: vec![] };
     let timed =|sample: &mut Sample, f: &mut dyn FnMut()| {
-        textflow::reset_wrap_calls();
+        counts::reset();
         let start = Instant::now();
         f();
         sample.times.push(start.elapsed());
-        sample.wraps.push(textflow::wrap_calls());
+        sample.wraps.push(counts::get(Count::Wrap));
+        sample.builds.push(counts::get(Count::LayoutBuild));
     };
     match op {
         Op::Keystroke => {

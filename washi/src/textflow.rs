@@ -25,27 +25,21 @@
 //! while editing as well, each piece in its own face.
 
 use crate::document::{Block, Caret, Kind, Paint, Range, Style as Flags};
+use crate::trace::{count, counts::Count};
 use std::rc::Rc;
 use ttf_parser::Face;
 
-// How many times `wrap` has run (a whole block's text broken into lines). Counted only in tests and
-// with the `trace` feature, so a release build pays nothing for it. The count is per thread, so tests
-// running side by side do not count each other's wraps.
-#[cfg(any(test, feature = "trace"))]
-thread_local! {
-    static WRAP_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// Calls to `wrap` on this thread since the last [`reset_wrap_calls`].
+/// Calls to `wrap` on this thread since the last [`reset_wrap_calls`] (counted only in tests and
+/// with the `trace` feature, see `trace::counts`).
 #[cfg(any(test, feature = "trace"))]
 pub fn wrap_calls() -> usize {
-    WRAP_CALLS.with(|c| c.get())
+    crate::trace::counts::get(Count::Wrap)
 }
 
 /// Start counting `wrap` calls from zero.
 #[cfg(any(test, feature = "trace"))]
 pub fn reset_wrap_calls() {
-    WRAP_CALLS.with(|c| c.set(0));
+    crate::trace::counts::clear(Count::Wrap);
 }
 
 /// A marker is a line pitch tall less this much at its top and bottom, so marked lines do not touch.
@@ -189,8 +183,7 @@ fn push_word(lines: &mut [Vec<Word>], word: Word) {
 /// fewer lines here than the edit fields show for text such as paths, and the note would then
 /// scroll short of its end and move the caret to the wrong lines.
 fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
-    #[cfg(any(test, feature = "trace"))]
-    WRAP_CALLS.with(|c| c.set(c.get() + 1));
+    count(Count::Wrap);
     let mut lines: Vec<Vec<Word>> = vec![vec![]];
     let mut x = 0.0;
     let mut pending = 0.0; // trailing spaces since the last word
@@ -577,6 +570,7 @@ impl Layout {
     /// `image_size` gives a picture's size in pixels (an image block is as wide as the text area and as tall as its aspect ratio makes it; a missing
     /// size: one body line).
     pub fn build(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Layout {
+        count(Count::LayoutBuild);
         let avail = paper.0 - t.inset_left - t.inset_right;
         let (mut runs, mut rules, mut markers) = (vec![], vec![], vec![]);
         let mut laid = Vec::with_capacity(blocks.len());
@@ -637,6 +631,11 @@ impl Layout {
         self.bottom
     }
 
+    /// How many blocks the layout was built from.
+    pub fn block_count(&self) -> usize {
+        self.blocks.len()
+    }
+
     /// Where block `block` starts, in the paper's frame.
     pub fn block_top(&self, block: usize) -> Option<f64> {
         self.blocks.get(block).map(|b| b.top)
@@ -664,8 +663,7 @@ impl Layout {
     /// Where the caret at byte `offset` of text block `block` is drawn: its x, and the top and bottom
     /// of its line box. `line_end` as in [`Self::caret_line`]. An image has no caret.
     pub fn caret_box(&self, block: usize, offset: usize, line_end: bool) -> Option<(f64, f64, f64)> {
-        #[cfg(any(test, feature = "trace"))]
-        crate::trace::counts::bump(crate::trace::counts::Count::CaretBox);
+        count(Count::CaretBox);
         let b = self.blocks.get(block).filter(|b| b.kind != Kind::Image)?;
         let pitch = self.tokens.style(b.kind).pitch;
         let at = caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, line_end);

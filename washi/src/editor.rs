@@ -212,6 +212,7 @@ pub struct Editor {
     /// The note's geometry as last built, with what it was built from.
     layout: RefCell<Option<(LayoutKey, Rc<Layout>)>>,
     /// Cache hits so far; every so often a debug build checks one against a fresh build.
+    #[cfg(debug_assertions)]
     layout_hits: Cell<u32>,
     /// The picture ids of the document as `images` last learned them (see [`Self::sync_model`]).
     image_ids: RefCell<Vec<i64>>,
@@ -304,6 +305,7 @@ impl Editor {
             doc: RefCell::new(parsed.clone()),
             doc_rev: Cell::new(0),
             layout: RefCell::new(None),
+            #[cfg(debug_assertions)]
             layout_hits: Cell::new(0),
             image_ids: RefCell::new(image_ids(&parsed)),
             history: RefCell::new(History::new(parsed.clone())),
@@ -814,7 +816,8 @@ impl Editor {
 
     /// The note's text, to write: the only way to change it, which retires the cached layout. Drop
     /// the guard before asking for the [`Self::layout`]: a layout cannot be built from a document
-    /// that is being changed.
+    /// that is being changed. It retires the layout when called, not when something changes, so a
+    /// write that changes nothing rebuilds it needlessly: deliberate, it is safe and cheap to be wrong that way.
     pub fn doc_mut(&self) -> RefMut<'_, Document> {
         self.doc_rev.set(self.doc_rev.get() + 1);
         self.doc.borrow_mut()
@@ -839,6 +842,8 @@ impl Editor {
                 if hits % 1024 == 0 {
                     let fresh = Layout::build(self.doc().blocks(), key.paper, tokens, &|b| self.images.size(b));
                     debug_assert_eq!(fresh.content_height(), layout.content_height(), "the cached layout is stale");
+                    debug_assert_eq!(fresh.runs().len(), layout.runs().len(), "the cached layout is stale");
+                    debug_assert_eq!(fresh.block_count(), layout.block_count(), "the cached layout is stale");
                 }
             }
             return layout;
@@ -911,8 +916,9 @@ impl Editor {
         let doc = self.doc();
         // the pictures are learned again only when the note's set of them changed (the sizes they
         // are laid out with only change then, and the decoded pixels are freed and thawed elsewhere)
+        // (a picture that did not resolve, a failed decode, is tried again at the next sync)
         let ids = image_ids(&doc);
-        if *self.image_ids.borrow() != ids {
+        if *self.image_ids.borrow() != ids || !self.images.knows(&ids) {
             self.images.load(&doc);
             *self.image_ids.borrow_mut() = ids;
         }
@@ -951,8 +957,7 @@ impl Editor {
 
     /// A block as the window shows it.
     pub fn block_data(&self, b: &Block) -> BlockData {
-        #[cfg(any(test, feature = "trace"))]
-        crate::trace::counts::bump(crate::trace::counts::Count::BlockData);
+        crate::trace::count(crate::trace::counts::Count::BlockData);
         let (img_w, img_h) = self.images.size(b).unwrap_or((0, 0));
         BlockData {
             img: self.images.pixels(b),

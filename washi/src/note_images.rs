@@ -121,8 +121,7 @@ impl NoteImages {
 
     /// Learn the images a document refers to, decoding the ones not yet known, and forget the rest.
     pub fn load(&self, doc: &Document) {
-        #[cfg(any(test, feature = "trace"))]
-        crate::trace::counts::bump(crate::trace::counts::Count::ImagesLoad);
+        crate::trace::count(crate::trace::counts::Count::ImagesLoad);
         let wanted: Vec<i64> = doc.blocks().iter().filter_map(|b| b.image_id).collect();
         let mut slots = self.slots.borrow_mut();
         let known = slots.len();
@@ -145,6 +144,12 @@ impl NoteImages {
                 self.bump();
             }
         }
+    }
+
+    /// Whether every one of `ids` has been learned (a picture whose load failed has not).
+    pub fn knows(&self, ids: &[i64]) -> bool {
+        let slots = self.slots.borrow();
+        ids.iter().all(|id| slots.contains_key(id))
     }
 
     /// Register an image that was just stored and show it.
