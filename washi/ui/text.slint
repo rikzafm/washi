@@ -431,7 +431,8 @@ export component TextLayer inherits Rectangle {
         y: r.y + (r.dy + root.shift-y) * root.tilt-scale;
         visible: r.block != root.composing-block && self.y >= root.edge-y(self.x + self.width / 2);
         width: r.width;
-        height: r.height;
+        // never thinner than a screen pixel: below 100% a bar can cover no pixel centre and vanish
+        height: max(r.height, 1phx);
         border-radius: min(r.width, r.height) / 2;
         background: Theme.ink;
     }

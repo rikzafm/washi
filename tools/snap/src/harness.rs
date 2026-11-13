@@ -861,6 +861,15 @@ impl Harness {
             .unwrap()
     }
 
+    /// The note's bars (underlines, strike-throughs, bullets) as (block, x, y, width, height), level, in the
+    /// paper's frame.
+    pub fn text_rules(&self, note: usize) -> Vec<(i32, f32, f32, f32, f32)> {
+        use slint::Model;
+        self.app()
+            .with_note(self.id(note), |n| { let (m, sc) = (n.ui().get_window_margin(), n.ui().get_scroll_y()); n.ui().get_rules().iter().map(|r| (r.block, m + r.x, m + r.y - sc, r.width, r.height)).collect() })
+            .unwrap()
+    }
+
     /// The ink of each resting word, as `0xRRGGBB`, in the order of [`Harness::text_runs`].
     pub fn run_inks(&self, note: usize) -> Vec<u32> {
         use slint::Model;

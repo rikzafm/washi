@@ -3,6 +3,7 @@
 
 use snap::Harness;
 use washi::storage::db::Choice;
+use std::time::Duration;
 use washi::images::{encode_png, Rgba};
 
 /// A note as exported (its stored text), without the line of its picture.
@@ -175,4 +176,90 @@ fn the_caret_is_the_box_of_its_line_at_fractional_monitor_scales() {
     check_carets(0.8, 40);
     check_carets(1.25, 40);
     check_carets(1.5, 40);
+}
+
+/// Below 100% (UI size Medium and Small) a 1 logical px caret is under a screen pixel wide, and the
+/// renderer draws nothing for it at some x. A click right of every line must still show a caret.
+fn click_right_of_every_line_shows_a_caret(scale: f32) {
+    let mut h = note_with_picture(scale);
+    let mut checked = 0;
+    for (block, (kind, text)) in h.blocks(0).iter().enumerate() {
+        if kind == "image" {
+            continue;
+        }
+        for line in 0..lines_of(&h, block, text).len() {
+            let first = lines_of(&h, block, text)[line].3;
+            h.place_caret_at(0, block, first);
+            h.drawn_caret(0).unwrap_or_else(|| panic!("no caret is drawn at block {block} offset {first} at scale {scale}"));
+            let (top, bottom, end_x, _) = lines_of(&h, block, text)[line];
+            h.click(0, end_x + 12.0, (top + bottom) / 2.0);
+            let (left, _, right, _) = h.drawn_caret(0).unwrap_or_else(|| panic!("block {block} line {line} at scale {scale}: no caret is drawn after a click right of the line (end x {end_x})"));
+            assert!(right - left >= 1, "block {block} line {line} at scale {scale}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked} lines");
+}
+
+#[test]
+fn a_click_right_of_a_line_shows_the_caret_at_ui_size_medium_and_small() {
+    click_right_of_every_line_shows_a_caret(0.8);
+    click_right_of_every_line_shows_a_caret(0.75);
+}
+
+/// An underline or strike-through is 1.13 logical px thick: under a screen pixel at UI size Medium
+/// and Small, where the renderer draws nothing for a bar that covers no pixel centre. Every bar of a
+/// note must change the pixels under it, against the same note without the formatting.
+fn every_bar_is_drawn(scale: f32, open: &str, close: &str) {
+    let build = |open: &str, close: &str| {
+        let mut t = String::from("title
+");
+        for i in 0..3 {
+            t += &format!("# head {i}
+{open}body line {i} of some words{close}
+");
+        }
+        t
+    };
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.set_tilted_editing(false);
+    if scale != 1.0 {
+        h.move_to_monitor(0, scale);
+    }
+    h.set_note_text(0, &build("", ""));
+    h.place_caret_at(0, 0, 0);
+    h.settle();
+    h.advance(Duration::from_millis(1000));
+    let (w, _, plain) = h.redraw(0);
+    h.set_note_text(0, &build(open, close));
+    h.place_caret_at(0, 0, 0);
+    h.settle();
+    h.advance(Duration::from_millis(1000));
+    let (_, _, marked) = h.redraw(0);
+    let rules = h.text_rules(0);
+    assert!(rules.len() >= 3, "{} bars", rules.len());
+    let (mut missing, mut seen) = (vec![], 0);
+    for (block, x, y, width, height) in rules {
+        let (x0, x1) = ((x * scale).floor() as u32, ((x + width) * scale).ceil() as u32);
+        let (y0, y1) = ((y * scale).floor() as u32, ((y + height) * scale).ceil() as u32);
+        if y1 + 1 >= plain.len() as u32 / w || x1 + 1 >= w {
+            continue; // below the window: the note scrolls
+        }
+        seen += 1;
+        let changed = (y0..y1.max(y0 + 1)).any(|py| (x0..x1).any(|px| plain[(py * w + px) as usize] != marked[(py * w + px) as usize]));
+        if !changed {
+            missing.push((block, y));
+        }
+    }
+    assert!(seen >= 2, "{seen} bars in view");
+    assert!(missing.is_empty(), "scale {scale} {open}: bars with no pixels changed (block, y): {missing:?}");
+}
+
+#[test]
+fn underlines_and_strike_throughs_are_drawn_at_ui_size_medium_and_small() {
+    for scale in [1.0, 0.8, 0.75] {
+        every_bar_is_drawn(scale, "<u>", "</u>");
+        every_bar_is_drawn(scale, "~~", "~~");
+    }
 }
