@@ -28,6 +28,45 @@ pub fn mark(label: &str) {
     }
 }
 
+/// Counts of the work one input causes, for the tests that pin the edit path (only in tests and with
+/// the `trace` feature, so a release build pays nothing). Per thread, like `textflow::wrap_calls`.
+#[cfg(any(test, feature = "trace"))]
+pub mod counts {
+    use std::cell::Cell;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Count {
+        /// A `Document` was cloned.
+        DocumentClone,
+        /// A `Document` was written out as text.
+        ToText,
+        /// `Layout::caret_box` was asked.
+        CaretBox,
+        /// A window row (`BlockData`) was built for a block.
+        BlockData,
+        /// `NoteImages::load` ran.
+        ImagesLoad,
+    }
+
+    const N: usize = 5;
+
+    thread_local! {
+        static COUNTS: [Cell<usize>; N] = const { [const { Cell::new(0) }; N] };
+    }
+
+    pub fn bump(c: Count) {
+        COUNTS.with(|a| a[c as usize].set(a[c as usize].get() + 1));
+    }
+
+    pub fn get(c: Count) -> usize {
+        COUNTS.with(|a| a[c as usize].get())
+    }
+
+    pub fn reset() {
+        COUNTS.with(|a| a.iter().for_each(|c| c.set(0)));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

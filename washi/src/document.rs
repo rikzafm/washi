@@ -297,15 +297,40 @@ impl Range {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Document {
     blocks: Vec<Block>,
+}
+
+impl Clone for Document {
+    fn clone(&self) -> Self {
+        #[cfg(any(test, feature = "trace"))]
+        crate::trace::counts::bump(crate::trace::counts::Count::DocumentClone);
+        Document { blocks: self.blocks.clone() }
+    }
 }
 
 impl Default for Document {
     fn default() -> Self {
         Document::new()
     }
+}
+
+/// The kind a body block turns into when its text becomes `text` with the caret at `cursor` after
+/// the marker's space was typed (`old` is the text before the edit).
+fn auto_format_kind(kind: Kind, old: &str, text: &str, cursor: usize) -> Option<Kind> {
+    if kind != Kind::Body || cursor != 2 {
+        return None;
+    }
+    let to = match text.get(..2)? {
+        "# " => Kind::Heading,
+        "- " | "* " => Kind::ListItem,
+        _ => return None,
+    };
+    if old.starts_with(&text[..2]) {
+        return None;
+    }
+    Some(to)
 }
 
 fn one_line(s: &str) -> String {
@@ -621,6 +646,8 @@ impl Document {
 
     /// The stored text (inverse of [`Document::parse`]).
     pub fn to_text(&self) -> String {
+        #[cfg(any(test, feature = "trace"))]
+        crate::trace::counts::bump(crate::trace::counts::Count::ToText);
         // a note nobody wrote in is stored as before: no content at all
         if self.is_empty() {
             return String::new();
@@ -746,22 +773,19 @@ impl Document {
     /// drops the marker. Returns the caret (the start of the block) when it did.
     pub fn auto_format(&mut self, block: usize, old: &str, cursor: usize) -> Option<Caret> {
         let b = self.blocks.get_mut(block)?;
-        if b.kind != Kind::Body || cursor != 2 {
-            return None;
-        }
-        let kind = match b.text.get(..2)? {
-            "# " => Kind::Heading,
-            "- " | "* " => Kind::ListItem,
-            _ => return None,
-        };
-        if old.starts_with(&b.text[..2]) {
-            return None;
-        }
+        let kind = auto_format_kind(b.kind, old, &b.text, cursor)?;
         b.kind = kind;
         b.text.drain(..2);
         b.marks.drain(..2);
         b.paints.drain(..2);
         Some(Caret { block, offset: 0 })
+    }
+
+    /// Whether [`Self::auto_format`] would fire for an edit of `block` that makes its text `new`
+    /// (it was `old`) with the caret at `cursor`: asked before the edit, so that only an edit that
+    /// formats needs the document as it was.
+    pub fn would_auto_format(&self, block: usize, old: &str, new: &str, cursor: usize) -> bool {
+        self.blocks.get(block).is_some_and(|b| b.is_text() && auto_format_kind(b.kind, old, new, cursor).is_some())
     }
 
     /// Toggle one style flag over `start..end` of a block: off if every character there has it,

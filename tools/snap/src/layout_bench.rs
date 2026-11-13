@@ -105,7 +105,7 @@ fn picture() -> Rgba {
     Rgba { width: w, height: h, data: (0..w * h).flat_map(|_| [200, 30, 60, 255]).collect() }
 }
 
-fn open(text: &str) -> Harness {
+pub fn open(text: &str) -> Harness {
     let mut h = Harness::new();
     h.start().unwrap();
     h.set_note_text(0, text);
@@ -116,7 +116,7 @@ fn open(text: &str) -> Harness {
 }
 
 /// Give the first field of `block` the caret at byte `offset`.
-fn focus(h: &Harness, block: usize, offset: usize) {
+pub fn focus(h: &Harness, block: usize, offset: usize) {
     let id = h.id(0);
     h.app().with_note(id, |n| {
         let ui = n.ui();
@@ -205,4 +205,24 @@ pub fn run(text: &str, op: Op, iterations: usize) -> Sample {
         }
     }
     sample
+}
+
+/// The median time of one `Layout::build` of the note `text` (as the editor builds it: its blocks,
+/// paper, tokens and picture sizes), over `iterations` builds. What a keystroke spends in the layout
+/// at least, until a wrap cache: compare it with the typed character's median time.
+pub fn build_time(text: &str, iterations: usize) -> Duration {
+    let h = open(text);
+    let mut times = vec![];
+    h.app().with_note(h.id(0), |n| {
+        let editor = n.editor();
+        let layout = editor.layout(n.ui());
+        let (paper, tokens) = (layout.paper(), *layout.tokens());
+        for _ in 0..iterations {
+            let start = Instant::now();
+            let built = textflow::Layout::build(editor.doc().blocks(), paper, &tokens, &|b| editor.images.size(b));
+            times.push(start.elapsed());
+            std::hint::black_box(built);
+        }
+    });
+    percentile(&times, 50)
 }

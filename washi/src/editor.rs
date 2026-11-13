@@ -85,19 +85,32 @@ pub fn same_row(a: &BlockData, b: &BlockData) -> bool {
         && (a.img.size().width == 0 || a.img == b.img)
 }
 
-pub fn block_data(b: &Block) -> BlockData {
-    let kind = match b.kind {
+fn block_kind(kind: Kind) -> BlockKind {
+    match kind {
         Kind::Title => BlockKind::Title,
         Kind::Heading => BlockKind::Heading,
         Kind::Body => BlockKind::Body,
         Kind::ListItem => BlockKind::ListItem,
         Kind::Image => BlockKind::Image,
-    };
-    let img_align = match b.align {
+    }
+}
+
+fn image_align(align: Align) -> i32 {
+    match align {
         Align::Left => 0,
         Align::Center => 1,
         Align::Right => 2,
-    };
+    }
+}
+
+/// The picture ids of a document, in order.
+fn image_ids(doc: &Document) -> Vec<i64> {
+    doc.blocks().iter().filter_map(|b| b.image_id).collect()
+}
+
+pub fn block_data(b: &Block) -> BlockData {
+    let kind = block_kind(b.kind);
+    let img_align = image_align(b.align);
     BlockData {
         kind,
         text: b.text.as_str().into(),
@@ -188,6 +201,8 @@ pub struct Editor {
     layout: RefCell<Option<(LayoutKey, Rc<Layout>)>>,
     /// Cache hits so far; every so often a debug build checks one against a fresh build.
     layout_hits: Cell<u32>,
+    /// The picture ids of the document as `images` last learned them (see [`Self::sync_model`]).
+    image_ids: RefCell<Vec<i64>>,
     pub history: RefCell<History<Document>>,
     pub images: NoteImages,
 
@@ -278,6 +293,7 @@ impl Editor {
             doc_rev: Cell::new(0),
             layout: RefCell::new(None),
             layout_hits: Cell::new(0),
+            image_ids: RefCell::new(image_ids(&parsed)),
             history: RefCell::new(History::new(parsed.clone())),
             images,
             model,
@@ -732,7 +748,7 @@ impl Editor {
     pub fn apply_change(&self, ui: &NoteWindow, focus: Option<Caret>) {
         let text = self.text();
         self.sync_model();
-        self.relayout(ui);
+        self.lay_out(ui);
         ui.set_text(text.as_str().into());
         ui.set_window_title(window_title(&text).into());
         if let Some(c) = focus {
@@ -833,6 +849,7 @@ impl Editor {
     pub fn load(&self, content: &str) {
         let parsed = Document::parse(content);
         self.images.load(&parsed);
+        *self.image_ids.borrow_mut() = image_ids(&parsed);
         self.model.set_vec(parsed.blocks().iter().map(|b| self.block_data(b)).collect::<Vec<_>>());
         *self.history.borrow_mut() = History::new(parsed.clone());
         *self.doc_mut() = parsed;
@@ -879,25 +896,51 @@ impl Editor {
 
     /// Make the window's blocks match the document, touching only rows that differ.
     pub fn sync_model(&self) {
-        self.images.load(&self.doc());
-        let new: Vec<BlockData> = self.doc().blocks().iter().map(|b| self.block_data(b)).collect();
-        let old: Vec<BlockData> = self.model.iter().collect();
-        let prefix = old.iter().zip(&new).take_while(|(a, b)| same_row(a, b)).count();
-        let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| same_row(a, b)).count();
-        let (old_mid, new_mid) = (old.len() - prefix - suffix, new.len() - prefix - suffix);
+        let doc = self.doc();
+        // the pictures are learned again only when the note's set of them changed (the sizes they
+        // are laid out with only change then, and the decoded pixels are freed and thawed elsewhere)
+        let ids = image_ids(&doc);
+        if *self.image_ids.borrow() != ids {
+            self.images.load(&doc);
+            *self.image_ids.borrow_mut() = ids;
+        }
+        // rows are built only for the span between the rows that are already right at both ends
+        let blocks = doc.blocks();
+        let old_len = self.model.row_count();
+        let same = |row: usize, block: usize| self.model.row_data(row).is_some_and(|r| self.shows(&r, &blocks[block]));
+        let most = old_len.min(blocks.len());
+        let prefix = (0..most).take_while(|&k| same(k, k)).count();
+        let suffix = (0..most - prefix).take_while(|&k| same(old_len - 1 - k, blocks.len() - 1 - k)).count();
+        let (old_mid, new_mid) = (old_len - prefix - suffix, blocks.len() - prefix - suffix);
         for k in 0..old_mid.min(new_mid) {
-            self.model.set_row_data(prefix + k, new[prefix + k].clone());
+            self.model.set_row_data(prefix + k, self.block_data(&blocks[prefix + k]));
         }
         for _ in new_mid..old_mid {
             self.model.remove(prefix + new_mid);
         }
         for k in old_mid..new_mid {
-            self.model.insert(prefix + k, new[prefix + k].clone());
+            self.model.insert(prefix + k, self.block_data(&blocks[prefix + k]));
         }
+    }
+
+    /// Whether `row` of the window's blocks already shows `b`: what [`same_row`] says of it and
+    /// `block_data(b)`, without building that.
+    fn shows(&self, row: &BlockData, b: &Block) -> bool {
+        let (img_w, img_h) = self.images.size(b).unwrap_or((0, 0));
+        let img = self.images.pixels(b);
+        row.kind == block_kind(b.kind)
+            && row.text == b.text.as_str()
+            && row.bold == (b.kind == Kind::Heading)
+            && (row.img_w, row.img_h) == (img_w as i32, img_h as i32)
+            && (row.img_pct, row.img_align) == (b.image_pct as i32, image_align(b.align))
+            && row.img.size() == img.size()
+            && (img.size().width == 0 || row.img == img)
     }
 
     /// A block as the window shows it.
     pub fn block_data(&self, b: &Block) -> BlockData {
+        #[cfg(any(test, feature = "trace"))]
+        crate::trace::counts::bump(crate::trace::counts::Count::BlockData);
         let (img_w, img_h) = self.images.size(b).unwrap_or((0, 0));
         BlockData {
             img: self.images.pixels(b),
@@ -953,7 +996,14 @@ impl Editor {
         }
     }
 
+    /// Lay the note out again and show it, caret included.
     pub fn relayout(&self, ui: &NoteWindow) {
+        self.lay_out(ui);
+        self.show_caret(ui);
+    }
+
+    /// [`Self::relayout`] without the caret, for a caller that moves the caret next and shows it itself.
+    fn lay_out(&self, ui: &NoteWindow) {
         ui.set_pitch_scale(ui.window().scale_factor());
         let tokens = self.tokens(ui);
         let layout = self.layout_with(&tokens);
@@ -1013,7 +1063,6 @@ impl Editor {
                 .collect::<Vec<_>>(),
         );
         drop(doc);
-        self.show_caret(ui);
     }
 
     /// Tell the note where to draw the caret: the box of its line in the app's own layout, or
@@ -1360,15 +1409,22 @@ impl Editor {
 
     pub fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
         if !text.contains(['\n', '\r']) {
-            let before = self.doc().clone();
+            // only an edit that auto-formats is an undo step of its own, so only then is the note
+            // as it was needed (a copy of it)
+            let (old, before) = {
+                let doc = self.doc();
+                let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
+                let before = doc.would_auto_format(i, &old, text, cursor).then(|| doc.clone());
+                (old, before)
+            };
             let mut doc = self.doc_mut();
-            let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
             let typing = self.typing.take().filter(|(c, _)| c.block == i).map(|(_, s)| s);
             let paint = self.typing_paint.take().filter(|(c, _)| c.block == i).map(|(_, p)| p);
             doc.edit_text(i, text, cursor, typing, paint);
             let caret = doc.auto_format(i, &old, cursor);
             drop(doc);
-            if caret.is_some() {
+            debug_assert_eq!(caret.is_some(), before.is_some(), "auto-format fires exactly when it was predicted");
+            if let (Some(_), Some(before)) = (caret, before) {
                 self.structural(before);
             }
             return caret;

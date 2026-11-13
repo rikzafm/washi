@@ -91,11 +91,11 @@ impl Harness {
         Harness { dir, env, signals, power, dialogs, clipboard, startup, instance, control, stats, shell, app: None, last_ids: Vec::new() }
     }
 
-    pub(crate) fn app(&self) -> &App {
+    pub fn app(&self) -> &App {
         self.app.as_ref().expect("app is not running")
     }
 
-    pub(crate) fn id(&self, note: usize) -> NoteId {
+    pub fn id(&self, note: usize) -> NoteId {
         self.app().note_ids()[note]
     }
 

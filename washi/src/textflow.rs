@@ -838,6 +838,8 @@ impl Layout {
     /// Where the caret at byte `offset` of text block `block` is drawn: its x, and the top and bottom
     /// of its line box. `line_end` as in [`caret_line_on`]. An image has no caret.
     pub fn caret_box(&self, block: usize, offset: usize, line_end: bool) -> Option<(f64, f64, f64)> {
+        #[cfg(any(test, feature = "trace"))]
+        crate::trace::counts::bump(crate::trace::counts::Count::CaretBox);
         let b = self.blocks.get(block).filter(|b| b.kind != Kind::Image)?;
         let pitch = self.tokens.style(b.kind).pitch;
         let at = caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, line_end);
