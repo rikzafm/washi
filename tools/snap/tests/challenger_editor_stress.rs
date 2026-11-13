@@ -267,8 +267,8 @@ fn stress_unicode_emoji_and_multibyte_utf8_boundaries() {
         focus: Caret { block: 0, offset: 5 },
     };
     let clamped = editor.clamp(unaligned);
-    assert!(editor.doc.borrow().blocks()[0].text.is_char_boundary(clamped.anchor.offset));
-    assert!(editor.doc.borrow().blocks()[0].text.is_char_boundary(clamped.focus.offset));
+    assert!(editor.doc().blocks()[0].text.is_char_boundary(clamped.anchor.offset));
+    assert!(editor.doc().blocks()[0].text.is_char_boundary(clamped.focus.offset));
 
     // Selection across block 0 and block 1 with emojis
     editor.set_selection(&ui, Range {
@@ -419,7 +419,7 @@ fn stress_image_aspect_ratio_consistency() {
         for pct in (10..=100).step_by(15) {
             editor.set_image_pct(1, pct);
             editor.relayout(&ui);
-            let doc = editor.doc.borrow();
+            let doc = editor.doc();
             let b = &doc.blocks()[1];
             let avail = editor.paper.get().0 - 32.0 - 40.0;
             let (_, img_w, img_h) = b.image_box(avail, (w, h));
@@ -463,7 +463,7 @@ fn stress_image_deletion_cutting_and_undo_invariants() {
     assert_eq!(editor.model.row_data(1).unwrap().kind, BlockKind::Image);
 
     // 3. Delete second image (block 3) via Backspace on block 3
-    let before = editor.doc.borrow().clone();
+    let before = editor.doc().clone();
     let caret = editor.image_key(3, &char::from(slint::platform::Key::Backspace).to_string(), before);
     assert!(caret.is_some());
     editor.notify_change(caret);
@@ -504,7 +504,7 @@ fn stress_stepped_line_layout_invariants_across_scale_factors() {
         assert!(runs.row_count() >= 5);
         for i in 0..runs.row_count() {
             let r = runs.row_data(i).unwrap();
-            assert!(r.block >= 0 && (r.block as usize) < editor.doc.borrow().len(), "Run block index in valid range");
+            assert!(r.block >= 0 && (r.block as usize) < editor.doc().len(), "Run block index in valid range");
             assert!(r.pitch > 0.0, "Run pitch must be strictly positive");
             assert!(r.size > 0.0, "Run size must be strictly positive");
             assert!(!r.x.is_nan() && !r.y.is_nan(), "Coordinates must not be NaN");

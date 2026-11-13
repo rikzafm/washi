@@ -17,24 +17,25 @@ fn counts() -> Vec<(String, Op, usize, usize)> {
 }
 
 #[test]
-fn wraps_per_operation_today() {
-    // Measured at 992e711 (before any layout cache work). One whole-note wrap is one `wrap` per
-    // text block, so divide by the block count (mockup.md 3, long.md 13, generated 50; the pointer
-    // scenario also has the pasted picture and the paragraph below it).
+fn wraps_per_operation() {
+    // The editor owns one cached `Layout` (ticket 03): an edit or a resize builds it once, which is one
+    // `wrap` per text block (mockup.md 3, long.md 15, generated 50), and caret motion and the pointer
+    // are answered from it without wrapping. Before the cache (992e711) a keystroke cost 12 whole-note
+    // wraps, Down 8, a pointer move over a selected image 4 and a resize step 3 (see docs/PERF.md).
     use Op::*;
     let expected: &[(&str, Op, usize)] = &[
-        ("mockup.md", Keystroke, 36),
-        ("mockup.md", Down, 24),
-        ("mockup.md", PointerOverImage, 12),
-        ("mockup.md", ResizeStep, 10),
-        ("long.md", Keystroke, 156),
-        ("long.md", Down, 96),
-        ("long.md", PointerOverImage, 48),
-        ("long.md", ResizeStep, 46),
-        ("50 paragraphs", Keystroke, 506),
-        ("50 paragraphs", Down, 306),
-        ("50 paragraphs", PointerOverImage, 153),
-        ("50 paragraphs", ResizeStep, 151),
+        ("mockup.md", Keystroke, 3),
+        ("mockup.md", Down, 0),
+        ("mockup.md", PointerOverImage, 0),
+        ("mockup.md", ResizeStep, 3),
+        ("long.md", Keystroke, 15),
+        ("long.md", Down, 0),
+        ("long.md", PointerOverImage, 0),
+        ("long.md", ResizeStep, 15),
+        ("50 paragraphs", Keystroke, 50),
+        ("50 paragraphs", Down, 0),
+        ("50 paragraphs", PointerOverImage, 0),
+        ("50 paragraphs", ResizeStep, 50),
     ];
     for (name, op, median, max) in counts() {
         let want = expected.iter().find(|e| e.0 == name && e.1 == op).unwrap_or_else(|| panic!("no pinned count for {name} / {op:?}: {median}")).2;

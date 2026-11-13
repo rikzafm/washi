@@ -183,7 +183,7 @@ pub fn run(text: &str, op: Op, iterations: usize) -> Sample {
                 .app()
                 .with_note(h.id(0), |n| {
                     let (ui, editor) = (n.ui(), n.editor());
-                    let r = textflow::image_rect(editor.doc.borrow().blocks(), image, editor.paper.get().0, &editor.tokens(ui), &|b| editor.images.size(b)).unwrap();
+                    let r = editor.layout(ui).image_rect(image).unwrap();
                     let (margin, scroll) = (ui.get_window_margin() as f64, ui.get_scroll_y() as f64);
                     ((margin + r.x + r.width / 2.0) as f32, (margin + r.y - scroll + r.height / 2.0) as f32, (r.width / 4.0) as f32, (r.height / 4.0) as f32)
                 })

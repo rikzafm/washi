@@ -20,9 +20,9 @@ use crate::note_window::{
 };
 use crate::platform::{Clock, ImageClipboard, NoteId};
 use crate::storage::{Db, DbError};
-use crate::textflow::{self, Style, Tokens};
+use crate::textflow::{self, Layout, Style, Tokens};
 use slint::{ComponentHandle, Model, Timer, TimerMode, VecModel};
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -114,20 +114,27 @@ pub fn block_data(b: &Block) -> BlockData {
 
 /// The note's wrapped lines, measured for vertical caret motion.
 struct NoteLines<'a> {
-    doc: &'a Document,
-    width: f64,
-    tokens: &'a Tokens,
+    layout: &'a Layout,
 }
 
 impl caret_motion::Lines for NoteLines<'_> {
     fn line_at(&self, block: usize, offset: usize, line_end: bool) -> caret_motion::LineAt {
-        let at = textflow::caret_line_on(&self.doc.blocks()[block], offset, line_end, self.width, self.tokens);
+        let at = self.layout.caret_line(block, offset, line_end).expect("the caret's block exists");
         caret_motion::LineAt { line: at.line, lines: at.lines, x: at.x }
     }
 
     fn offset_on(&self, block: usize, line: usize, x: f64) -> (usize, bool) {
-        textflow::offset_on_line(&self.doc.blocks()[block], line, x, self.width, self.tokens)
+        self.layout.offset_on_line(block, line, x).expect("the caret's block exists")
     }
+}
+
+/// What a cached layout was built from: when any of it differs, the layout is stale.
+#[derive(Clone, PartialEq)]
+struct LayoutKey {
+    doc_rev: u64,
+    paper: (f64, f64),
+    tokens: Tokens,
+    images_gen: u64,
 }
 
 /// The pointer's press in progress: what a drag extends, by characters, words or paragraphs.
@@ -173,7 +180,14 @@ pub struct Editor {
     pub id: Cell<NoteId>,
     pub db: Rc<Db>,
     pub clipboard: Rc<dyn ImageClipboard>,
-    pub doc: RefCell<Document>,
+    /// The note's text. Private: writes go through [`Self::doc_mut`], which retires the cached layout.
+    doc: RefCell<Document>,
+    /// Counts the writes to `doc`; part of the layout's key.
+    doc_rev: Cell<u64>,
+    /// The note's geometry as last built, with what it was built from.
+    layout: RefCell<Option<(LayoutKey, Rc<Layout>)>>,
+    /// Cache hits so far; every so often a debug build checks one against a fresh build.
+    layout_hits: Cell<u32>,
     pub history: RefCell<History<Document>>,
     pub images: NoteImages,
 
@@ -261,6 +275,9 @@ impl Editor {
             db,
             clipboard,
             doc: RefCell::new(parsed.clone()),
+            doc_rev: Cell::new(0),
+            layout: RefCell::new(None),
+            layout_hits: Cell::new(0),
             history: RefCell::new(History::new(parsed.clone())),
             images,
             model,
@@ -759,11 +776,57 @@ impl Editor {
     }
 
     pub fn text(&self) -> String {
-        self.doc.borrow().to_text()
+        self.doc().to_text()
+    }
+
+    /// The note's text, to read.
+    pub fn doc(&self) -> Ref<'_, Document> {
+        self.doc.borrow()
+    }
+
+    /// The note's text, to write: the only way to change it, which retires the cached layout. Drop
+    /// the guard before asking for the [`Self::layout`]: a layout cannot be built from a document
+    /// that is being changed.
+    pub fn doc_mut(&self) -> RefMut<'_, Document> {
+        self.doc_rev.set(self.doc_rev.get() + 1);
+        self.doc.borrow_mut()
+    }
+
+    /// The note's geometry in the window's tokens, built again only when the document, the paper,
+    /// the tokens or the pictures' sizes changed since the last call.
+    pub fn layout(&self, ui: &NoteWindow) -> Rc<Layout> {
+        self.layout_with(&self.tokens(ui))
+    }
+
+    /// [`Self::layout`] with the given tokens (without a window, see [`Self::default_tokens`]).
+    pub fn layout_with(&self, tokens: &Tokens) -> Rc<Layout> {
+        let key = LayoutKey { doc_rev: self.doc_rev.get(), paper: self.paper.get(), tokens: *tokens, images_gen: self.images.generation() };
+        let cached = self.layout.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, l)| l.clone());
+        if let Some(layout) = cached {
+            #[cfg(debug_assertions)]
+            {
+                // now and then, build from scratch and compare: a stale layout shows as another height
+                let hits = self.layout_hits.get().wrapping_add(1);
+                self.layout_hits.set(hits);
+                if hits % 1024 == 0 {
+                    let fresh = Layout::build(self.doc().blocks(), key.paper, tokens, &|b| self.images.size(b));
+                    debug_assert_eq!(fresh.content_height(), layout.content_height(), "the cached layout is stale");
+                }
+            }
+            return layout;
+        }
+        let built = Rc::new(Layout::build(self.doc().blocks(), key.paper, tokens, &|b| self.images.size(b)));
+        *self.layout.borrow_mut() = Some((key, built.clone()));
+        built
+    }
+
+    /// Forget the cached layout (the note is suspended); the next question builds it again.
+    pub fn drop_layout(&self) {
+        *self.layout.borrow_mut() = None;
     }
 
     pub fn is_empty(&self) -> bool {
-        self.doc.borrow().is_empty()
+        self.doc().is_empty()
     }
 
     /// Replace everything (opening a note, or text set from outside).
@@ -772,7 +835,7 @@ impl Editor {
         self.images.load(&parsed);
         self.model.set_vec(parsed.blocks().iter().map(|b| self.block_data(b)).collect::<Vec<_>>());
         *self.history.borrow_mut() = History::new(parsed.clone());
-        *self.doc.borrow_mut() = parsed;
+        *self.doc_mut() = parsed;
     }
 
     /// Set text with active UI reset.
@@ -816,8 +879,8 @@ impl Editor {
 
     /// Make the window's blocks match the document, touching only rows that differ.
     pub fn sync_model(&self) {
-        self.images.load(&self.doc.borrow());
-        let new: Vec<BlockData> = self.doc.borrow().blocks().iter().map(|b| self.block_data(b)).collect();
+        self.images.load(&self.doc());
+        let new: Vec<BlockData> = self.doc().blocks().iter().map(|b| self.block_data(b)).collect();
         let old: Vec<BlockData> = self.model.iter().collect();
         let prefix = old.iter().zip(&new).take_while(|(a, b)| same_row(a, b)).count();
         let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| same_row(a, b)).count();
@@ -893,9 +956,11 @@ impl Editor {
     pub fn relayout(&self, ui: &NoteWindow) {
         ui.set_pitch_scale(ui.window().scale_factor());
         let tokens = self.tokens(ui);
-        let doc = self.doc.borrow();
-        let (mut runs, rules, markers) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
-        ui.set_content_height(textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b)).1 as f32);
+        let layout = self.layout_with(&tokens);
+        let doc = self.doc();
+        let mut runs = layout.runs().to_vec();
+        let (rules, markers) = (layout.rules(), layout.markers().to_vec());
+        ui.set_content_height(layout.content_height() as f32);
         sync_rows(&self.rules, 
             rules
                 .iter()
@@ -923,10 +988,10 @@ impl Editor {
                 .collect::<Vec<_>>(),
         );
         *self.markers.borrow_mut() = markers;
-        self.fill_sel_rects(&doc, &tokens);
+        self.fill_sel_rects(&doc, &layout);
         let hint = doc.is_empty();
         if hint {
-            runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
+            runs = Layout::build(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens, &|_| None).runs().to_vec();
         }
         sync_rows(&self.runs, 
             runs.iter()
@@ -956,9 +1021,9 @@ impl Editor {
     pub fn show_caret(&self, ui: &NoteWindow) {
         let sel = self.selection.get();
         let at = if sel.anchor == sel.focus && self.range.get().is_none() {
-            let doc = self.doc.borrow();
             let c = sel.focus;
-            textflow::caret_box(doc.blocks(), c.block, c.offset, self.line_end.get() == Some(c), self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b))
+            self.layout(ui)
+                .caret_box(c.block, c.offset, self.line_end.get() == Some(c))
                 .map(|(x, top, bottom)| (x as f32, top as f32, bottom as f32))
         } else {
             None
@@ -991,7 +1056,7 @@ impl Editor {
     /// Something is selected: a range of text, or a picture.
     pub fn has_selection(&self) -> bool {
         let r = self.selection.get();
-        r.anchor != r.focus || self.selected_image(&self.doc.borrow()).is_some()
+        r.anchor != r.focus || self.selected_image(&self.doc()).is_some()
     }
 
     /// Text now stays tilted while editing (true) or settles flat (false).
@@ -999,7 +1064,7 @@ impl Editor {
         self.tilted.set(on);
         ui.set_tilted_editing(on);
         if let Ok(doc) = self.doc.try_borrow() {
-            self.fill_sel_rects(&doc, &self.tokens(ui));
+            self.fill_sel_rects(&doc, &self.layout(ui));
         }
     }
 
@@ -1044,12 +1109,12 @@ impl Editor {
         ui.set_wash(!across);
         if across {
             self.range.set(Some(range));
-            self.fill_sel_rects(&self.doc.borrow(), &self.tokens(ui));
+            self.fill_sel_rects(&self.doc(), &self.layout(ui));
             self.focus_with(ui, range.focus, None);
         } else {
             self.range.set(None);
             // empty unless tilted editing washes a selection inside this block
-            self.fill_sel_rects(&self.doc.borrow(), &self.tokens(ui));
+            self.fill_sel_rects(&self.doc(), &self.layout(ui));
             self.focus_with(ui, range.focus, Some(range.anchor.offset));
         }
         self.typing.set(None);
@@ -1061,7 +1126,7 @@ impl Editor {
     }
 
     pub fn select_all(&self, ui: &NoteWindow) {
-        let all = self.doc.borrow().all();
+        let all = self.doc().all();
         self.set_selection(ui, all);
     }
 
@@ -1073,7 +1138,7 @@ impl Editor {
     }
 
     pub fn clamp(&self, range: Range) -> Range {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let fix = |c: Caret| {
             let block = c.block.min(doc.len().saturating_sub(1));
             let text = doc.blocks().get(block).map_or("", |b| b.text.as_str());
@@ -1082,15 +1147,15 @@ impl Editor {
         Range { anchor: fix(range.anchor), focus: fix(range.focus) }
     }
 
-    pub fn fill_sel_rects(&self, doc: &Document, tokens: &Tokens) {
+    pub fn fill_sel_rects(&self, doc: &Document, layout: &Layout) {
         let rects = match self.washed() {
-            Some(range) if !doc.is_empty() => textflow::selection_rects(doc.blocks(), range, self.paper.get().0, tokens, &|b| self.images.size(b)),
+            Some(range) if !doc.is_empty() => layout.selection_rects(range),
             _ => vec![],
         };
         let rect = |r: &textflow::Rect| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 };
         self.sel_rects.set_vec(rects.iter().map(rect).collect::<Vec<_>>());
         self.marker_wash.set_vec(textflow::marker_wash(&self.markers.borrow(), &rects).iter().map(rect).collect::<Vec<_>>());
-        self.fill_handles(doc, tokens);
+        self.fill_handles(doc, layout);
     }
 
     /// What the caret at `focus` held after the last move, for the next one.
@@ -1121,9 +1186,9 @@ impl Editor {
         // the range the note holds, or else the caret the field reports
         let sel = if shift || held.anchor != held.focus { held } else { Range { anchor: here, focus: here } };
         let moved = {
-            let doc = self.doc.borrow();
-            let tokens = self.tokens(ui);
-            let lines = NoteLines { doc: &doc, width: self.paper.get().0, tokens: &tokens };
+            let doc = self.doc();
+            let layout = self.layout(ui);
+            let lines = NoteLines { layout: &layout };
             let held = self.held_at(sel.focus);
             if let Some(edge) = Edge::from_key(key, ctrl) {
                 caret_motion::to_edge(&doc, &lines, sel, edge, shift, held.line_end)
@@ -1166,8 +1231,8 @@ impl Editor {
 
     pub fn replace_range(&self, text: &str) -> Caret {
         let range = self.clamp(self.selection.get());
-        let before = self.doc.borrow().clone();
-        let caret = self.doc.borrow_mut().replace_range(range, text);
+        let before = self.doc().clone();
+        let caret = self.doc_mut().replace_range(range, text);
         self.typing.set(None);
         self.typing_paint.set(None);
         self.structural(before);
@@ -1175,7 +1240,7 @@ impl Editor {
     }
 
     pub fn range_text(&self) -> String {
-        self.doc.borrow().plain_range(self.clamp(self.selection.get()))
+        self.doc().plain_range(self.clamp(self.selection.get()))
     }
 
     pub fn hit(&self, ui: &NoteWindow, at: (f32, f32)) -> Caret {
@@ -1185,12 +1250,11 @@ impl Editor {
     /// [`Self::hit`], and whether the caret is at the end of the line under the point where the
     /// next line starts at the same offset.
     pub fn hit_on_line(&self, ui: &NoteWindow, at: (f32, f32)) -> (Caret, bool) {
-        let doc = self.doc.borrow();
-        textflow::hit_on_line(doc.blocks(), (at.0 as f64, at.1 as f64), self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b))
+        self.layout(ui).hit_on_line((at.0 as f64, at.1 as f64))
     }
 
     pub fn unit_at(&self, at: Caret, clicks: u8) -> Range {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let Some(b) = doc.blocks().get(at.block) else { return Range { anchor: at, focus: at } };
         let (start, end) = if clicks >= 3 {
             (0, b.text.len())
@@ -1201,7 +1265,7 @@ impl Editor {
     }
 
     pub fn caret_block(&self) -> usize {
-        self.selection.get().focus.block.min(self.doc.borrow().len().saturating_sub(1))
+        self.selection.get().focus.block.min(self.doc().len().saturating_sub(1))
     }
 
     pub fn set_caret(&self, c: Caret) {
@@ -1250,7 +1314,7 @@ impl Editor {
         // a selection the field made (Shift+arrows) is washed by the note too when tilted
         if self.tilted.get() {
             if let Ok(doc) = self.doc.try_borrow() {
-                self.fill_sel_rects(&doc, &self.tokens(ui));
+                self.fill_sel_rects(&doc, &self.layout(ui));
             }
         }
         self.show_caret(ui);
@@ -1274,15 +1338,15 @@ impl Editor {
     }
 
     pub fn reveal(&self, ui: &NoteWindow, block: usize, offset: usize) {
-        let tokens = self.tokens(ui);
-        let doc = self.doc.borrow();
+        let layout = self.layout(ui);
+        let tokens = layout.tokens();
         let line_end = self.line_end.get() == Some(Caret { block, offset });
-        let span = match textflow::caret_box(doc.blocks(), block, offset, line_end, self.paper.get().0, &tokens, &|b| self.images.size(b)) {
+        let span = match layout.caret_box(block, offset, line_end) {
             Some((_, top, bottom)) => Some((top, bottom)),
-            None => textflow::caret_span_with_images(doc.blocks(), block, offset, self.paper.get().0, &tokens, &|b| self.images.size(b)),
+            None => layout.caret_span(block, offset),
         };
         let Some((top, bottom)) = span else { return };
-        let (_, content) = textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b));
+        let content = layout.content_height();
         let view = ui.get_text_view_height() as f64;
         let cur = ui.get_scroll_y() as f64;
         let mut to = if top <= tokens.inset_top + 0.5 { 0.0 } else if top < cur { top } else if bottom > cur + view { bottom - view } else { cur };
@@ -1296,8 +1360,8 @@ impl Editor {
 
     pub fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
         if !text.contains(['\n', '\r']) {
-            let before = self.doc.borrow().clone();
-            let mut doc = self.doc.borrow_mut();
+            let before = self.doc().clone();
+            let mut doc = self.doc_mut();
             let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
             let typing = self.typing.take().filter(|(c, _)| c.block == i).map(|(_, s)| s);
             let paint = self.typing_paint.take().filter(|(c, _)| c.block == i).map(|(_, p)| p);
@@ -1309,8 +1373,8 @@ impl Editor {
             }
             return caret;
         }
-        let before = self.doc.borrow().clone();
-        let mut doc = self.doc.borrow_mut();
+        let before = self.doc().clone();
+        let mut doc = self.doc_mut();
         let old = match doc.blocks().get(i) {
             Some(b) if b.is_text() => b.text.clone(),
             _ => return None,
@@ -1338,7 +1402,7 @@ impl Editor {
     pub fn edit_key(&self, i: usize, key: &str, offset: usize) -> Option<Caret> {
         use slint::platform::Key;
         let pressed = caret_motion::decode_key(key).filter(|k| matches!(k, Key::Return | Key::Backspace | Key::Delete))?;
-        let before = self.doc.borrow().clone();
+        let before = self.doc().clone();
         if before.is_image(i) {
             return self.image_key(i, key, before);
         }
@@ -1347,7 +1411,7 @@ impl Editor {
         } else {
             before.blocks().get(i).map(|b| b.style_for_insert(offset))
         };
-        let mut doc = self.doc.borrow_mut();
+        let mut doc = self.doc_mut();
         let edit = match pressed {
             Key::Return => {
                 let c = doc.split(i, offset);
@@ -1368,7 +1432,7 @@ impl Editor {
         let cursor = self.selection.get().focus.offset;
         match self.typing.get() {
             Some((c, style)) if c == (Caret { block: i, offset: cursor }) => style,
-            _ => self.doc.borrow().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
+            _ => self.doc().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
         }
     }
 
@@ -1377,7 +1441,7 @@ impl Editor {
         let cursor = self.selection.get().focus.offset;
         match self.typing_paint.get() {
             Some((c, paint)) if c == (Caret { block: i, offset: cursor }) => paint,
-            _ => self.doc.borrow().blocks().get(i).map_or(Paint::default(), |b| b.paint_for_insert(cursor)),
+            _ => self.doc().blocks().get(i).map_or(Paint::default(), |b| b.paint_for_insert(cursor)),
         }
     }
 
@@ -1389,8 +1453,8 @@ impl Editor {
             FORMAT_UNDERLINE => Flags::UNDERLINE,
             FORMAT_STRIKE => Flags::STRIKE,
             FORMAT_LIST => {
-                let before = self.doc.borrow().clone();
-                let done = self.doc.borrow_mut().toggle_list_range(self.selection.get());
+                let before = self.doc().clone();
+                let done = self.doc_mut().toggle_list_range(self.selection.get());
                 if done {
                     self.structural(before);
                 }
@@ -1400,9 +1464,9 @@ impl Editor {
         };
         let sel = self.selection.get();
         let (cursor, collapsed) = (sel.focus.offset, sel.anchor == sel.focus);
-        let before = self.doc.borrow().clone();
+        let before = self.doc().clone();
         let done = {
-            let mut doc = self.doc.borrow_mut();
+            let mut doc = self.doc_mut();
             if !collapsed {
                 doc.toggle_style_range(sel, flag)
             } else if let Some((start, end)) = doc.word_at(i, cursor).filter(|&(start, end)| cursor > start && cursor < end) {
@@ -1430,9 +1494,9 @@ impl Editor {
             self.typing_paint.set(Some((sel.focus, paint)));
             return false;
         }
-        let before = self.doc.borrow().clone();
+        let before = self.doc().clone();
         let done = {
-            let mut doc = self.doc.borrow_mut();
+            let mut doc = self.doc_mut();
             let a = ink.is_some_and(|i| doc.set_ink_range(sel, i));
             let b = marker.is_some_and(|m| doc.set_marker_range(sel, m));
             a | b
@@ -1445,7 +1509,7 @@ impl Editor {
 
     pub fn show_formats(&self, ui: &NoteWindow) {
         let style = {
-            let doc = self.doc.borrow();
+            let doc = self.doc();
             let sel = self.selection.get();
             match doc.blocks().get(self.caret_block()) {
                 Some(_) if sel.anchor != sel.focus => doc.common_style_range(sel),
@@ -1456,7 +1520,7 @@ impl Editor {
                 None => Flags::NONE,
             }
         };
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(self.caret_block());
         let heading = b.is_some_and(|b| b.kind == Kind::Heading);
         ui.set_fmt_bold(heading || style.contains(Flags::BOLD));
@@ -1464,7 +1528,7 @@ impl Editor {
         ui.set_fmt_underline(style.contains(Flags::UNDERLINE));
         ui.set_fmt_strike(style.contains(Flags::STRIKE));
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
-        self.fill_handles(&doc, &self.tokens(ui));
+        self.fill_handles(&doc, &self.layout(ui));
         let sel = self.selection.get();
         let (ink, marker) = if b.is_none() {
             (Some(0), Some(0))
@@ -1491,11 +1555,11 @@ impl Editor {
         textflow::Rect { x, y: r.y + r.height - GRIP, width: GRIP, height: GRIP }
     }
 
-    pub fn fill_handles(&self, doc: &Document, tokens: &Tokens) {
+    pub fn fill_handles(&self, doc: &Document, layout: &Layout) {
         let rows = self
             .selected_image(doc)
             .and_then(|i| {
-                let r = textflow::image_rect(doc.blocks(), i, self.paper.get().0, tokens, &|b| self.images.size(b))?;
+                let r = layout.image_rect(i)?;
                 Some([r, Self::grip_rect(&doc.blocks()[i], r)])
             })
             .map(|rs| rs.map(|r| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 }).to_vec())
@@ -1507,7 +1571,7 @@ impl Editor {
         if !self.grip_at(ui, at) {
             return false;
         }
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let Some(i) = self.selected_image(&doc) else { return false };
         *self.grip.borrow_mut() = Some((i, doc.clone()));
         true
@@ -1518,7 +1582,7 @@ impl Editor {
         let t = self.tokens(ui);
         let avail = self.paper.get().0 - t.inset_left - t.inset_right;
         let x = at.0 as f64;
-        let mut doc = self.doc.borrow_mut();
+        let mut doc = self.doc_mut();
         let w = match doc.blocks().get(block)?.align {
             Align::Left => x - t.inset_left,
             Align::Center => 2.0 * (x - (t.inset_left + avail / 2.0)),
@@ -1530,7 +1594,7 @@ impl Editor {
 
     pub fn release_grip(&self) -> bool {
         let Some((_, before)) = self.grip.borrow_mut().take() else { return false };
-        if *self.doc.borrow() != before {
+        if *self.doc() != before {
             self.structural(before);
         }
         true
@@ -1538,16 +1602,15 @@ impl Editor {
 
     pub fn image_at(&self, ui: &NoteWindow, at: (f32, f32)) -> Option<usize> {
         let block = self.hit(ui, at).block;
-        let doc = self.doc.borrow();
-        let r = textflow::image_rect(doc.blocks(), block, self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b))?;
+        let r = self.layout(ui).image_rect(block)?;
         let (x, y) = (at.0 as f64, at.1 as f64);
         (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height).then_some(block)
     }
 
     pub fn grip_at(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let Some(i) = self.selected_image(&doc) else { return false };
-        let Some(r) = textflow::image_rect(doc.blocks(), i, self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b)) else { return false };
+        let Some(r) = self.layout(ui).image_rect(i) else { return false };
         let g = Self::grip_rect(&doc.blocks()[i], r);
         let slop = 6.0;
         let (x, y) = (at.0 as f64, at.1 as f64);
@@ -1568,7 +1631,7 @@ impl Editor {
         use slint::platform::Key;
         if matches!(caret_motion::decode_key(key), Some(Key::Backspace | Key::Delete)) {
             let range = Range { anchor: Caret { block: i, offset: 0 }, focus: Caret { block: i + 1, offset: 0 } };
-            let caret = self.doc.borrow_mut().replace_range(range, "");
+            let caret = self.doc_mut().replace_range(range, "");
             self.structural(before);
             return Some(caret);
         }
@@ -1576,7 +1639,7 @@ impl Editor {
     }
 
     pub fn insert_position(&self, ui: &NoteWindow) -> usize {
-        let last = self.doc.borrow().len().saturating_sub(1);
+        let last = self.doc().len().saturating_sub(1);
         let focused = ui.get_text_focused_block();
         let at = if focused >= 0 { focused } else { ui.get_last_focused_block() };
         if at < 0 { last } else { (at as usize).min(last) }
@@ -1586,8 +1649,8 @@ impl Editor {
         let image_id = self.db.add_image(self.id.get(), stored.mime, stored.width, stored.height, &stored.data)?;
         let pixels = crate::images::decode(&stored.data).ok().map(|p| crate::note_images::to_slint(&p));
         self.images.add(image_id, (stored.width, stored.height), pixels);
-        let before = self.doc.borrow().clone();
-        let at = self.doc.borrow_mut().insert_image(after, image_id);
+        let before = self.doc().clone();
+        let at = self.doc_mut().insert_image(after, image_id);
         self.structural(before);
         let caret = Caret { block: at + 1, offset: 0 };
         self.notify_change(Some(caret));
@@ -1595,12 +1658,12 @@ impl Editor {
     }
 
     pub fn image_state(&self, block: usize) -> Option<(u8, Align)> {
-        self.doc.borrow().blocks().get(block).filter(|b| b.kind == Kind::Image).map(|b| (b.image_pct, b.align))
+        self.doc().blocks().get(block).filter(|b| b.kind == Kind::Image).map(|b| (b.image_pct, b.align))
     }
 
     pub fn edit_image(&self, edit: impl FnOnce(&mut Document) -> Option<Option<Caret>>) -> bool {
-        let before = self.doc.borrow().clone();
-        let Some(caret) = edit(&mut self.doc.borrow_mut()) else { return false };
+        let before = self.doc().clone();
+        let Some(caret) = edit(&mut self.doc_mut()) else { return false };
         self.structural(before);
         self.notify_change(caret);
         true
@@ -1619,7 +1682,7 @@ impl Editor {
     }
 
     pub fn image_rgba(&self, block: usize) -> Option<Rgba> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(block).filter(|b| b.kind == Kind::Image)?;
         self.images.rgba(b)
     }
@@ -1630,22 +1693,22 @@ impl Editor {
     }
 
     pub fn cut_image(&self, block: usize) -> Option<Caret> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(block).filter(|b| b.kind == Kind::Image)?;
         let rgba = self.images.rgba(b)?;
         drop(doc);
         if self.clipboard.set_image(&rgba).is_err() {
             return None;
         }
-        let before = self.doc.borrow().clone();
-        let caret = self.doc.borrow_mut().delete_image(block)?;
+        let before = self.doc().clone();
+        let caret = self.doc_mut().delete_image(block)?;
         self.structural(before);
         self.notify_change(Some(caret));
         Some(caret)
     }
 
     pub fn picture_at(&self, block: usize) -> Option<(slint::Image, (u32, u32))> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(block)?;
         let size = self.images.size(b)?;
         let pixels = self.images.pixels(b);
@@ -1657,17 +1720,18 @@ impl Editor {
     }
 
     pub fn free_images(&self) {
+        self.drop_layout();
         self.images.free();
         self.sync_model();
     }
 
     pub fn thaw_images(&self) {
-        self.images.thaw(&self.doc.borrow());
+        self.images.thaw(&self.doc());
         self.sync_model();
     }
 
     pub fn prune_images(&self) -> Result<(), DbError> {
-        let keep: Vec<i64> = self.doc.borrow().blocks().iter().filter_map(|b| b.image_id).collect();
+        let keep: Vec<i64> = self.doc().blocks().iter().filter_map(|b| b.image_id).collect();
         self.db.prune_images(self.id.get(), &keep)
     }
 
@@ -1755,13 +1819,13 @@ impl Editor {
     // --- Undo / Redo History ---
 
     pub fn checkpoint(&self) {
-        self.history.borrow_mut().record(self.doc.borrow().clone());
+        self.history.borrow_mut().record(self.doc().clone());
     }
 
     pub fn structural(&self, before: Document) {
         let mut h = self.history.borrow_mut();
         h.record(before);
-        h.record(self.doc.borrow().clone());
+        h.record(self.doc().clone());
     }
 
     pub fn step(&self, redo: bool) -> Option<Caret> {
@@ -1772,7 +1836,7 @@ impl Editor {
             let mut h = self.history.borrow_mut();
             if redo { h.redo() } else { h.undo() }?.clone()
         };
-        let mut doc = self.doc.borrow_mut();
+        let mut doc = self.doc_mut();
         let at = doc.blocks().iter().zip(target.blocks()).take_while(|(a, b)| a == b).count();
         let block = at.min(target.len() - 1);
         let offset = target.blocks()[block].text.len();
@@ -1791,7 +1855,7 @@ impl Editor {
     // --- Clipboard ---
 
     pub fn copy_range(&self, clipboard: &Rc<dyn ImageClipboard>) -> bool {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let range = self.selection.get();
         if let Some(i) = self.selected_image(&doc) {
             if let Some(b) = doc.blocks().get(i) {
@@ -1809,14 +1873,14 @@ impl Editor {
     }
 
     pub fn cut_range(&self, clipboard: &Rc<dyn ImageClipboard>) -> Option<Caret> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         if let Some(i) = self.selected_image(&doc) {
             if let Some(b) = doc.blocks().get(i) {
                 if let Some(rgba) = self.images.rgba(b) {
                     let _ = clipboard.set_image(&rgba);
                     drop(doc);
-                    let before = self.doc.borrow().clone();
-                    let caret = self.doc.borrow_mut().delete_image(i)?;
+                    let before = self.doc().clone();
+                    let caret = self.doc_mut().delete_image(i)?;
                     self.structural(before);
                     return Some(caret);
                 }
@@ -1836,7 +1900,7 @@ impl Editor {
             let is_plain_single_body = parsed.len() == 1
                 && matches!(&parsed[0], ParsedBlock::Body { marks, paints, .. } if marks.iter().all(|m| *m == Flags::NONE) && paints.iter().all(|p| *p == Paint::default()));
             if !parsed.is_empty() && !is_plain_single_body {
-                let before = self.doc.borrow().clone();
+                let before = self.doc().clone();
                 let range = self.selection.get();
                 let db = self.db.clone();
                 let images = &self.images;
@@ -1849,7 +1913,7 @@ impl Editor {
                     images.add(image_id, (w, h), pixels);
                     Some(image_id)
                 };
-                let caret = self.doc.borrow_mut().replace_range_rich(range, parsed, &mut add_image);
+                let caret = self.doc_mut().replace_range_rich(range, parsed, &mut add_image);
                 self.structural(before);
                 self.notify_change(Some(caret));
                 return true;
@@ -1857,7 +1921,7 @@ impl Editor {
         }
         if let Some(rgba) = self.clipboard.image() {
             let after = {
-                let last = self.doc.borrow().len().saturating_sub(1);
+                let last = self.doc().len().saturating_sub(1);
                 let range = self.selection.get();
                 range.focus.block.min(last)
             };
@@ -1866,8 +1930,8 @@ impl Editor {
                 if let Ok(image_id) = self.db.add_image(self.id.get(), "image/png", w, h, &png) {
                     let pixels = Some(crate::note_images::to_slint(&rgba));
                     self.images.add(image_id, (w, h), pixels);
-                    let before = self.doc.borrow().clone();
-                    let at = self.doc.borrow_mut().insert_image(after, image_id);
+                    let before = self.doc().clone();
+                    let at = self.doc_mut().insert_image(after, image_id);
                     self.structural(before);
                     self.notify_change(Some(Caret { block: at + 1, offset: 0 }));
                     return true;
@@ -1894,7 +1958,7 @@ impl Editor {
     pub fn paste_image(&self) -> bool {
         if let Some(rgba) = self.clipboard.image() {
             let after = {
-                let last = self.doc.borrow().len().saturating_sub(1);
+                let last = self.doc().len().saturating_sub(1);
                 let range = self.selection.get();
                 range.focus.block.min(last)
             };
@@ -1903,8 +1967,8 @@ impl Editor {
                 if let Ok(image_id) = self.db.add_image(self.id.get(), "image/png", w, h, &png) {
                     let pixels = Some(crate::note_images::to_slint(&rgba));
                     self.images.add(image_id, (w, h), pixels);
-                    let before = self.doc.borrow().clone();
-                    let at = self.doc.borrow_mut().insert_image(after, image_id);
+                    let before = self.doc().clone();
+                    let at = self.doc_mut().insert_image(after, image_id);
                     self.structural(before);
                     self.notify_change(Some(Caret { block: at + 1, offset: 0 }));
                     return true;
