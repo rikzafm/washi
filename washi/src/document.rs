@@ -1300,10 +1300,10 @@ mod tests {
     #[test]
     fn auto_format_is_predicted_from_the_text_as_edit_text_writes_it() {
         // `edit_text` turns a line break into a space, so "-" + line break at the caret 2 is "- "
-        let mut d = Document::parse("");
-        assert!(d.would_auto_format(0, "", "-\n", 2));
-        d.edit_text(0, "-\n", 2, None, None);
-        assert_eq!(d.auto_format(0, "", 2), Some(Caret { block: 0, offset: 0 }));
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "")]);
+        assert!(d.would_auto_format(1, "", "-\n", 2));
+        d.edit_text(1, "-\n", 2, None, None);
+        assert_eq!(d.auto_format(1, "", 2), Some(Caret { block: 1, offset: 0 }));
     }
 
     #[test]
