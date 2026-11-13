@@ -189,6 +189,18 @@ impl Clock for SystemClock {
     }
 }
 
+/// One note's editing state: its document, selection, history and the models the window shows.
+///
+/// The note's geometry is one cached [`Layout`] (see [`Self::layout`]), shared by every question
+/// about where text is: the caret box, the pointer, the selection wash, a picture's rect, scrolling.
+/// It is rebuilt on the first question after any of these changed, and not otherwise:
+/// - the document, which retires it in [`Self::doc_mut`], the only way to write the document, so a
+///   write cannot forget to;
+/// - the paper size;
+/// - the tokens (font sizes, pitches, insets, letter spacing, tilt);
+/// - the size of a picture, once its pixels are known (a picture added, replaced or loaded).
+///
+/// Caret motion, selection changes and the pointer change none of these and never rebuild it.
 pub struct Editor {
     pub id: Cell<NoteId>,
     pub db: Rc<Db>,
