@@ -10,7 +10,7 @@ impl Editor {
     /// Something is selected: a range of text, or a picture.
     pub fn has_selection(&self) -> bool {
         let r = self.selection.get();
-        r.anchor != r.focus || self.selected_image(&self.doc.borrow()).is_some()
+        r.anchor != r.focus || self.selected_image(&self.doc()).is_some()
     }
 
     /// Text now stays tilted while editing (true) or settles flat (false).
@@ -18,7 +18,7 @@ impl Editor {
         self.tilted.set(on);
         ui.set_tilted_editing(on);
         if let Ok(doc) = self.doc.try_borrow() {
-            self.fill_sel_rects(&doc, &self.tokens(ui));
+            self.fill_sel_rects(&doc, &self.layout(ui));
         }
     }
 
@@ -63,12 +63,12 @@ impl Editor {
         ui.set_wash(!across);
         if across {
             self.range.set(Some(range));
-            self.fill_sel_rects(&self.doc.borrow(), &self.tokens(ui));
+            self.fill_sel_rects(&self.doc(), &self.layout(ui));
             self.focus_with(ui, range.focus, None);
         } else {
             self.range.set(None);
             // empty unless tilted editing washes a selection inside this block
-            self.fill_sel_rects(&self.doc.borrow(), &self.tokens(ui));
+            self.fill_sel_rects(&self.doc(), &self.layout(ui));
             self.focus_with(ui, range.focus, Some(range.anchor.offset));
         }
         self.typing.set(None);
@@ -80,7 +80,7 @@ impl Editor {
     }
 
     pub fn select_all(&self, ui: &NoteWindow) {
-        let all = self.doc.borrow().all();
+        let all = self.doc().all();
         self.set_selection(ui, all);
     }
 
@@ -92,7 +92,7 @@ impl Editor {
     }
 
     pub fn clamp(&self, range: Range) -> Range {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let fix = |c: Caret| {
             let block = c.block.min(doc.len().saturating_sub(1));
             let text = doc.blocks().get(block).map_or("", |b| b.text.as_str());
@@ -101,15 +101,15 @@ impl Editor {
         Range { anchor: fix(range.anchor), focus: fix(range.focus) }
     }
 
-    pub fn fill_sel_rects(&self, doc: &Document, tokens: &Tokens) {
+    pub fn fill_sel_rects(&self, doc: &Document, layout: &Layout) {
         let rects = match self.washed() {
-            Some(range) if !doc.is_empty() => textflow::selection_rects(doc.blocks(), range, self.paper.get().0, tokens, &|b| self.images.size(b)),
+            Some(range) if !doc.is_empty() => layout.selection_rects(range),
             _ => vec![],
         };
         let rect = |r: &textflow::Rect| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 };
         self.sel_rects.set_vec(rects.iter().map(rect).collect::<Vec<_>>());
         self.marker_wash.set_vec(textflow::marker_wash(&self.markers.borrow(), &rects).iter().map(rect).collect::<Vec<_>>());
-        self.fill_handles(doc, tokens);
+        self.fill_handles(doc, layout);
     }
 
     /// What the caret at `focus` held after the last move, for the next one.
@@ -140,9 +140,9 @@ impl Editor {
         // the range the note holds, or else the caret the field reports
         let sel = if shift || held.anchor != held.focus { held } else { Range { anchor: here, focus: here } };
         let moved = {
-            let doc = self.doc.borrow();
-            let tokens = self.tokens(ui);
-            let lines = NoteLines { doc: &doc, width: self.paper.get().0, tokens: &tokens };
+            let doc = self.doc();
+            let layout = self.layout(ui);
+            let lines = NoteLines { layout: &layout };
             let held = self.held_at(sel.focus);
             if let Some(edge) = Edge::from_key(key, ctrl) {
                 caret_motion::to_edge(&doc, &lines, sel, edge, shift, held.line_end)
@@ -185,8 +185,8 @@ impl Editor {
 
     pub fn replace_range(&self, text: &str) -> Caret {
         let range = self.clamp(self.selection.get());
-        let before = self.doc.borrow().clone();
-        let caret = self.doc.borrow_mut().replace_range(range, text);
+        let before = self.doc().clone();
+        let caret = self.doc_mut().replace_range(range, text);
         self.typing.set(None);
         self.typing_paint.set(None);
         self.structural(before);
@@ -194,7 +194,7 @@ impl Editor {
     }
 
     pub fn range_text(&self) -> String {
-        self.doc.borrow().plain_range(self.clamp(self.selection.get()))
+        self.doc().plain_range(self.clamp(self.selection.get()))
     }
 
     pub fn hit(&self, ui: &NoteWindow, at: (f32, f32)) -> Caret {
@@ -204,12 +204,11 @@ impl Editor {
     /// [`Self::hit`], and whether the caret is at the end of the line under the point where the
     /// next line starts at the same offset.
     pub fn hit_on_line(&self, ui: &NoteWindow, at: (f32, f32)) -> (Caret, bool) {
-        let doc = self.doc.borrow();
-        textflow::hit_on_line(doc.blocks(), (at.0 as f64, at.1 as f64), self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b))
+        self.layout(ui).hit_on_line((at.0 as f64, at.1 as f64))
     }
 
     pub fn unit_at(&self, at: Caret, clicks: u8) -> Range {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let Some(b) = doc.blocks().get(at.block) else { return Range { anchor: at, focus: at } };
         let (start, end) = if clicks >= 3 {
             (0, b.text.len())
@@ -220,7 +219,7 @@ impl Editor {
     }
 
     pub fn caret_block(&self) -> usize {
-        self.selection.get().focus.block.min(self.doc.borrow().len().saturating_sub(1))
+        self.selection.get().focus.block.min(self.doc().len().saturating_sub(1))
     }
 
     pub fn set_caret(&self, c: Caret) {
@@ -269,7 +268,7 @@ impl Editor {
         // a selection the field made (Shift+arrows) is washed by the note too when tilted
         if self.tilted.get() {
             if let Ok(doc) = self.doc.try_borrow() {
-                self.fill_sel_rects(&doc, &self.tokens(ui));
+                self.fill_sel_rects(&doc, &self.layout(ui));
             }
         }
         self.show_caret(ui);
@@ -293,15 +292,15 @@ impl Editor {
     }
 
     pub fn reveal(&self, ui: &NoteWindow, block: usize, offset: usize) {
-        let tokens = self.tokens(ui);
-        let doc = self.doc.borrow();
+        let layout = self.layout(ui);
+        let tokens = layout.tokens();
         let line_end = self.line_end.get() == Some(Caret { block, offset });
-        let span = match textflow::caret_box(doc.blocks(), block, offset, line_end, self.paper.get().0, &tokens, &|b| self.images.size(b)) {
+        let span = match layout.caret_box(block, offset, line_end) {
             Some((_, top, bottom)) => Some((top, bottom)),
-            None => textflow::caret_span_with_images(doc.blocks(), block, offset, self.paper.get().0, &tokens, &|b| self.images.size(b)),
+            None => layout.caret_span(block, offset),
         };
         let Some((top, bottom)) = span else { return };
-        let (_, content) = textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b));
+        let content = layout.content_height();
         let view = ui.get_text_view_height() as f64;
         let cur = ui.get_scroll_y() as f64;
         let mut to = if top <= tokens.inset_top + 0.5 { 0.0 } else if top < cur { top } else if bottom > cur + view { bottom - view } else { cur };

@@ -45,9 +45,9 @@ use crate::note_window::{
 };
 use crate::platform::{Clock, ImageClipboard, NoteId};
 use crate::storage::{Db, DbError};
-use crate::textflow::{self, Style, Tokens};
+use crate::textflow::{self, Layout, Style, Tokens};
 use slint::{ComponentHandle, Model, Timer, TimerMode, VecModel};
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -110,19 +110,32 @@ pub fn same_row(a: &BlockData, b: &BlockData) -> bool {
         && (a.img.size().width == 0 || a.img == b.img)
 }
 
-pub fn block_data(b: &Block) -> BlockData {
-    let kind = match b.kind {
+fn block_kind(kind: Kind) -> BlockKind {
+    match kind {
         Kind::Title => BlockKind::Title,
         Kind::Heading => BlockKind::Heading,
         Kind::Body => BlockKind::Body,
         Kind::ListItem => BlockKind::ListItem,
         Kind::Image => BlockKind::Image,
-    };
-    let img_align = match b.align {
+    }
+}
+
+fn image_align(align: Align) -> i32 {
+    match align {
         Align::Left => 0,
         Align::Center => 1,
         Align::Right => 2,
-    };
+    }
+}
+
+/// The picture ids of a document, in order.
+fn image_ids(doc: &Document) -> Vec<i64> {
+    doc.blocks().iter().filter_map(|b| b.image_id).collect()
+}
+
+pub fn block_data(b: &Block) -> BlockData {
+    let kind = block_kind(b.kind);
+    let img_align = image_align(b.align);
     BlockData {
         kind,
         text: b.text.as_str().into(),
@@ -139,20 +152,27 @@ pub fn block_data(b: &Block) -> BlockData {
 
 /// The note's wrapped lines, measured for vertical caret motion.
 struct NoteLines<'a> {
-    doc: &'a Document,
-    width: f64,
-    tokens: &'a Tokens,
+    layout: &'a Layout,
 }
 
 impl caret_motion::Lines for NoteLines<'_> {
     fn line_at(&self, block: usize, offset: usize, line_end: bool) -> caret_motion::LineAt {
-        let at = textflow::caret_line_on(&self.doc.blocks()[block], offset, line_end, self.width, self.tokens);
+        let at = self.layout.caret_line(block, offset, line_end).expect("the caret's block exists");
         caret_motion::LineAt { line: at.line, lines: at.lines, x: at.x }
     }
 
     fn offset_on(&self, block: usize, line: usize, x: f64) -> (usize, bool) {
-        textflow::offset_on_line(&self.doc.blocks()[block], line, x, self.width, self.tokens)
+        self.layout.offset_on_line(block, line, x).expect("the caret's block exists")
     }
+}
+
+/// What a cached layout was built from: when any of it differs, the layout is stale.
+#[derive(Clone, PartialEq)]
+struct LayoutKey {
+    doc_rev: u64,
+    paper: (f64, f64),
+    tokens: Tokens,
+    images_gen: u64,
 }
 
 /// The pointer's press in progress: what a drag extends, by characters, words or paragraphs.
@@ -194,11 +214,33 @@ impl Clock for SystemClock {
     }
 }
 
+/// One note's editing state: its document, selection, history and the models the window shows.
+///
+/// The note's geometry is one cached [`Layout`] (see [`Self::layout`]), shared by every question
+/// about where text is: the caret box, the pointer, the selection wash, a picture's rect, scrolling.
+/// It is rebuilt on the first question after any of these changed, and not otherwise:
+/// - the document, which retires it in [`Self::doc_mut`], the only way to write the document, so a
+///   write cannot forget to;
+/// - the paper size;
+/// - the tokens (font sizes, pitches, insets, letter spacing, tilt);
+/// - the size of a picture, once its pixels are known (a picture added, replaced or loaded).
+///
+/// Caret motion, selection changes and the pointer change none of these and never rebuild it.
 pub struct Editor {
     id: Cell<NoteId>,
     pub db: Rc<Db>,
     clipboard: Rc<dyn ImageClipboard>,
-    pub doc: RefCell<Document>,
+    /// The note's text. Private: writes go through [`Self::doc_mut`], which retires the cached layout.
+    doc: RefCell<Document>,
+    /// Counts the writes to `doc`; part of the layout's key.
+    doc_rev: Cell<u64>,
+    /// The note's geometry as last built, with what it was built from.
+    layout: RefCell<Option<(LayoutKey, Rc<Layout>)>>,
+    /// Cache hits so far; every so often a debug build checks one against a fresh build.
+    #[cfg(debug_assertions)]
+    layout_hits: Cell<u32>,
+    /// The picture ids of the document as `images` last learned them (see [`Self::sync_model`]).
+    image_ids: RefCell<Vec<i64>>,
     pub history: RefCell<History<Document>>,
     pub images: NoteImages,
 
@@ -286,6 +328,11 @@ impl Editor {
             db,
             clipboard,
             doc: RefCell::new(parsed.clone()),
+            doc_rev: Cell::new(0),
+            layout: RefCell::new(None),
+            #[cfg(debug_assertions)]
+            layout_hits: Cell::new(0),
+            image_ids: RefCell::new(image_ids(&parsed)),
             history: RefCell::new(History::new(parsed.clone())),
             images,
             model,
@@ -324,7 +371,7 @@ impl Editor {
     pub fn apply_change(&self, ui: &NoteWindow, focus: Option<Caret>) {
         let text = self.text();
         self.sync_model();
-        self.relayout(ui);
+        self.lay_out(ui);
         ui.set_text(text.as_str().into());
         ui.set_window_title(window_title(&text).into());
         if let Some(c) = focus {
@@ -368,20 +415,70 @@ impl Editor {
     }
 
     pub fn text(&self) -> String {
-        self.doc.borrow().to_text()
+        self.doc().to_text()
+    }
+
+    /// The note's text, to read.
+    pub fn doc(&self) -> Ref<'_, Document> {
+        self.doc.borrow()
+    }
+
+    /// The note's text, to write: the only way to change it, which retires the cached layout. Drop
+    /// the guard before asking for the [`Self::layout`]: a layout cannot be built from a document
+    /// that is being changed. It retires the layout when called, not when something changes, so a
+    /// write that changes nothing rebuilds it needlessly: deliberate, it is safe and cheap to be wrong that way.
+    pub fn doc_mut(&self) -> RefMut<'_, Document> {
+        self.doc_rev.set(self.doc_rev.get() + 1);
+        self.doc.borrow_mut()
+    }
+
+    /// The note's geometry in the window's tokens, built again only when the document, the paper,
+    /// the tokens or the pictures' sizes changed since the last call.
+    pub fn layout(&self, ui: &NoteWindow) -> Rc<Layout> {
+        self.layout_with(&self.tokens(ui))
+    }
+
+    /// [`Self::layout`] with the given tokens (without a window, see [`Self::default_tokens`]).
+    pub fn layout_with(&self, tokens: &Tokens) -> Rc<Layout> {
+        let key = LayoutKey { doc_rev: self.doc_rev.get(), paper: self.paper.get(), tokens: *tokens, images_gen: self.images.generation() };
+        let cached = self.layout.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, l)| l.clone());
+        if let Some(layout) = cached {
+            #[cfg(debug_assertions)]
+            {
+                // now and then, build from scratch and compare: a stale layout shows as another height
+                let hits = self.layout_hits.get().wrapping_add(1);
+                self.layout_hits.set(hits);
+                if hits % 1024 == 0 {
+                    let fresh = Layout::build(self.doc().blocks(), key.paper, tokens, &|b| self.images.size(b));
+                    debug_assert_eq!(fresh.content_height(), layout.content_height(), "the cached layout is stale");
+                    debug_assert_eq!(fresh.runs().len(), layout.runs().len(), "the cached layout is stale");
+                    debug_assert_eq!(fresh.block_count(), layout.block_count(), "the cached layout is stale");
+                }
+            }
+            return layout;
+        }
+        let built = Rc::new(Layout::build(self.doc().blocks(), key.paper, tokens, &|b| self.images.size(b)));
+        *self.layout.borrow_mut() = Some((key, built.clone()));
+        built
+    }
+
+    /// Forget the cached layout (the note is suspended); the next question builds it again.
+    pub fn drop_layout(&self) {
+        *self.layout.borrow_mut() = None;
     }
 
     pub fn is_empty(&self) -> bool {
-        self.doc.borrow().is_empty()
+        self.doc().is_empty()
     }
 
     /// Replace everything (opening a note, or text set from outside).
     pub fn load(&self, content: &str) {
         let parsed = Document::parse(content);
         self.images.load(&parsed);
+        *self.image_ids.borrow_mut() = image_ids(&parsed);
         self.model.set_vec(parsed.blocks().iter().map(|b| self.block_data(b)).collect::<Vec<_>>());
         *self.history.borrow_mut() = History::new(parsed.clone());
-        *self.doc.borrow_mut() = parsed;
+        *self.doc_mut() = parsed;
     }
 
     /// Set text with active UI reset.
@@ -425,25 +522,51 @@ impl Editor {
 
     /// Make the window's blocks match the document, touching only rows that differ.
     pub fn sync_model(&self) {
-        self.images.load(&self.doc.borrow());
-        let new: Vec<BlockData> = self.doc.borrow().blocks().iter().map(|b| self.block_data(b)).collect();
-        let old: Vec<BlockData> = self.model.iter().collect();
-        let prefix = old.iter().zip(&new).take_while(|(a, b)| same_row(a, b)).count();
-        let suffix = old[prefix..].iter().rev().zip(new[prefix..].iter().rev()).take_while(|(a, b)| same_row(a, b)).count();
-        let (old_mid, new_mid) = (old.len() - prefix - suffix, new.len() - prefix - suffix);
+        let doc = self.doc();
+        // the pictures are learned again only when the note's set of them changed (the sizes they
+        // are laid out with only change then, and the decoded pixels are freed and thawed elsewhere)
+        // (a picture that did not resolve, a failed decode, is tried again at the next sync)
+        let ids = image_ids(&doc);
+        if *self.image_ids.borrow() != ids || !self.images.knows(&ids) {
+            self.images.load(&doc);
+            *self.image_ids.borrow_mut() = ids;
+        }
+        // rows are built only for the span between the rows that are already right at both ends
+        let blocks = doc.blocks();
+        let old_len = self.model.row_count();
+        let same = |row: usize, block: usize| self.model.row_data(row).is_some_and(|r| self.shows(&r, &blocks[block]));
+        let most = old_len.min(blocks.len());
+        let prefix = (0..most).take_while(|&k| same(k, k)).count();
+        let suffix = (0..most - prefix).take_while(|&k| same(old_len - 1 - k, blocks.len() - 1 - k)).count();
+        let (old_mid, new_mid) = (old_len - prefix - suffix, blocks.len() - prefix - suffix);
         for k in 0..old_mid.min(new_mid) {
-            self.model.set_row_data(prefix + k, new[prefix + k].clone());
+            self.model.set_row_data(prefix + k, self.block_data(&blocks[prefix + k]));
         }
         for _ in new_mid..old_mid {
             self.model.remove(prefix + new_mid);
         }
         for k in old_mid..new_mid {
-            self.model.insert(prefix + k, new[prefix + k].clone());
+            self.model.insert(prefix + k, self.block_data(&blocks[prefix + k]));
         }
+    }
+
+    /// Whether `row` of the window's blocks already shows `b`: what [`same_row`] says of it and
+    /// `block_data(b)`, without building that.
+    fn shows(&self, row: &BlockData, b: &Block) -> bool {
+        let (img_w, img_h) = self.images.size(b).unwrap_or((0, 0));
+        let img = self.images.pixels(b);
+        row.kind == block_kind(b.kind)
+            && row.text == b.text.as_str()
+            && row.bold == (b.kind == Kind::Heading)
+            && (row.img_w, row.img_h) == (img_w as i32, img_h as i32)
+            && (row.img_pct, row.img_align) == (b.image_pct as i32, image_align(b.align))
+            && row.img.size() == img.size()
+            && (img.size().width == 0 || row.img == img)
     }
 
     /// A block as the window shows it.
     pub fn block_data(&self, b: &Block) -> BlockData {
+        crate::trace::count(crate::trace::counts::Count::BlockData);
         let (img_w, img_h) = self.images.size(b).unwrap_or((0, 0));
         BlockData {
             img: self.images.pixels(b),

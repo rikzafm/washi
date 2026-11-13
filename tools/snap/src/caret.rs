@@ -5,7 +5,6 @@ use crate::harness::Harness;
 use crate::platform;
 use slint::ComponentHandle;
 use std::time::Duration;
-use washi::textflow;
 
 /// A box in a note's window, in screen px: left, top, right, bottom (the last two exclusive).
 pub type PxBox = (u32, u32, u32, u32);
@@ -39,12 +38,9 @@ impl Harness {
         self.app()
             .with_note(self.id(note), |n| {
                 let (ui, editor) = (n.ui(), n.editor());
-                let tokens = editor.tokens(ui);
-                let doc = editor.doc.borrow();
-                let paper_w = editor.paper.get().0;
-                let (top, bottom) =
-                    textflow::caret_span_with_images(doc.blocks(), block, offset, paper_w, &tokens, &|b| editor.images.size(b)).expect("the block exists");
-                let x = textflow::caret_line(&doc.blocks()[block], offset, paper_w, &tokens).x + tokens.inset_left;
+                let layout = editor.layout(ui);
+                let (top, bottom) = layout.caret_span(block, offset).expect("the block exists");
+                let x = layout.caret_line(block, offset, false).expect("the block exists").x + layout.tokens().inset_left;
                 let (margin, scroll) = (ui.get_window_margin() as f64, ui.get_scroll_y() as f64);
                 ((margin + x) as f32, (margin + top - scroll) as f32, (margin + bottom - scroll) as f32)
             })

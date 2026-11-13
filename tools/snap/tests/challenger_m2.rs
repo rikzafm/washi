@@ -174,7 +174,7 @@ fn challenge_headless_image_operations() {
     // Headless undo image deletion
     let caret = editor.step(false);
     assert!(caret.is_some());
-    assert_eq!(editor.doc.borrow().len(), 3);
+    assert_eq!(editor.doc().len(), 3);
     editor.sync_model();
     assert_eq!(editor.model.row_count(), 3);
     assert_eq!(editor.image_state(1), Some((60, Align::Center)));

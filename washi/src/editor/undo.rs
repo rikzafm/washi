@@ -4,13 +4,13 @@ use super::*;
 
 impl Editor {
     pub fn checkpoint(&self) {
-        self.history.borrow_mut().record(self.doc.borrow().clone());
+        self.history.borrow_mut().record(self.doc().clone());
     }
 
     pub fn structural(&self, before: Document) {
         let mut h = self.history.borrow_mut();
         h.record(before);
-        h.record(self.doc.borrow().clone());
+        h.record(self.doc().clone());
     }
 
     pub fn step(&self, redo: bool) -> Option<Caret> {
@@ -21,7 +21,7 @@ impl Editor {
             let mut h = self.history.borrow_mut();
             if redo { h.redo() } else { h.undo() }?.clone()
         };
-        let mut doc = self.doc.borrow_mut();
+        let mut doc = self.doc_mut();
         let at = doc.blocks().iter().zip(target.blocks()).take_while(|(a, b)| a == b).count();
         let block = at.min(target.len() - 1);
         let offset = target.blocks()[block].text.len();

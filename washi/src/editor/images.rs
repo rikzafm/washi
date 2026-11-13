@@ -13,11 +13,11 @@ impl Editor {
         textflow::Rect { x, y: r.y + r.height - GRIP, width: GRIP, height: GRIP }
     }
 
-    pub fn fill_handles(&self, doc: &Document, tokens: &Tokens) {
+    pub fn fill_handles(&self, doc: &Document, layout: &Layout) {
         let rows = self
             .selected_image(doc)
             .and_then(|i| {
-                let r = textflow::image_rect(doc.blocks(), i, self.paper.get().0, tokens, &|b| self.images.size(b))?;
+                let r = layout.image_rect(i)?;
                 Some([r, Self::grip_rect(&doc.blocks()[i], r)])
             })
             .map(|rs| rs.map(|r| SelRect { x: r.x as f32, y: r.y as f32, width: r.width as f32, height: r.height as f32 }).to_vec())
@@ -29,7 +29,7 @@ impl Editor {
         if !self.grip_at(ui, at) {
             return false;
         }
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let Some(i) = self.selected_image(&doc) else { return false };
         *self.grip.borrow_mut() = Some((i, doc.clone()));
         true
@@ -40,7 +40,7 @@ impl Editor {
         let t = self.tokens(ui);
         let avail = self.paper.get().0 - t.inset_left - t.inset_right;
         let x = at.0 as f64;
-        let mut doc = self.doc.borrow_mut();
+        let mut doc = self.doc_mut();
         let w = match doc.blocks().get(block)?.align {
             Align::Left => x - t.inset_left,
             Align::Center => 2.0 * (x - (t.inset_left + avail / 2.0)),
@@ -52,7 +52,7 @@ impl Editor {
 
     pub fn release_grip(&self) -> bool {
         let Some((_, before)) = self.grip.borrow_mut().take() else { return false };
-        if *self.doc.borrow() != before {
+        if *self.doc() != before {
             self.structural(before);
         }
         true
@@ -60,16 +60,15 @@ impl Editor {
 
     pub fn image_at(&self, ui: &NoteWindow, at: (f32, f32)) -> Option<usize> {
         let block = self.hit(ui, at).block;
-        let doc = self.doc.borrow();
-        let r = textflow::image_rect(doc.blocks(), block, self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b))?;
+        let r = self.layout(ui).image_rect(block)?;
         let (x, y) = (at.0 as f64, at.1 as f64);
         (x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height).then_some(block)
     }
 
     pub fn grip_at(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let Some(i) = self.selected_image(&doc) else { return false };
-        let Some(r) = textflow::image_rect(doc.blocks(), i, self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b)) else { return false };
+        let Some(r) = self.layout(ui).image_rect(i) else { return false };
         let g = Self::grip_rect(&doc.blocks()[i], r);
         let slop = 6.0;
         let (x, y) = (at.0 as f64, at.1 as f64);
@@ -90,7 +89,7 @@ impl Editor {
         use slint::platform::Key;
         if matches!(caret_motion::decode_key(key), Some(Key::Backspace | Key::Delete)) {
             let range = Range { anchor: Caret { block: i, offset: 0 }, focus: Caret { block: i + 1, offset: 0 } };
-            let caret = self.doc.borrow_mut().replace_range(range, "");
+            let caret = self.doc_mut().replace_range(range, "");
             self.structural(before);
             return Some(caret);
         }
@@ -98,7 +97,7 @@ impl Editor {
     }
 
     pub fn insert_position(&self, ui: &NoteWindow) -> usize {
-        let last = self.doc.borrow().len().saturating_sub(1);
+        let last = self.doc().len().saturating_sub(1);
         let focused = ui.get_text_focused_block();
         let at = if focused >= 0 { focused } else { ui.get_last_focused_block() };
         if at < 0 { last } else { (at as usize).min(last) }
@@ -108,8 +107,8 @@ impl Editor {
         let image_id = self.db.add_image(self.id.get(), stored.mime, stored.width, stored.height, &stored.data)?;
         let pixels = crate::images::decode(&stored.data).ok().map(|p| crate::note_images::to_slint(&p));
         self.images.add(image_id, (stored.width, stored.height), pixels);
-        let before = self.doc.borrow().clone();
-        let at = self.doc.borrow_mut().insert_image(after, image_id);
+        let before = self.doc().clone();
+        let at = self.doc_mut().insert_image(after, image_id);
         self.structural(before);
         let caret = Caret { block: at + 1, offset: 0 };
         self.notify_change(Some(caret));
@@ -117,12 +116,12 @@ impl Editor {
     }
 
     pub fn image_state(&self, block: usize) -> Option<(u8, Align)> {
-        self.doc.borrow().blocks().get(block).filter(|b| b.kind == Kind::Image).map(|b| (b.image_pct, b.align))
+        self.doc().blocks().get(block).filter(|b| b.kind == Kind::Image).map(|b| (b.image_pct, b.align))
     }
 
     pub fn edit_image(&self, edit: impl FnOnce(&mut Document) -> Option<Option<Caret>>) -> bool {
-        let before = self.doc.borrow().clone();
-        let Some(caret) = edit(&mut self.doc.borrow_mut()) else { return false };
+        let before = self.doc().clone();
+        let Some(caret) = edit(&mut self.doc_mut()) else { return false };
         self.structural(before);
         self.notify_change(caret);
         true
@@ -141,7 +140,7 @@ impl Editor {
     }
 
     pub fn image_rgba(&self, block: usize) -> Option<Rgba> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(block).filter(|b| b.kind == Kind::Image)?;
         self.images.rgba(b)
     }
@@ -152,22 +151,22 @@ impl Editor {
     }
 
     pub fn cut_image(&self, block: usize) -> Option<Caret> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(block).filter(|b| b.kind == Kind::Image)?;
         let rgba = self.images.rgba(b)?;
         drop(doc);
         if self.clipboard.set_image(&rgba).is_err() {
             return None;
         }
-        let before = self.doc.borrow().clone();
-        let caret = self.doc.borrow_mut().delete_image(block)?;
+        let before = self.doc().clone();
+        let caret = self.doc_mut().delete_image(block)?;
         self.structural(before);
         self.notify_change(Some(caret));
         Some(caret)
     }
 
     pub fn picture_at(&self, block: usize) -> Option<(slint::Image, (u32, u32))> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(block)?;
         let size = self.images.size(b)?;
         let pixels = self.images.pixels(b);
@@ -179,17 +178,18 @@ impl Editor {
     }
 
     pub fn free_images(&self) {
+        self.drop_layout();
         self.images.free();
         self.sync_model();
     }
 
     pub fn thaw_images(&self) {
-        self.images.thaw(&self.doc.borrow());
+        self.images.thaw(&self.doc());
         self.sync_model();
     }
 
     pub fn prune_images(&self) -> Result<(), DbError> {
-        let keep: Vec<i64> = self.doc.borrow().blocks().iter().filter_map(|b| b.image_id).collect();
+        let keep: Vec<i64> = self.doc().blocks().iter().filter_map(|b| b.image_id).collect();
         self.db.prune_images(self.id.get(), &keep)
     }
 }

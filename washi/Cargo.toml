@@ -18,6 +18,9 @@ path = "src/main.rs"
 [features]
 default = ["accessibility"]
 accessibility = ["slint/accessibility"]
+# Keeps the work counters of `trace::counts` (`Layout::build`, `textflow::wrap`, document clones and
+# the like) for tools/snap's layout benchmark and the tests that pin them.
+trace = []
 
 [dependencies]
 # Software renderer on winit (ADR 0001). No GPU renderer features, ever (CI-checked).

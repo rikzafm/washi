@@ -1,5 +1,5 @@
 //! Ticket 03 of cross-paragraph selection: the wash of a selection is laid out by Rust
-//! (`textflow::selection_rects`) and drawn from the `sel-rects` model. Ctrl+A fills it.
+//! (`Layout::selection_rects`) and drawn from the `sel-rects` model. Ctrl+A fills it.
 
 use snap::Harness;
 use std::time::Duration;

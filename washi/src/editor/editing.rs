@@ -5,21 +5,28 @@ use super::*;
 impl Editor {
     pub fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
         if !text.contains(['\n', '\r']) {
-            let before = self.doc.borrow().clone();
-            let mut doc = self.doc.borrow_mut();
-            let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
+            // only an edit that auto-formats is an undo step of its own, so only then is the note
+            // as it was needed (a copy of it)
+            let (old, before) = {
+                let doc = self.doc();
+                let old = doc.blocks().get(i).map(|b| b.text.clone()).unwrap_or_default();
+                let before = doc.would_auto_format(i, &old, text, cursor).then(|| doc.clone());
+                (old, before)
+            };
+            let mut doc = self.doc_mut();
             let typing = self.typing.take().filter(|(c, _)| c.block == i).map(|(_, s)| s);
             let paint = self.typing_paint.take().filter(|(c, _)| c.block == i).map(|(_, p)| p);
             doc.edit_text(i, text, cursor, typing, paint);
             let caret = doc.auto_format(i, &old, cursor);
             drop(doc);
-            if caret.is_some() {
+            debug_assert_eq!(caret.is_some(), before.is_some(), "auto-format fires exactly when it was predicted");
+            if let (Some(_), Some(before)) = (caret, before) {
                 self.structural(before);
             }
             return caret;
         }
-        let before = self.doc.borrow().clone();
-        let mut doc = self.doc.borrow_mut();
+        let before = self.doc().clone();
+        let mut doc = self.doc_mut();
         let old = match doc.blocks().get(i) {
             Some(b) if b.is_text() => b.text.clone(),
             _ => return None,
@@ -47,7 +54,7 @@ impl Editor {
     pub fn edit_key(&self, i: usize, key: &str, offset: usize) -> Option<Caret> {
         use slint::platform::Key;
         let pressed = caret_motion::decode_key(key).filter(|k| matches!(k, Key::Return | Key::Backspace | Key::Delete))?;
-        let before = self.doc.borrow().clone();
+        let before = self.doc().clone();
         if before.is_image(i) {
             return self.image_key(i, key, before);
         }
@@ -56,7 +63,7 @@ impl Editor {
         } else {
             before.blocks().get(i).map(|b| b.style_for_insert(offset))
         };
-        let mut doc = self.doc.borrow_mut();
+        let mut doc = self.doc_mut();
         let edit = match pressed {
             Key::Return => {
                 let c = doc.split(i, offset);
@@ -77,7 +84,7 @@ impl Editor {
         let cursor = self.selection.get().focus.offset;
         match self.typing.get() {
             Some((c, style)) if c == (Caret { block: i, offset: cursor }) => style,
-            _ => self.doc.borrow().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
+            _ => self.doc().blocks().get(i).map_or(Flags::NONE, |b| b.style_for_insert(cursor)),
         }
     }
 
@@ -86,7 +93,7 @@ impl Editor {
         let cursor = self.selection.get().focus.offset;
         match self.typing_paint.get() {
             Some((c, paint)) if c == (Caret { block: i, offset: cursor }) => paint,
-            _ => self.doc.borrow().blocks().get(i).map_or(Paint::default(), |b| b.paint_for_insert(cursor)),
+            _ => self.doc().blocks().get(i).map_or(Paint::default(), |b| b.paint_for_insert(cursor)),
         }
     }
 
@@ -98,8 +105,8 @@ impl Editor {
             FORMAT_UNDERLINE => Flags::UNDERLINE,
             FORMAT_STRIKE => Flags::STRIKE,
             FORMAT_LIST => {
-                let before = self.doc.borrow().clone();
-                let done = self.doc.borrow_mut().toggle_list_range(self.selection.get());
+                let before = self.doc().clone();
+                let done = self.doc_mut().toggle_list_range(self.selection.get());
                 if done {
                     self.structural(before);
                 }
@@ -109,9 +116,9 @@ impl Editor {
         };
         let sel = self.selection.get();
         let (cursor, collapsed) = (sel.focus.offset, sel.anchor == sel.focus);
-        let before = self.doc.borrow().clone();
+        let before = self.doc().clone();
         let done = {
-            let mut doc = self.doc.borrow_mut();
+            let mut doc = self.doc_mut();
             if !collapsed {
                 doc.toggle_style_range(sel, flag)
             } else if let Some((start, end)) = doc.word_at(i, cursor).filter(|&(start, end)| cursor > start && cursor < end) {
@@ -139,9 +146,9 @@ impl Editor {
             self.typing_paint.set(Some((sel.focus, paint)));
             return false;
         }
-        let before = self.doc.borrow().clone();
+        let before = self.doc().clone();
         let done = {
-            let mut doc = self.doc.borrow_mut();
+            let mut doc = self.doc_mut();
             let a = ink.is_some_and(|i| doc.set_ink_range(sel, i));
             let b = marker.is_some_and(|m| doc.set_marker_range(sel, m));
             a | b
@@ -154,7 +161,7 @@ impl Editor {
 
     pub fn show_formats(&self, ui: &NoteWindow) {
         let style = {
-            let doc = self.doc.borrow();
+            let doc = self.doc();
             let sel = self.selection.get();
             match doc.blocks().get(self.caret_block()) {
                 Some(_) if sel.anchor != sel.focus => doc.common_style_range(sel),
@@ -165,7 +172,7 @@ impl Editor {
                 None => Flags::NONE,
             }
         };
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let b = doc.blocks().get(self.caret_block());
         let heading = b.is_some_and(|b| b.kind == Kind::Heading);
         ui.set_fmt_bold(heading || style.contains(Flags::BOLD));
@@ -173,7 +180,7 @@ impl Editor {
         ui.set_fmt_underline(style.contains(Flags::UNDERLINE));
         ui.set_fmt_strike(style.contains(Flags::STRIKE));
         ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
-        self.fill_handles(&doc, &self.tokens(ui));
+        self.fill_handles(&doc, &self.layout(ui));
         let sel = self.selection.get();
         let (ink, marker) = if b.is_none() {
             (Some(0), Some(0))

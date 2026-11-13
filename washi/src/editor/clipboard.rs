@@ -4,7 +4,7 @@ use super::*;
 
 impl Editor {
     pub fn copy_range(&self, clipboard: &Rc<dyn ImageClipboard>) -> bool {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         let range = self.selection.get();
         if let Some(i) = self.selected_image(&doc) {
             if let Some(b) = doc.blocks().get(i) {
@@ -22,14 +22,14 @@ impl Editor {
     }
 
     pub fn cut_range(&self, clipboard: &Rc<dyn ImageClipboard>) -> Option<Caret> {
-        let doc = self.doc.borrow();
+        let doc = self.doc();
         if let Some(i) = self.selected_image(&doc) {
             if let Some(b) = doc.blocks().get(i) {
                 if let Some(rgba) = self.images.rgba(b) {
                     let _ = clipboard.set_image(&rgba);
                     drop(doc);
-                    let before = self.doc.borrow().clone();
-                    let caret = self.doc.borrow_mut().delete_image(i)?;
+                    let before = self.doc().clone();
+                    let caret = self.doc_mut().delete_image(i)?;
                     self.structural(before);
                     return Some(caret);
                 }
@@ -49,7 +49,7 @@ impl Editor {
             let is_plain_single_body = parsed.len() == 1
                 && matches!(&parsed[0], ParsedBlock::Body { marks, paints, .. } if marks.iter().all(|m| *m == Flags::NONE) && paints.iter().all(|p| *p == Paint::default()));
             if !parsed.is_empty() && !is_plain_single_body {
-                let before = self.doc.borrow().clone();
+                let before = self.doc().clone();
                 let range = self.selection.get();
                 let db = self.db.clone();
                 let images = &self.images;
@@ -62,7 +62,7 @@ impl Editor {
                     images.add(image_id, (w, h), pixels);
                     Some(image_id)
                 };
-                let caret = self.doc.borrow_mut().replace_range_rich(range, parsed, &mut add_image);
+                let caret = self.doc_mut().replace_range_rich(range, parsed, &mut add_image);
                 self.structural(before);
                 self.notify_change(Some(caret));
                 return true;
@@ -70,7 +70,7 @@ impl Editor {
         }
         if let Some(rgba) = self.clipboard.image() {
             let after = {
-                let last = self.doc.borrow().len().saturating_sub(1);
+                let last = self.doc().len().saturating_sub(1);
                 let range = self.selection.get();
                 range.focus.block.min(last)
             };
@@ -79,8 +79,8 @@ impl Editor {
                 if let Ok(image_id) = self.db.add_image(self.id.get(), "image/png", w, h, &png) {
                     let pixels = Some(crate::note_images::to_slint(&rgba));
                     self.images.add(image_id, (w, h), pixels);
-                    let before = self.doc.borrow().clone();
-                    let at = self.doc.borrow_mut().insert_image(after, image_id);
+                    let before = self.doc().clone();
+                    let at = self.doc_mut().insert_image(after, image_id);
                     self.structural(before);
                     self.notify_change(Some(Caret { block: at + 1, offset: 0 }));
                     return true;
@@ -107,7 +107,7 @@ impl Editor {
     pub fn paste_image(&self) -> bool {
         if let Some(rgba) = self.clipboard.image() {
             let after = {
-                let last = self.doc.borrow().len().saturating_sub(1);
+                let last = self.doc().len().saturating_sub(1);
                 let range = self.selection.get();
                 range.focus.block.min(last)
             };
@@ -116,8 +116,8 @@ impl Editor {
                 if let Ok(image_id) = self.db.add_image(self.id.get(), "image/png", w, h, &png) {
                     let pixels = Some(crate::note_images::to_slint(&rgba));
                     self.images.add(image_id, (w, h), pixels);
-                    let before = self.doc.borrow().clone();
-                    let at = self.doc.borrow_mut().insert_image(after, image_id);
+                    let before = self.doc().clone();
+                    let at = self.doc_mut().insert_image(after, image_id);
                     self.structural(before);
                     self.notify_change(Some(Caret { block: at + 1, offset: 0 }));
                     return true;

@@ -30,6 +30,8 @@ pub struct NoteImages {
     slots: RefCell<HashMap<i64, Slot>>,
     /// Freed (suspended): new pictures are known by size only until [`NoteImages::thaw`].
     frozen: Cell<bool>,
+    /// Changes whenever a picture's size is added, removed or changed (see [`NoteImages::generation`]).
+    generation: Cell<u64>,
 }
 
 /// The text's tilt, degrees clockwise (`Theme.text-tilt`): a picture at rest lies on it.
@@ -84,7 +86,7 @@ pub fn to_slint(px: &Rgba) -> slint::Image {
 
 impl NoteImages {
     pub fn new(note: NoteId, db: Rc<Db>) -> NoteImages {
-        NoteImages { note: Cell::new(note), db, slots: RefCell::new(HashMap::new()), frozen: Cell::new(false) }
+        NoteImages { note: Cell::new(note), db, slots: RefCell::new(HashMap::new()), frozen: Cell::new(false), generation: Cell::new(0) }
     }
 
     fn decode_stored(&self, id: i64) -> Option<((u32, u32), Option<slint::Image>)> {
@@ -104,32 +106,57 @@ impl NoteImages {
     /// pictures of the old note are forgotten by the next [`NoteImages::load`].
     pub fn retarget(&self, note: NoteId) {
         self.note.set(note);
+        self.bump();
+    }
+
+    fn bump(&self) {
+        self.generation.set(self.generation.get() + 1);
+    }
+
+    /// A number that is another one whenever the size of any picture was added, removed or changed:
+    /// what a layout built from these sizes must be checked against.
+    pub fn generation(&self) -> u64 {
+        self.generation.get()
     }
 
     /// Learn the images a document refers to, decoding the ones not yet known, and forget the rest.
     pub fn load(&self, doc: &Document) {
+        crate::trace::count(crate::trace::counts::Count::ImagesLoad);
         let wanted: Vec<i64> = doc.blocks().iter().filter_map(|b| b.image_id).collect();
         let mut slots = self.slots.borrow_mut();
+        let known = slots.len();
         slots.retain(|id, _| wanted.contains(id));
+        if slots.len() != known {
+            self.bump();
+        }
         for id in wanted {
-            let known = slots.get(&id).is_some_and(|s| s.pixels.is_some() || self.frozen.get());
-            if known {
+            let have = slots.get(&id).is_some_and(|s| s.pixels.is_some() || self.frozen.get());
+            if have {
                 continue;
             }
             if self.frozen.get() {
                 if let Ok(Some(size)) = self.db.image_size(id) {
                     slots.insert(id, Slot { size, pixels: None, turned: None });
+                    self.bump();
                 }
             } else if let Some((size, pixels)) = self.decode_stored(id) {
                 slots.insert(id, Slot { size, pixels, turned: None });
+                self.bump();
             }
         }
+    }
+
+    /// Whether every one of `ids` has been learned (a picture whose load failed has not).
+    pub fn knows(&self, ids: &[i64]) -> bool {
+        let slots = self.slots.borrow();
+        ids.iter().all(|id| slots.contains_key(id))
     }
 
     /// Register an image that was just stored and show it.
     pub fn add(&self, id: i64, size: (u32, u32), pixels: Option<slint::Image>) {
         let pixels = if self.frozen.get() { None } else { pixels };
         self.slots.borrow_mut().insert(id, Slot { size, pixels, turned: None });
+        self.bump();
     }
 
     pub fn size(&self, block: &Block) -> Option<(u32, u32)> {

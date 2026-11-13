@@ -46,12 +46,21 @@ impl Editor {
         }
     }
 
+    /// Lay the note out again and show it, caret included.
     pub fn relayout(&self, ui: &NoteWindow) {
+        self.lay_out(ui);
+        self.show_caret(ui);
+    }
+
+    /// [`Self::relayout`] without the caret, for a caller that moves the caret next and shows it itself.
+    pub(super) fn lay_out(&self, ui: &NoteWindow) {
         ui.set_pitch_scale(ui.window().scale_factor());
         let tokens = self.tokens(ui);
-        let doc = self.doc.borrow();
-        let (mut runs, rules, markers) = textflow::layout_all_with_images(doc.blocks(), self.paper.get(), &tokens, &|b| self.images.size(b));
-        ui.set_content_height(textflow::extent_with_images(doc.blocks(), self.paper.get().0, &tokens, &|b| self.images.size(b)).1 as f32);
+        let layout = self.layout_with(&tokens);
+        let doc = self.doc();
+        let mut runs = layout.runs().to_vec();
+        let (rules, markers) = (layout.rules(), layout.markers().to_vec());
+        ui.set_content_height(layout.content_height() as f32);
         sync_rows(&self.rules, 
             rules
                 .iter()
@@ -79,10 +88,10 @@ impl Editor {
                 .collect::<Vec<_>>(),
         );
         *self.markers.borrow_mut() = markers;
-        self.fill_sel_rects(&doc, &tokens);
+        self.fill_sel_rects(&doc, &layout);
         let hint = doc.is_empty();
         if hint {
-            runs = textflow::layout(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens);
+            runs = Layout::build(&[Block::new(Kind::Title, HINT)], self.paper.get(), &tokens, &|_| None).runs().to_vec();
         }
         sync_rows(&self.runs, 
             runs.iter()
@@ -104,7 +113,6 @@ impl Editor {
                 .collect::<Vec<_>>(),
         );
         drop(doc);
-        self.show_caret(ui);
     }
 
     /// Tell the note where to draw the caret: the box of its line in the app's own layout, or
@@ -112,9 +120,9 @@ impl Editor {
     pub fn show_caret(&self, ui: &NoteWindow) {
         let sel = self.selection.get();
         let at = if sel.anchor == sel.focus && self.range.get().is_none() {
-            let doc = self.doc.borrow();
             let c = sel.focus;
-            textflow::caret_box(doc.blocks(), c.block, c.offset, self.line_end.get() == Some(c), self.paper.get().0, &self.tokens(ui), &|b| self.images.size(b))
+            self.layout(ui)
+                .caret_box(c.block, c.offset, self.line_end.get() == Some(c))
                 .map(|(x, top, bottom)| (x as f32, top as f32, bottom as f32))
         } else {
             None

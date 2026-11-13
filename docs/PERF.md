@@ -124,3 +124,95 @@ second, but it is not zero, and the repainting window wakes the event loop every
 while General is on screen (a deliberate, user-opened view); the CPU figure it shows includes its own
 cost. Idle CPU of Washi with Settings open on General has NOT been measured, and the transition frame
 cost (above) is still NOT yet measured.
+
+
+## Layout cache
+
+Baseline before the layout cache work (.scratch/layout-cache, ticket 01). Commit 992e711 (plus the wrap counter and `layout_bench`), release build (`cargo run --release -p snap --bin layout_bench`, 200 inputs per cell), Windows 11, Intel i5-13600K, 32 GB. Headless: this is layout and the app's reaction to one input, not Slint's repaint. `wraps` is `textflow::wrap` calls per input (one per text block per whole-note wrap); the same counts are pinned in `tools/snap/tests/layout_wraps.rs`. The pointer row runs on the fixture plus a pasted 300x150 picture, selected.
+
+| note | operation | median ms | p95 ms | wraps |
+|---|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.167 | 0.251 | 36 |
+| mockup.md | Down arrow | 0.079 | 0.087 | 24 |
+| mockup.md | pointer over image | 0.028 | 0.035 | 12 |
+| mockup.md | 10 px resize | 0.053 | 0.056 | 10 |
+| long.md | typed character | 1.251 | 1.428 | 156 |
+| long.md | Down arrow | 0.405 | 0.474 | 96 |
+| long.md | pointer over image | 0.169 | 0.189 | 48 |
+| long.md | 10 px resize | 0.516 | 0.624 | 46 |
+| 50 paragraphs | typed character | 9.155 | 10.380 | 506 |
+| 50 paragraphs | Down arrow | 2.433 | 2.710 | 306 |
+| 50 paragraphs | pointer over image | 1.102 | 1.513 | 153 |
+| 50 paragraphs | 10 px resize | 7.029 | 8.365 | 151 |
+### After ticket 03 (editor owns one cached `Layout`)
+
+Same machine, benchmark and method as the baseline above, release build. The editor keeps one `Layout` keyed by document revision, paper size, tokens and picture sizes, so one input costs at most one build (one `wrap` per text block: mockup.md 3, long.md 15, 50 paragraphs 50) and caret motion and the pointer cost none.
+
+| note | operation | median ms | p95 ms | wraps | before (median ms / wraps) |
+|---|---|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.119 | 0.148 | 3 | 0.167 / 36 |
+| mockup.md | Down arrow | 0.053 | 0.069 | 0 | 0.079 / 24 |
+| mockup.md | pointer over image | 0.015 | 0.016 | 0 | 0.028 / 12 |
+| mockup.md | 10 px resize | 0.048 | 0.050 | 3 | 0.053 / 10 |
+| long.md | typed character | 0.870 | 1.006 | 15 | 1.251 / 156 |
+| long.md | Down arrow | 0.141 | 0.170 | 0 | 0.405 / 96 |
+| long.md | pointer over image | 0.046 | 0.047 | 0 | 0.169 / 48 |
+| long.md | 10 px resize | 0.470 | 0.579 | 15 | 0.516 / 46 |
+| 50 paragraphs | typed character | 6.627 | 7.432 | 50 | 9.155 / 506 |
+| 50 paragraphs | Down arrow | 0.679 | 0.830 | 0 | 2.433 / 306 |
+| 50 paragraphs | pointer over image | 0.237 | 0.275 | 0 | 1.102 / 153 |
+| 50 paragraphs | 10 px resize | 6.473 | 7.113 | 50 | 7.029 / 151 |
+
+What is left of a keystroke is the single build (still wraps every block; ticket 05 would cut that to the edited block) plus the draw-list rows.
+
+
+### After ticket 04 (edit-path cleanups)
+
+Same machine and method, release build. A typed character no longer copies the `Document` (only an auto-formatting one does), `apply_change` computes the caret box once, and `sync_model` builds a window row only for the changed block and loads pictures only when the note's set of pictures changed (pinned in `tools/snap/tests/edit_path.rs`). On a 50 paragraph note that is 50 rows built before and 1 now, and no picture reload; the wrap counts are unchanged.
+
+| note | operation | median ms | p95 ms | wraps | after ticket 03 (median ms) |
+|---|---|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.116 | 0.152 | 3 | 0.119 |
+| mockup.md | Down arrow | 0.052 | 0.059 | 0 | 0.053 |
+| mockup.md | pointer over image | 0.015 | 0.015 | 0 | 0.015 |
+| mockup.md | 10 px resize | 0.049 | 0.067 | 3 | 0.048 |
+| long.md | typed character | 0.852 | 1.013 | 15 | 0.870 |
+| long.md | Down arrow | 0.140 | 0.171 | 0 | 0.141 |
+| long.md | pointer over image | 0.045 | 0.051 | 0 | 0.046 |
+| long.md | 10 px resize | 0.475 | 0.585 | 15 | 0.470 |
+| 50 paragraphs | typed character | 6.700 | 7.418 | 50 | 6.627 |
+| 50 paragraphs | Down arrow | 0.674 | 0.824 | 0 | 0.679 |
+| 50 paragraphs | pointer over image | 0.236 | 0.285 | 0 | 0.237 |
+| 50 paragraphs | 10 px resize | 6.557 | 7.432 | 50 | 6.473 |
+
+The keystroke time did not move: the work removed (a document copy, a second caret box, 49 row builds) is microseconds next to the rest of the keystroke, which this benchmark shows is not the layout either. `layout_bench` now also times one `Layout::build` against the typed character it is part of:
+
+| note | Layout::build median ms | typed character median ms | share |
+|---|---|---|---|
+| mockup.md | 0.012 | 0.117 | 10% |
+| long.md | 0.136 | 0.848 | 16% |
+| 50 paragraphs | 0.928 | 6.665 | 14% |
+
+So a wrap cache (ticket 05) could save at most about 10 to 16% of a keystroke here (less, as it would still lay out the edited block).
+
+
+### Final: before and after (ticket 06)
+
+The old free functions are gone; Layout is the only geometry source. Same machine and method as above, release build, median ms / wraps per input, the baseline of ticket 01 against the final tree.
+
+| note | operation | before (ms / wraps) | now (ms / wraps) |
+|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.167 / 36 | 0.118 / 3 |
+| mockup.md | Down arrow | 0.079 / 24 | 0.053 / 0 |
+| mockup.md | pointer over image | 0.028 / 12 | 0.015 / 0 |
+| mockup.md | 10 px resize | 0.053 / 10 | 0.048 / 3 |
+| long.md | typed character | 1.251 / 156 | 0.860 / 15 |
+| long.md | Down arrow | 0.405 / 96 | 0.140 / 0 |
+| long.md | pointer over image | 0.169 / 48 | 0.045 / 0 |
+| long.md | 10 px resize | 0.516 / 46 | 0.475 / 15 |
+| 50 paragraphs | typed character | 9.155 / 506 | 6.645 / 50 |
+| 50 paragraphs | Down arrow | 2.433 / 306 | 0.671 / 0 |
+| 50 paragraphs | pointer over image | 1.102 / 153 | 0.237 / 0 |
+| 50 paragraphs | 10 px resize | 7.029 / 151 | 6.445 / 50 |
+
+The measured gain is one layout build per input, which is 3x to 12x fewer wrap passes (506 to 50 on a typed character of the 50 paragraph note, 36 to 3 on the mockup); most of a keystroke is spent elsewhere, in the work done for Slint, not in the layout.
