@@ -14,7 +14,7 @@ use std::rc::Rc;
 pub use crate::note_window::{ClosedItem, ContextMenuWindow};
 
 /// Width of the card, logical px.
-pub const CARD_WIDTH: f32 = 352.0;
+pub const CARD_WIDTH: f32 = 212.0;
 /// Transparent margin around the card that holds its shadow, logical px.
 pub const SHADOW_MARGIN: f32 = 16.0;
 
