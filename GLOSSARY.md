@@ -43,3 +43,7 @@ _Avoid_: Setting page, preferences, options window
 **Tab**:
 One section of the Settings page, shown on the Paper: General, Appearance, Font & Style, Shortcuts, Privacy.
 _Avoid_: Page, section
+
+**Layout**:
+The Note's geometry at one Paper size: where every block starts, where each line wraps, and so where the caret, a click, a selection and a picture are. Rebuilt when the text, the Paper, the tokens or a picture's size changes; every question about where text is is answered from it.
+_Avoid_: Text flow, wrap (wrapping is one step of building it)
