@@ -194,3 +194,25 @@ The keystroke time did not move: the work removed (a document copy, a second car
 | 50 paragraphs | 0.928 | 6.665 | 14% |
 
 So a wrap cache (ticket 05) could save at most about 10 to 16% of a keystroke here (less, as it would still lay out the edited block).
+
+
+### Final: before and after (ticket 06)
+
+The old free functions are gone; Layout is the only geometry source. Same machine and method as above, release build, median ms / wraps per input, the baseline of ticket 01 against the final tree.
+
+| note | operation | before (ms / wraps) | now (ms / wraps) |
+|---|---|---|---|
+| mockup.md (3 blocks) | typed character | 0.167 / 36 | 0.118 / 3 |
+| mockup.md | Down arrow | 0.079 / 24 | 0.053 / 0 |
+| mockup.md | pointer over image | 0.028 / 12 | 0.015 / 0 |
+| mockup.md | 10 px resize | 0.053 / 10 | 0.048 / 3 |
+| long.md | typed character | 1.251 / 156 | 0.860 / 15 |
+| long.md | Down arrow | 0.405 / 96 | 0.140 / 0 |
+| long.md | pointer over image | 0.169 / 48 | 0.045 / 0 |
+| long.md | 10 px resize | 0.516 / 46 | 0.475 / 15 |
+| 50 paragraphs | typed character | 9.155 / 506 | 6.645 / 50 |
+| 50 paragraphs | Down arrow | 2.433 / 306 | 0.671 / 0 |
+| 50 paragraphs | pointer over image | 1.102 / 153 | 0.237 / 0 |
+| 50 paragraphs | 10 px resize | 7.029 / 151 | 6.445 / 50 |
+
+The measured gain is one layout build per input, which is 3x to 12x fewer wrap passes (506 to 50 on a typed character of the 50 paragraph note, 36 to 3 on the mockup); most of a keystroke is spent elsewhere, in the work done for Slint, not in the layout.
