@@ -15,23 +15,27 @@
 //! while editing as well, each piece in its own face.
 
 use crate::document::{Block, Caret, Kind, Paint, Range, Style as Flags};
+use std::rc::Rc;
 use ttf_parser::Face;
 
-/// How many times `wrap` has run (a whole block's text broken into lines). Counted only in tests and
-/// with the `trace` feature, so a release build pays nothing for it.
+// How many times `wrap` has run (a whole block's text broken into lines). Counted only in tests and
+// with the `trace` feature, so a release build pays nothing for it. The count is per thread, so tests
+// running side by side do not count each other's wraps.
 #[cfg(any(test, feature = "trace"))]
-static WRAP_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+thread_local! {
+    static WRAP_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
-/// Calls to `wrap` since the last [`reset_wrap_calls`].
+/// Calls to `wrap` on this thread since the last [`reset_wrap_calls`].
 #[cfg(any(test, feature = "trace"))]
 pub fn wrap_calls() -> usize {
-    WRAP_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+    WRAP_CALLS.with(|c| c.get())
 }
 
 /// Start counting `wrap` calls from zero.
 #[cfg(any(test, feature = "trace"))]
 pub fn reset_wrap_calls() {
-    WRAP_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+    WRAP_CALLS.with(|c| c.set(0));
 }
 
 /// A marker is a line pitch tall less this much at its top and bottom, so marked lines do not touch.
@@ -43,14 +47,14 @@ const ITALIC: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Italic.ttf");
 const BOLD_ITALIC: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-BoldItalic.ttf");
 
 /// The look of one kind of block: font size and line pitch, in logical px.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Style {
     pub size: f64,
     pub pitch: f64,
 }
 
 /// Fixed logical values from `ui/theme.slint`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tokens {
     pub inset_left: f64,
     pub inset_right: f64,
@@ -72,7 +76,7 @@ pub struct Tokens {
 }
 
 impl Tokens {
-    fn measure<'a>(&self, size: f64) -> Measure<'a> {
+    fn measure(&self, size: f64) -> Measure {
         Measure { spacing: self.letter_spacing * size, ..Measure::new(false, false, size) }
     }
 
@@ -109,22 +113,27 @@ pub struct Run {
     pub dy: f64,
 }
 
-struct Measure<'a> {
-    face: Face<'a>,
+/// The four faces, parsed on first use and kept: regular, bold, italic, bold italic.
+fn faces() -> &'static [Face<'static>; 4] {
+    static FACES: std::sync::OnceLock<[Face<'static>; 4]> = std::sync::OnceLock::new();
+    FACES.get_or_init(|| [REGULAR, BOLD, ITALIC, BOLD_ITALIC].map(|data| Face::parse(data, 0).expect("embedded font parses")))
+}
+
+struct Measure {
+    face: &'static Face<'static>,
     scale: f64,
     /// Added to every character's advance (letter spacing), logical px.
     spacing: f64,
 }
 
-impl<'a> Measure<'a> {
-    fn new(bold: bool, italic: bool, size: f64) -> Measure<'a> {
-        let data = match (bold, italic) {
-            (false, false) => REGULAR,
-            (true, false) => BOLD,
-            (false, true) => ITALIC,
-            (true, true) => BOLD_ITALIC,
+impl Measure {
+    fn new(bold: bool, italic: bool, size: f64) -> Measure {
+        let face = match (bold, italic) {
+            (false, false) => &faces()[0],
+            (true, false) => &faces()[1],
+            (false, true) => &faces()[2],
+            (true, true) => &faces()[3],
         };
-        let face = Face::parse(data, 0).expect("embedded font parses");
         let scale = size / face.units_per_em() as f64;
         Measure { face, scale, spacing: 0.0 }
     }
@@ -171,7 +180,7 @@ fn push_word(lines: &mut [Vec<Word>], word: Word) {
 /// scroll short of its end and move the caret to the wrong lines.
 fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
     #[cfg(any(test, feature = "trace"))]
-    WRAP_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    WRAP_CALLS.with(|c| c.set(c.get() + 1));
     let mut lines: Vec<Vec<Word>> = vec![vec![]];
     let mut x = 0.0;
     let mut pending = 0.0; // trailing spaces since the last word
@@ -331,15 +340,20 @@ pub fn caret_line_on(b: &Block, offset: usize, line_end: bool, paper_w: f64, t: 
     let m = t.measure(t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
-    let mut offset = offset.min(b.text.len());
-    while !b.text.is_char_boundary(offset) {
+    caret_line_in(&b.text, &starts, &m, offset, line_end)
+}
+
+/// [`caret_line_on`] on a block's text already wrapped (`starts` are its [`line_starts`]).
+fn caret_line_in(text: &str, starts: &[usize], m: &Measure, offset: usize, line_end: bool) -> CaretLine {
+    let mut offset = offset.min(text.len());
+    while !text.is_char_boundary(offset) {
         offset -= 1;
     }
     let mut line = starts.iter().rposition(|&s| s <= offset).unwrap_or(0);
     if line_end && line > 0 && starts[line] == offset {
         line -= 1;
     }
-    CaretLine { line, lines: lines.len(), x: m.width(&b.text[starts[line]..offset]) }
+    CaretLine { line, lines: starts.len(), x: m.width(&text[starts[line]..offset]) }
 }
 
 /// The byte offset on visual `line` (clamped to the block's last) of block `b` nearest to `x`.
@@ -355,17 +369,22 @@ pub fn offset_on_line(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) 
     let m = t.measure(t.style(b.kind).size);
     let lines = wrap(&b.text, avail, &m);
     let starts = line_starts(&lines);
+    offset_in(&b.text, &lines, &starts, &m, line, x)
+}
+
+/// [`offset_on_line`] on a block's text already wrapped.
+fn offset_in(text: &str, lines: &[Vec<Word>], starts: &[usize], m: &Measure, line: usize, x: f64) -> (usize, bool) {
     let line = line.min(lines.len() - 1);
     let start = starts[line];
     let line_words = &lines[line];
     let line_text_end = if line == lines.len() - 1 {
-        b.text.len()
+        text.len()
     } else {
-        line_words.last().map_or(b.text.len(), |w| w.off + w.text.len())
+        line_words.last().map_or(text.len(), |w| w.off + w.text.len())
     };
     let mut best = (start, f64::MAX);
     let mut at = 0.0;
-    for (i, c) in b.text[start..line_text_end].char_indices().map(|(i, c)| (start + i, c)) {
+    for (i, c) in text[start..line_text_end].char_indices().map(|(i, c)| (start + i, c)) {
         let d = (at - x).abs();
         if d < best.1 {
             best = (i, d);
@@ -468,71 +487,78 @@ pub fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, i
         }
         let m = t.measure(st.size);
         let lines = wrap(&b.text, avail, &m);
-        let base = baseline(&m, st.pitch);
-        let thick = (st.size / 20.0).max(1.0);
-        let bar = |rules: &mut Vec<Rule>, x: f64, y: f64, width: f64, height: f64| {
-            let mut at = 0.0;
-            while at < width - 1e-9 {
-                let w = (width - at).min(t.max_run);
-                let (dx, dy) = tilt_offset(x + at + w / 2.0, y + height / 2.0, paper, t.tilt_deg);
-                rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy });
-                at += w;
-            }
-        };
-        if b.kind == Kind::ListItem {
-            let d = (st.size / 4.0).max(3.0);
-            bar(&mut rules, t.inset_left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
-        }
-        for (li, line) in lines.iter().enumerate() {
-            let y = top + li as f64 * st.pitch;
-            for Word { text: word, at, off } in line {
-                let mut x = t.inset_left + at;
-                for (s, e) in look_runs(b, *off, *off + word.len()) {
-                    let shown = b.shown_at(s);
-                    let (bold, italic) = (shown.contains(Flags::BOLD), shown.contains(Flags::ITALIC));
-                    let Paint { ink, marker } = b.paints[s];
-                    for piece in pieces(&b.text[s..e], t.max_run, &m) {
-                        let width = m.width(&piece);
-                        let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
-                        runs.push(Run { block: bi, kind: b.kind, bold, italic, ink, marker, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
-                        x += width;
-                    }
-                }
-            }
-            if let (Some(first), Some(last)) = (line.first(), line.last()) {
-                // from the line's first word to the end of its last (the spaces between words
-                // included, those after the last left out)
-                let (from, to) = (first.off, last.off + last.text.len());
-                let x_of = |i: usize| t.inset_left + first.at + m.width(&b.text[from..i]);
-                // a marker per stretch of one color, from the stretch's first character to its last
-                let mut i = from;
-                while i < to {
-                    let color = b.paints[i].marker;
-                    let j = (i..to).find(|&k| b.paints[k].marker != color).unwrap_or(to);
-                    if color != 0 {
-                        markers.push(Marker { block: bi, marker: color, x: x_of(i), y: y + MARKER_INSET, width: x_of(j) - x_of(i), height: st.pitch - 2.0 * MARKER_INSET });
-                    }
-                    i = j;
-                }
-                for (flag, lift) in [(Flags::UNDERLINE, -0.1), (Flags::STRIKE, 0.3)] {
-                    let mut i = from;
-                    while i < to {
-                        // every byte of a character has its mark: a change is at a character boundary
-                        if !b.marks[i].contains(flag) {
-                            i += 1;
-                            continue;
-                        }
-                        let j = (i..to).find(|&k| !b.marks[k].contains(flag)).unwrap_or(to);
-                        bar(&mut rules, x_of(i), y + base - lift * st.size, x_of(j) - x_of(i), thick);
-                        i = j;
-                    }
-                }
-            }
-        }
+        draw_block(b, bi, top, &lines, &m, paper, t, &mut runs, &mut rules, &mut markers);
         // every block takes at least one line, even when empty
         top += lines.len() as f64 * st.pitch;
     }
     (runs, rules, markers)
+}
+
+/// The words, bars and markers of one text block whose lines start at `top`, pushed onto the lists.
+#[allow(clippy::too_many_arguments)]
+fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, paper: (f64, f64), t: &Tokens, runs: &mut Vec<Run>, rules: &mut Vec<Rule>, markers: &mut Vec<Marker>) {
+    let st = t.style(b.kind);
+    let base = baseline(m, st.pitch);
+    let thick = (st.size / 20.0).max(1.0);
+    let bar = |rules: &mut Vec<Rule>, x: f64, y: f64, width: f64, height: f64| {
+        let mut at = 0.0;
+        while at < width - 1e-9 {
+            let w = (width - at).min(t.max_run);
+            let (dx, dy) = tilt_offset(x + at + w / 2.0, y + height / 2.0, paper, t.tilt_deg);
+            rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy });
+            at += w;
+        }
+    };
+    if b.kind == Kind::ListItem {
+        let d = (st.size / 4.0).max(3.0);
+        bar(rules, t.inset_left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
+    }
+    for (li, line) in lines.iter().enumerate() {
+        let y = top + li as f64 * st.pitch;
+        for Word { text: word, at, off } in line {
+            let mut x = t.inset_left + at;
+            for (s, e) in look_runs(b, *off, *off + word.len()) {
+                let shown = b.shown_at(s);
+                let (bold, italic) = (shown.contains(Flags::BOLD), shown.contains(Flags::ITALIC));
+                let Paint { ink, marker } = b.paints[s];
+                for piece in pieces(&b.text[s..e], t.max_run, m) {
+                    let width = m.width(&piece);
+                    let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
+                    runs.push(Run { block: bi, kind: b.kind, bold, italic, ink, marker, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                    x += width;
+                }
+            }
+        }
+        if let (Some(first), Some(last)) = (line.first(), line.last()) {
+            // from the line's first word to the end of its last (the spaces between words
+            // included, those after the last left out)
+            let (from, to) = (first.off, last.off + last.text.len());
+            let x_of = |i: usize| t.inset_left + first.at + m.width(&b.text[from..i]);
+            // a marker per stretch of one color, from the stretch's first character to its last
+            let mut i = from;
+            while i < to {
+                let color = b.paints[i].marker;
+                let j = (i..to).find(|&k| b.paints[k].marker != color).unwrap_or(to);
+                if color != 0 {
+                    markers.push(Marker { block: bi, marker: color, x: x_of(i), y: y + MARKER_INSET, width: x_of(j) - x_of(i), height: st.pitch - 2.0 * MARKER_INSET });
+                }
+                i = j;
+            }
+            for (flag, lift) in [(Flags::UNDERLINE, -0.1), (Flags::STRIKE, 0.3)] {
+                let mut i = from;
+                while i < to {
+                    // every byte of a character has its mark: a change is at a character boundary
+                    if !b.marks[i].contains(flag) {
+                        i += 1;
+                        continue;
+                    }
+                    let j = (i..to).find(|&k| !b.marks[k].contains(flag)).unwrap_or(to);
+                    bar(rules, x_of(i), y + base - lift * st.size, x_of(j) - x_of(i), thick);
+                    i = j;
+                }
+            }
+        }
+    }
 }
 
 /// Vertical extent of the text in the paper's frame: the top of every block, and the bottom of the
@@ -651,26 +677,33 @@ pub fn selection_rects(blocks: &[Block], range: Range, paper_w: f64, t: &Tokens,
         let m = t.measure(st.size);
         let lines = wrap(&b.text, avail, &m);
         let starts = line_starts(&lines);
-        for (li, &ls) in starts.iter().enumerate() {
-            let last = li + 1 == starts.len();
-            let le = if last { b.text.len() } else { starts[li + 1] };
-            if (from >= le && !last) || to < ls {
-                continue;
-            }
-            let (a, e) = (from.clamp(ls, le), to.clamp(ls, le));
-            let pad = if last { bi < end.block } else { to > le };
-            if a >= e && !pad {
-                continue;
-            }
-            // the space a wrap breaks at is not shown washed: the pad stands for it
-            let shown_end = if last { e } else { e.min(ls + b.text[ls..le].trim_end().len()).max(a) };
-            let x0 = m.width(&b.text[ls..a]);
-            let x1 = m.width(&b.text[ls..shown_end]);
-            let tail = if pad { st.size * 0.3 } else { 0.0 };
-            out.push(Rect { x: t.inset_left + x0, y: tops[bi] + li as f64 * st.pitch, width: x1 - x0 + tail, height: st.pitch });
-        }
+        wash_block(&b.text, &starts, &m, st, t.inset_left, tops[bi], (from, to), bi < end.block, &mut out);
     }
     out
+}
+
+/// The wash of `from..to` of one text block (wrapped to `starts`) whose lines start at `top`; `closes`
+/// when the range goes on into a later block, so the last line gets its pad. See [`selection_rects`].
+#[allow(clippy::too_many_arguments)]
+fn wash_block(text: &str, starts: &[usize], m: &Measure, st: Style, left: f64, top: f64, (from, to): (usize, usize), closes: bool, out: &mut Vec<Rect>) {
+    for (li, &ls) in starts.iter().enumerate() {
+        let last = li + 1 == starts.len();
+        let le = if last { text.len() } else { starts[li + 1] };
+        if (from >= le && !last) || to < ls {
+            continue;
+        }
+        let (a, e) = (from.clamp(ls, le), to.clamp(ls, le));
+        let pad = if last { closes } else { to > le };
+        if a >= e && !pad {
+            continue;
+        }
+        // the space a wrap breaks at is not shown washed: the pad stands for it
+        let shown_end = if last { e } else { e.min(ls + text[ls..le].trim_end().len()).max(a) };
+        let x0 = m.width(&text[ls..a]);
+        let x1 = m.width(&text[ls..shown_end]);
+        let tail = if pad { st.size * 0.3 } else { 0.0 };
+        out.push(Rect { x: left + x0, y: top + li as f64 * st.pitch, width: x1 - x0 + tail, height: st.pitch });
+    }
 }
 
 /// Where the picture of block `block` is drawn (level paper frame); `None` when it is no picture.
@@ -680,6 +713,194 @@ pub fn image_rect(blocks: &[Block], block: usize, paper_w: f64, t: &Tokens, imag
     let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
     let (x, width, height) = image_size(b).map_or((0.0, avail, t.style(b.kind).pitch), |px| b.image_box(avail, px));
     Some(Rect { x: t.inset_left + x, y: tops[block], width, height })
+}
+
+/// One block's text broken into lines: the words of each line, and the byte offset each line starts at.
+struct Wrapped {
+    lines: Vec<Vec<Word>>,
+    starts: Vec<usize>,
+}
+
+struct BlockLayout {
+    kind: Kind,
+    /// Where the block starts, in the paper's frame.
+    top: f64,
+    /// The text this was wrapped from (queries measure in it).
+    text: Rc<str>,
+    lines: Rc<Wrapped>,
+    /// x (from the text area's left edge), width and height of a picture block.
+    image: Option<(f64, f64, f64)>,
+}
+
+/// A note's geometry at one paper size and one set of tokens: where every block starts and where
+/// every line of it wraps. Built once; every question about where text is answers from it.
+///
+/// It keeps its own copy of each block's text and never looks at the document again, so it cannot be
+/// asked about a document it was not built from. Every answer is what the free functions of this
+/// module ([`caret_box`], [`hit_on_line`], [`selection_rects`], ...) give for the same document, to
+/// the last bit: the same sums in the same order.
+pub struct Layout {
+    paper: (f64, f64),
+    tokens: Tokens,
+    blocks: Vec<BlockLayout>,
+    /// The bottom of the last line (what the note scrolls through).
+    bottom: f64,
+    runs: Vec<Run>,
+    rules: Vec<Rule>,
+    markers: Vec<Marker>,
+}
+
+impl Layout {
+    /// Lay `blocks` out in a paper of size `paper` (logical px), wrapping each text block once.
+    /// `image_size` gives a picture's size in pixels (see [`layout_all_with_images`]).
+    pub fn build(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Layout {
+        let avail = paper.0 - t.inset_left - t.inset_right;
+        let (mut runs, mut rules, mut markers) = (vec![], vec![], vec![]);
+        let mut laid = Vec::with_capacity(blocks.len());
+        let mut top = t.inset_top;
+        for (bi, b) in blocks.iter().enumerate() {
+            let st = t.style(b.kind);
+            if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
+                top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
+            }
+            if b.kind == Kind::Image {
+                let image = image_size(b).map_or((0.0, avail, st.pitch), |px| b.image_box(avail, px));
+                // a picture has one empty line, as far as the caret is concerned
+                let lines = vec![vec![]];
+                let starts = line_starts(&lines);
+                laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(Wrapped { lines, starts }), image: Some(image) });
+                top += image.2;
+                continue;
+            }
+            let m = t.measure(st.size);
+            let lines = wrap(&b.text, avail, &m);
+            draw_block(b, bi, top, &lines, &m, paper, t, &mut runs, &mut rules, &mut markers);
+            let starts = line_starts(&lines);
+            let count = lines.len();
+            laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(Wrapped { lines, starts }), image: None });
+            // every block takes at least one line, even when empty
+            top += count as f64 * st.pitch;
+        }
+        Layout { paper, tokens: *t, blocks: laid, bottom: top, runs, rules, markers }
+    }
+
+    /// The paper size this was laid out in.
+    pub fn paper(&self) -> (f64, f64) {
+        self.paper
+    }
+
+    /// The tokens this was laid out with.
+    pub fn tokens(&self) -> &Tokens {
+        &self.tokens
+    }
+
+    /// Every word (or piece of a word) to draw, upright, with its offset onto the tilted baseline.
+    pub fn runs(&self) -> &[Run] {
+        &self.runs
+    }
+
+    /// The bars: underlines, strike-throughs and list bullets.
+    pub fn rules(&self) -> &[Rule] {
+        &self.rules
+    }
+
+    /// The markers behind colored text.
+    pub fn markers(&self) -> &[Marker] {
+        &self.markers
+    }
+
+    /// The bottom of the last line in the paper's frame.
+    pub fn content_height(&self) -> f64 {
+        self.bottom
+    }
+
+    /// Where block `block` starts, in the paper's frame.
+    pub fn block_top(&self, block: usize) -> Option<f64> {
+        self.blocks.get(block).map(|b| b.top)
+    }
+
+    fn measure(&self, b: &BlockLayout) -> Measure {
+        self.tokens.measure(self.tokens.style(b.kind).size)
+    }
+
+    /// [`caret_line_on`] for byte `offset` of block `block`.
+    pub fn caret_line(&self, block: usize, offset: usize, line_end: bool) -> Option<CaretLine> {
+        let b = self.blocks.get(block)?;
+        Some(caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, line_end))
+    }
+
+    /// [`offset_on_line`] on visual `line` of block `block`.
+    pub fn offset_on_line(&self, block: usize, line: usize, x: f64) -> Option<(usize, bool)> {
+        let b = self.blocks.get(block)?;
+        Some(offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, x))
+    }
+
+    /// Where the caret at byte `offset` of text block `block` is drawn: its x, and the top and bottom
+    /// of its line box. `line_end` as in [`caret_line_on`]. An image has no caret.
+    pub fn caret_box(&self, block: usize, offset: usize, line_end: bool) -> Option<(f64, f64, f64)> {
+        let b = self.blocks.get(block).filter(|b| b.kind != Kind::Image)?;
+        let pitch = self.tokens.style(b.kind).pitch;
+        let at = caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, line_end);
+        let y = b.top + at.line as f64 * pitch;
+        Some((self.tokens.inset_left + at.x, y, y + pitch))
+    }
+
+    /// The top and bottom of the line holding the caret (byte `offset` of block `block`).
+    pub fn caret_span(&self, block: usize, offset: usize) -> Option<(f64, f64)> {
+        let b = self.blocks.get(block)?;
+        let pitch = self.tokens.style(b.kind).pitch;
+        let y = b.top + caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, false).line as f64 * pitch;
+        Some((y, y + pitch))
+    }
+
+    /// [`hit_on_line`] for `point` (level paper frame, x from the paper's left edge).
+    pub fn hit_on_line(&self, point: (f64, f64)) -> (Caret, bool) {
+        let Some(last) = self.blocks.len().checked_sub(1) else { return (Caret { block: 0, offset: 0 }, false) };
+        if point.1 < self.blocks[0].top {
+            return (Caret { block: 0, offset: 0 }, false);
+        }
+        if point.1 >= self.bottom {
+            let b = &self.blocks[last];
+            return (Caret { block: last, offset: if b.kind == Kind::Image { 0 } else { b.text.len() } }, false);
+        }
+        let block = self.blocks.iter().rposition(|b| b.top <= point.1).unwrap_or(0);
+        let b = &self.blocks[block];
+        if b.kind == Kind::Image {
+            return (Caret { block, offset: 0 }, false);
+        }
+        let pitch = self.tokens.style(b.kind).pitch;
+        let line = ((point.1 - b.top) / pitch).floor().max(0.0) as usize;
+        let (offset, line_end) = offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, point.0 - self.tokens.inset_left);
+        (Caret { block, offset }, line_end)
+    }
+
+    /// The wash of a selection ([`selection_rects`]).
+    pub fn selection_rects(&self, range: Range) -> Vec<Rect> {
+        let (start, end) = range.ordered();
+        if start == end {
+            return vec![];
+        }
+        let t = &self.tokens;
+        let mut out = vec![];
+        for bi in start.block..=end.block.min(self.blocks.len().saturating_sub(1)) {
+            let Some(b) = self.blocks.get(bi) else { break };
+            if let Some((x, width, height)) = b.image {
+                out.push(Rect { x: t.inset_left + x, y: b.top, width, height });
+                continue;
+            }
+            let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
+            let to = if bi == end.block { end.offset.min(b.text.len()) } else { b.text.len() };
+            wash_block(&b.text, &b.lines.starts, &self.measure(b), t.style(b.kind), t.inset_left, b.top, (from, to), bi < end.block, &mut out);
+        }
+        out
+    }
+
+    /// Where the picture of block `block` is drawn (level paper frame); `None` when it is no picture.
+    pub fn image_rect(&self, block: usize) -> Option<Rect> {
+        let b = self.blocks.get(block)?;
+        let (x, width, height) = b.image?;
+        Some(Rect { x: self.tokens.inset_left + x, y: b.top, width, height })
+    }
 }
 
 #[cfg(test)]
@@ -1108,5 +1329,525 @@ mod tests {
         assert_eq!(caret_line(body, end0, 363.0, &TOKENS).line, 0);
         let multi = Block::new(Kind::Body, "héllo wörld");
         assert!(multi.text.is_char_boundary(offset_at(&multi, 0, 20.0, 363.0, &TOKENS)));
+    }
+}
+
+/// The free functions as they were before `Layout`, verbatim: the oracle the equivalence tests compare
+/// `Layout` against. Deleted with the free functions (layout-cache ticket 06).
+#[cfg(test)]
+mod reference {
+    #![allow(dead_code)]
+    use super::*;
+
+    pub(super) fn caret_line(b: &Block, offset: usize, paper_w: f64, t: &Tokens) -> CaretLine {
+        caret_line_on(b, offset, false, paper_w, t)
+    }
+
+    /// [`caret_line`], with the side of a wrap the caret is on: with `line_end`, an offset that starts
+    /// a line (other than the first) is the end of the line before it.
+    pub(super) fn caret_line_on(b: &Block, offset: usize, line_end: bool, paper_w: f64, t: &Tokens) -> CaretLine {
+        let avail = paper_w - t.inset_left - t.inset_right;
+        let m = t.measure(t.style(b.kind).size);
+        let lines = wrap(&b.text, avail, &m);
+        let starts = line_starts(&lines);
+        let mut offset = offset.min(b.text.len());
+        while !b.text.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        let mut line = starts.iter().rposition(|&s| s <= offset).unwrap_or(0);
+        if line_end && line > 0 && starts[line] == offset {
+            line -= 1;
+        }
+        CaretLine { line, lines: lines.len(), x: m.width(&b.text[starts[line]..offset]) }
+    }
+
+    pub(super) fn offset_on_line(b: &Block, line: usize, x: f64, paper_w: f64, t: &Tokens) -> (usize, bool) {
+        let avail = paper_w - t.inset_left - t.inset_right;
+        let m = t.measure(t.style(b.kind).size);
+        let lines = wrap(&b.text, avail, &m);
+        let starts = line_starts(&lines);
+        let line = line.min(lines.len() - 1);
+        let start = starts[line];
+        let line_words = &lines[line];
+        let line_text_end = if line == lines.len() - 1 {
+            b.text.len()
+        } else {
+            line_words.last().map_or(b.text.len(), |w| w.off + w.text.len())
+        };
+        let mut best = (start, f64::MAX);
+        let mut at = 0.0;
+        for (i, c) in b.text[start..line_text_end].char_indices().map(|(i, c)| (start + i, c)) {
+            let d = (at - x).abs();
+            if d < best.1 {
+                best = (i, d);
+            }
+            at += m.advance(c);
+        }
+        let d = (at - x).abs();
+        if d < best.1 {
+            best = (line_text_end, d);
+        }
+        (best.0, best.0 > start && starts.get(line + 1) == Some(&best.0))
+    }
+
+    pub(super) fn layout_all_with_images(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<Run>, Vec<Rule>, Vec<Marker>) {
+        let avail = paper.0 - t.inset_left - t.inset_right;
+        let mut runs = vec![];
+        let mut rules = vec![];
+        let mut markers = vec![];
+        let mut top = t.inset_top;
+        for (bi, b) in blocks.iter().enumerate() {
+            let st = t.style(b.kind);
+            if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
+                top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
+            }
+            if b.kind == Kind::Image {
+                top += image_size(b).map_or(st.pitch, |px| b.image_box(avail, px).2);
+                continue;
+            }
+            let m = t.measure(st.size);
+            let lines = wrap(&b.text, avail, &m);
+            let base = baseline(&m, st.pitch);
+            let thick = (st.size / 20.0).max(1.0);
+            let bar = |rules: &mut Vec<Rule>, x: f64, y: f64, width: f64, height: f64| {
+                let mut at = 0.0;
+                while at < width - 1e-9 {
+                    let w = (width - at).min(t.max_run);
+                    let (dx, dy) = tilt_offset(x + at + w / 2.0, y + height / 2.0, paper, t.tilt_deg);
+                    rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy });
+                    at += w;
+                }
+            };
+            if b.kind == Kind::ListItem {
+                let d = (st.size / 4.0).max(3.0);
+                bar(&mut rules, t.inset_left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
+            }
+            for (li, line) in lines.iter().enumerate() {
+                let y = top + li as f64 * st.pitch;
+                for Word { text: word, at, off } in line {
+                    let mut x = t.inset_left + at;
+                    for (s, e) in look_runs(b, *off, *off + word.len()) {
+                        let shown = b.shown_at(s);
+                        let (bold, italic) = (shown.contains(Flags::BOLD), shown.contains(Flags::ITALIC));
+                        let Paint { ink, marker } = b.paints[s];
+                        for piece in pieces(&b.text[s..e], t.max_run, &m) {
+                            let width = m.width(&piece);
+                            let (dx, dy) = tilt_offset(x + width / 2.0, y + st.pitch / 2.0, paper, t.tilt_deg);
+                            runs.push(Run { block: bi, kind: b.kind, bold, italic, ink, marker, line: li, text: piece, x, y, width, size: st.size, pitch: st.pitch, dx, dy });
+                            x += width;
+                        }
+                    }
+                }
+                if let (Some(first), Some(last)) = (line.first(), line.last()) {
+                    // from the line's first word to the end of its last (the spaces between words
+                    // included, those after the last left out)
+                    let (from, to) = (first.off, last.off + last.text.len());
+                    let x_of = |i: usize| t.inset_left + first.at + m.width(&b.text[from..i]);
+                    // a marker per stretch of one color, from the stretch's first character to its last
+                    let mut i = from;
+                    while i < to {
+                        let color = b.paints[i].marker;
+                        let j = (i..to).find(|&k| b.paints[k].marker != color).unwrap_or(to);
+                        if color != 0 {
+                            markers.push(Marker { block: bi, marker: color, x: x_of(i), y: y + MARKER_INSET, width: x_of(j) - x_of(i), height: st.pitch - 2.0 * MARKER_INSET });
+                        }
+                        i = j;
+                    }
+                    for (flag, lift) in [(Flags::UNDERLINE, -0.1), (Flags::STRIKE, 0.3)] {
+                        let mut i = from;
+                        while i < to {
+                            // every byte of a character has its mark: a change is at a character boundary
+                            if !b.marks[i].contains(flag) {
+                                i += 1;
+                                continue;
+                            }
+                            let j = (i..to).find(|&k| !b.marks[k].contains(flag)).unwrap_or(to);
+                            bar(&mut rules, x_of(i), y + base - lift * st.size, x_of(j) - x_of(i), thick);
+                            i = j;
+                        }
+                    }
+                }
+            }
+            // every block takes at least one line, even when empty
+            top += lines.len() as f64 * st.pitch;
+        }
+        (runs, rules, markers)
+    }
+
+    pub(super) fn extent_with_images(blocks: &[Block], paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Vec<f64>, f64) {
+        let avail = paper_w - t.inset_left - t.inset_right;
+        let mut tops = vec![];
+        let mut top = t.inset_top;
+        for (bi, b) in blocks.iter().enumerate() {
+            let st = t.style(b.kind);
+            if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
+                top += if b.kind == Kind::Heading { t.heading_gap } else { t.body_gap };
+            }
+            tops.push(top);
+            if b.kind == Kind::Image {
+                top += image_size(b).map_or(st.pitch, |px| b.image_box(avail, px).2);
+                continue;
+            }
+            let m = t.measure(st.size);
+            top += wrap(&b.text, avail, &m).len() as f64 * st.pitch;
+        }
+        (tops, top)
+    }
+
+    pub(super) fn caret_span_with_images(blocks: &[Block], block: usize, offset: usize, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Option<(f64, f64)> {
+        let b = blocks.get(block)?;
+        let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+        let pitch = t.style(b.kind).pitch;
+        let y = tops[block] + caret_line(b, offset, paper_w, t).line as f64 * pitch;
+        Some((y, y + pitch))
+    }
+
+    pub(super) fn caret_box(blocks: &[Block], block: usize, offset: usize, line_end: bool, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Option<(f64, f64, f64)> {
+        let b = blocks.get(block).filter(|b| b.kind != Kind::Image)?;
+        let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+        let pitch = t.style(b.kind).pitch;
+        let at = caret_line_on(b, offset, line_end, paper_w, t);
+        let y = tops[block] + at.line as f64 * pitch;
+        Some((t.inset_left + at.x, y, y + pitch))
+    }
+
+    pub(super) fn hit_on_line(blocks: &[Block], point: (f64, f64), paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> (Caret, bool) {
+        let (tops, bottom) = extent_with_images(blocks, paper_w, t, image_size);
+        let Some(last) = blocks.len().checked_sub(1) else { return (Caret { block: 0, offset: 0 }, false) };
+        if point.1 < tops[0] {
+            return (Caret { block: 0, offset: 0 }, false);
+        }
+        if point.1 >= bottom {
+            return (Caret { block: last, offset: if blocks[last].kind == Kind::Image { 0 } else { blocks[last].text.len() } }, false);
+        }
+        let block = tops.iter().rposition(|&top| top <= point.1).unwrap_or(0);
+        let b = &blocks[block];
+        if b.kind == Kind::Image {
+            return (Caret { block, offset: 0 }, false);
+        }
+        let pitch = t.style(b.kind).pitch;
+        let line = ((point.1 - tops[block]) / pitch).floor().max(0.0) as usize;
+        let (offset, line_end) = offset_on_line(b, line, point.0 - t.inset_left, paper_w, t);
+        (Caret { block, offset }, line_end)
+    }
+
+    pub(super) fn selection_rects(blocks: &[Block], range: Range, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Vec<Rect> {
+        let (start, end) = range.ordered();
+        if start == end {
+            return vec![];
+        }
+        let avail = paper_w - t.inset_left - t.inset_right;
+        let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+        let mut out = vec![];
+        for bi in start.block..=end.block.min(blocks.len().saturating_sub(1)) {
+            let b = &blocks[bi];
+            let st = t.style(b.kind);
+            if b.kind == Kind::Image {
+                let (x, width, height) = image_size(b).map_or((0.0, avail, st.pitch), |px| b.image_box(avail, px));
+                out.push(Rect { x: t.inset_left + x, y: tops[bi], width, height });
+                continue;
+            }
+            let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
+            let to = if bi == end.block { end.offset.min(b.text.len()) } else { b.text.len() };
+            let m = t.measure(st.size);
+            let lines = wrap(&b.text, avail, &m);
+            let starts = line_starts(&lines);
+            for (li, &ls) in starts.iter().enumerate() {
+                let last = li + 1 == starts.len();
+                let le = if last { b.text.len() } else { starts[li + 1] };
+                if (from >= le && !last) || to < ls {
+                    continue;
+                }
+                let (a, e) = (from.clamp(ls, le), to.clamp(ls, le));
+                let pad = if last { bi < end.block } else { to > le };
+                if a >= e && !pad {
+                    continue;
+                }
+                // the space a wrap breaks at is not shown washed: the pad stands for it
+                let shown_end = if last { e } else { e.min(ls + b.text[ls..le].trim_end().len()).max(a) };
+                let x0 = m.width(&b.text[ls..a]);
+                let x1 = m.width(&b.text[ls..shown_end]);
+                let tail = if pad { st.size * 0.3 } else { 0.0 };
+                out.push(Rect { x: t.inset_left + x0, y: tops[bi] + li as f64 * st.pitch, width: x1 - x0 + tail, height: st.pitch });
+            }
+        }
+        out
+    }
+
+    pub(super) fn image_rect(blocks: &[Block], block: usize, paper_w: f64, t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Option<Rect> {
+        let b = blocks.get(block).filter(|b| b.kind == Kind::Image)?;
+        let avail = paper_w - t.inset_left - t.inset_right;
+        let (tops, _) = extent_with_images(blocks, paper_w, t, image_size);
+        let (x, width, height) = image_size(b).map_or((0.0, avail, t.style(b.kind).pitch), |px| b.image_box(avail, px));
+        Some(Rect { x: t.inset_left + x, y: tops[block], width, height })
+    }
+
+}
+
+/// `Layout` against the free functions it replaces (`reference`), on every fixture, paper width and
+/// token set, with `==`: the same arithmetic in the same order must give the same floats.
+#[cfg(test)]
+mod layout_equivalence {
+    use super::*;
+    use crate::document::{Align, Document};
+
+    const FIXTURES: [(&str, &str); 5] = [
+        ("colored.md", include_str!("../../docs/design/fixtures/colored.md")),
+        ("empty.md", include_str!("../../docs/design/fixtures/empty.md")),
+        ("long.md", include_str!("../../docs/design/fixtures/long.md")),
+        ("mockup.md", include_str!("../../docs/design/fixtures/mockup.md")),
+        ("mixed-note.md", include_str!("../../tools/snap/tests/fixtures/mixed-note.md")),
+    ];
+
+    const BASE: Tokens = Tokens {
+        inset_left: 32.0,
+        inset_right: 40.0,
+        inset_top: 38.2,
+        heading_gap: 10.0,
+        body_gap: 8.1,
+        title: Style { size: 37.3, pitch: 60.0 },
+        heading: Style { size: 24.0, pitch: 29.3 },
+        body: Style { size: 22.65, pitch: 29.1 },
+        tilt_deg: 1.45,
+        max_run: f64::MAX,
+        letter_spacing: 0.0,
+    };
+
+    pub(super) const WIDTHS: [f64; 4] = [200.0, 363.0, 500.0, 900.0];
+
+    /// Plain tokens, and ones that cut words into pieces, space the letters and tilt the other way.
+    pub(super) fn token_sets() -> [Tokens; 2] {
+        [BASE, Tokens { max_run: 16.0, letter_spacing: 0.05, tilt_deg: -2.5, ..BASE }]
+    }
+
+    /// Every picture 200x100 pixels, or only the ones with an odd id (the others have no size yet).
+    pub(super) fn size_fns() -> [fn(&Block) -> Option<(u32, u32)>; 3] {
+        [|_| None, |b| b.image_id.map(|_| (200, 100)), |b| b.image_id.filter(|id| id % 2 == 1).map(|_| (640, 480))]
+    }
+
+    fn generated() -> Vec<(String, Document)> {
+        let long_word = "w".repeat(150);
+        let mut aligned = vec![Block::new(Kind::Title, "pictures")];
+        for (i, align) in [Align::Left, Align::Center, Align::Right].into_iter().enumerate() {
+            let mut img = Block::image(i as i64 + 1);
+            img.align = align;
+            img.image_pct = [100, 50, 33][i];
+            aligned.push(img);
+            aligned.push(Block::new(Kind::Body, "between the pictures"));
+        }
+        aligned.push(Block::image(4));
+        let mut styled = Document::from_blocks(vec![Block::new(Kind::Title, "styled"), Block::new(Kind::Body, "bold words, some underlined and struck, then more of them that wrap onto a second line")]);
+        styled.toggle_style(1, 0, 9, Flags::BOLD);
+        styled.toggle_style(1, 10, 30, Flags::UNDERLINE);
+        styled.toggle_style(1, 25, 45, Flags::STRIKE);
+        styled.toggle_style(1, 40, 55, Flags::ITALIC);
+        styled.set_ink(1, 5, 20, 2);
+        styled.set_marker(1, 15, 60, 1);
+        vec![
+            ("empty note".into(), Document::new()),
+            ("title only".into(), Document::from_blocks(vec![Block::new(Kind::Title, "Just a title")])),
+            ("empty title and body".into(), Document::from_blocks(vec![Block::new(Kind::Title, ""), Block::new(Kind::Body, "")])),
+            ("one very long word".into(), Document::from_blocks(vec![Block::new(Kind::Title, "t"), Block::new(Kind::Body, &long_word)])),
+            (
+                "wrapped list items".into(),
+                Document::from_blocks(vec![
+                    Block::new(Kind::Title, "list"),
+                    Block::new(Kind::ListItem, "the first item is long enough to need a second line when the paper is narrow"),
+                    Block::new(Kind::ListItem, "short"),
+                    Block::new(Kind::ListItem, "libopenssl-sys-bfe5c79-libcrypto-lib-ct-b64 with a path/like/this/one"),
+                    Block::new(Kind::Heading, "A heading that also wraps if the paper is narrow enough"),
+                    Block::new(Kind::Body, "naïve café — 日本語のテキスト and emoji 😀 mixed in"),
+                ]),
+            ),
+            ("pictures, every alignment".into(), Document::from_blocks(aligned)),
+            ("styled".into(), styled),
+        ]
+    }
+
+    pub(super) fn documents() -> Vec<(String, Document)> {
+        let mut out: Vec<(String, Document)> = FIXTURES.iter().map(|(n, t)| (n.to_string(), Document::parse(t))).collect();
+        out.extend(generated());
+        out
+    }
+
+    /// Every case: a document at a paper width with a token set and an image-size rule.
+    pub(super) fn cases() -> Vec<(String, Document, (f64, f64), Tokens, fn(&Block) -> Option<(u32, u32)>)> {
+        let mut out = vec![];
+        for (name, doc) in documents() {
+            // the sizes only matter to a note with pictures
+            let sizes = if doc.blocks().iter().any(|b| b.kind == Kind::Image) { 3 } else { 1 };
+            for w in WIDTHS {
+                for (ti, t) in token_sets().into_iter().enumerate() {
+                    for (si, size) in size_fns().into_iter().enumerate().take(sizes) {
+                        out.push((format!("{name} @ {w} tokens {ti} sizes {si}"), doc.clone(), (w, 433.0), t, size));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_draw_lists_and_the_content_height_equal_the_free_functions() {
+        for (name, doc, paper, t, size) in cases() {
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            let (runs, rules, markers) = reference::layout_all_with_images(doc.blocks(), paper, &t, &size);
+            let (tops, bottom) = reference::extent_with_images(doc.blocks(), paper.0, &t, &size);
+            assert_eq!(layout.runs(), runs, "{name}: runs");
+            assert_eq!(layout.rules(), rules, "{name}: rules");
+            assert_eq!(layout.markers(), markers, "{name}: markers");
+            assert_eq!(layout.content_height(), bottom, "{name}: content height");
+            for (bi, top) in tops.iter().enumerate() {
+                assert_eq!(layout.block_top(bi), Some(*top), "{name}: top of block {bi}");
+            }
+            assert_eq!(layout.block_top(tops.len()), None, "{name}: no block past the last");
+        }
+    }
+
+    #[test]
+    fn building_wraps_each_text_block_exactly_once_and_queries_never_wrap() {
+        for (name, doc, paper, t, size) in cases() {
+            let text_blocks = doc.blocks().iter().filter(|b| b.kind != Kind::Image).count();
+            reset_wrap_calls();
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            assert_eq!(wrap_calls(), text_blocks, "{name}: wraps to build");
+            let _ = (layout.runs(), layout.content_height(), layout.block_top(0));
+            assert_eq!(wrap_calls(), text_blocks, "{name}: reads wrap nothing");
+        }
+    }
+}
+
+/// The questions asked of a `Layout`, against the free functions that re-wrap the note to answer them.
+#[cfg(test)]
+mod layout_query_equivalence {
+    use super::layout_equivalence::cases;
+    use super::*;
+
+    /// Every byte offset of a block's text, and a few past its end (which clamp).
+    fn offsets(b: &Block) -> std::ops::RangeInclusive<usize> {
+        0..=b.text.len() + 2
+    }
+
+    /// Offsets that are character boundaries and matter to a wash: the ends, every line start and the
+    /// character before it, and the middle.
+    fn wash_offsets(layout: &Layout, block: usize) -> Vec<usize> {
+        let b = &layout.blocks[block];
+        let floor = |mut i: usize| {
+            while !b.text.is_char_boundary(i) {
+                i -= 1;
+            }
+            i
+        };
+        let mut out = vec![0, b.text.len(), floor(b.text.len() / 2)];
+        for &s in &b.lines.starts {
+            out.push(s);
+            out.push(floor(s.saturating_sub(1)));
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    #[test]
+    fn caret_queries_equal_the_free_functions_at_every_offset() {
+        for (name, doc, paper, t, size) in cases() {
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            for (bi, b) in doc.blocks().iter().enumerate() {
+                for offset in offsets(b) {
+                    assert_eq!(layout.caret_span(bi, offset), reference::caret_span_with_images(doc.blocks(), bi, offset, paper.0, &t, &size), "{name}: caret_span {bi}:{offset}");
+                    for line_end in [false, true] {
+                        let want = reference::caret_line_on(b, offset, line_end, paper.0, &t);
+                        assert_eq!(layout.caret_line(bi, offset, line_end), Some(want), "{name}: caret_line {bi}:{offset} end={line_end}");
+                        assert_eq!(layout.caret_box(bi, offset, line_end), reference::caret_box(doc.blocks(), bi, offset, line_end, paper.0, &t, &size), "{name}: caret_box {bi}:{offset} end={line_end}");
+                    }
+                }
+            }
+            let past = doc.blocks().len();
+            assert_eq!(layout.caret_line(past, 0, false), None, "{name}");
+            assert_eq!(layout.caret_box(past, 0, false), None, "{name}");
+            assert_eq!(layout.caret_span(past, 0), None, "{name}");
+            assert_eq!(layout.offset_on_line(past, 0, 0.0), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn offset_on_line_equals_the_free_function_on_every_line_and_x() {
+        for (name, doc, paper, t, size) in cases() {
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            for (bi, b) in doc.blocks().iter().enumerate() {
+                let lines = layout.caret_line(bi, 0, false).unwrap().lines;
+                for line in 0..lines + 2 {
+                    for x in [-10.0, 0.0, 7.3, 50.0, 120.5, 300.0, 5000.0] {
+                        assert_eq!(layout.offset_on_line(bi, line, x), Some(reference::offset_on_line(b, line, x, paper.0, &t)), "{name}: block {bi} line {line} x {x}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hit_equals_the_free_function_on_a_grid_of_points_around_and_inside_the_note() {
+        for (name, doc, paper, t, size) in cases() {
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            let (tops, bottom) = reference::extent_with_images(doc.blocks(), paper.0, &t, &size);
+            let xs = [-20.0, 0.0, 31.9, 32.0, 100.0, 150.5, 200.0, paper.0 - 40.0, paper.0, paper.0 + 50.0];
+            let mut ys: Vec<f64> = vec![];
+            let mut y = -10.0;
+            while y < bottom + 30.0 {
+                ys.push(y);
+                y += 3.7;
+            }
+            for top in tops.iter().copied().chain([bottom]) {
+                ys.extend([top - 1e-9, top, top + 1e-9, top - 1.0]);
+            }
+            for &y in &ys {
+                for x in xs {
+                    assert_eq!(layout.hit_on_line((x, y)), reference::hit_on_line(doc.blocks(), (x, y), paper.0, &t, &size), "{name}: hit ({x}, {y})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn selection_rects_equal_the_free_function_for_ranges_within_across_and_over_blocks() {
+        for (name, doc, paper, t, size) in cases() {
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            let blocks = doc.blocks();
+            let mut ranges = vec![];
+            for a in 0..blocks.len() {
+                for from in wash_offsets(&layout, a) {
+                    for b in a..blocks.len().min(a + 3) {
+                        for to in wash_offsets(&layout, b) {
+                            ranges.push(Range { anchor: Caret { block: a, offset: from }, focus: Caret { block: b, offset: to } });
+                            ranges.push(Range { anchor: Caret { block: b, offset: to }, focus: Caret { block: a, offset: from } });
+                        }
+                    }
+                }
+            }
+            ranges.push(doc.all());
+            for range in ranges {
+                assert_eq!(layout.selection_rects(range), reference::selection_rects(blocks, range, paper.0, &t, &size), "{name}: {range:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn image_rect_equals_the_free_function_for_every_block() {
+        for (name, doc, paper, t, size) in cases() {
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            for bi in 0..doc.blocks().len() + 1 {
+                assert_eq!(layout.image_rect(bi), reference::image_rect(doc.blocks(), bi, paper.0, &t, &size), "{name}: image_rect {bi}");
+            }
+        }
+    }
+
+    #[test]
+    fn queries_never_wrap() {
+        for (_, doc, paper, t, size) in cases().into_iter().take(40) {
+            let layout = Layout::build(doc.blocks(), paper, &t, &size);
+            reset_wrap_calls();
+            let _ = (layout.caret_box(0, 0, false), layout.caret_span(1, 0), layout.hit_on_line((50.0, 100.0)), layout.selection_rects(doc.all()), layout.image_rect(1), layout.offset_on_line(0, 0, 10.0));
+            assert_eq!(wrap_calls(), 0);
+        }
     }
 }
