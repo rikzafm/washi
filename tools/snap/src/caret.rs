@@ -40,10 +40,22 @@ impl Harness {
                 let (ui, editor) = (n.ui(), n.editor());
                 let layout = editor.layout(ui);
                 let (top, bottom) = layout.caret_span(block, offset).expect("the block exists");
-                let x = layout.caret_line(block, offset, false).expect("the block exists").x + layout.tokens().inset_left;
+                // from the text area's left edge, past a check item's box
+                let x = layout.caret_line(block, offset, false).expect("the block exists").x + layout.tokens().inset_left + layout.indent(block);
                 let (margin, scroll) = (ui.get_window_margin() as f64, ui.get_scroll_y() as f64);
                 ((margin + x) as f32, (margin + top - scroll) as f32, (margin + bottom - scroll) as f32)
             })
+            .unwrap()
+    }
+
+    /// Where the note's edit fields end and where the app's layout ends, in logical px of the
+    /// paper's frame: the bottom of the last field and the bottom of the last laid-out line. They are
+    /// the same when every field wraps its text to as many lines as the layout does.
+    pub fn fields_and_layout_bottom(&self, note: usize) -> (f32, f32) {
+        // the fields are laid out for a frame: draw one, so their heights are the current text's
+        let _ = self.render(note);
+        self.app()
+            .with_note(self.id(note), |n| (n.ui().get_fields_bottom(), n.editor().layout(n.ui()).content_height() as f32))
             .unwrap()
     }
 
