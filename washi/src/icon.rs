@@ -258,5 +258,65 @@ pub fn res_file() -> Vec<u8> {
         group.extend_from_slice(&id.to_le_bytes());
     }
     resource(&mut out, 14, 1, &group);
+    resource(&mut out, 16, 1, &version_info()); // RT_VERSION: Task Manager's app name comes from here
     out
+}
+
+/// A VS_VERSIONINFO block naming the app "Washi Note" (Task Manager shows FileDescription).
+fn version_info() -> Vec<u8> {
+    fn u16s(s: &str) -> Vec<u8> {
+        s.encode_utf16().chain(std::iter::once(0)).flat_map(|c| c.to_le_bytes()).collect()
+    }
+    fn pad(v: &mut Vec<u8>) {
+        while v.len() % 4 != 0 {
+            v.push(0);
+        }
+    }
+    // One block: length, value length, type, key, padding, value, padding, children.
+    fn block(key: &str, kind: u16, value_len: u16, value: &[u8], children: &[u8]) -> Vec<u8> {
+        let mut b = vec![0u8; 6];
+        b.extend(u16s(key));
+        pad(&mut b);
+        b.extend_from_slice(value);
+        pad(&mut b);
+        b.extend_from_slice(children);
+        let len = b.len() as u16;
+        b[0..2].copy_from_slice(&len.to_le_bytes());
+        b[2..4].copy_from_slice(&value_len.to_le_bytes());
+        b[4..6].copy_from_slice(&kind.to_le_bytes());
+        b
+    }
+    let text = |key: &str, value: &str| {
+        let v = u16s(value);
+        let mut b = block(key, 1, (v.len() / 2) as u16, &v, &[]);
+        pad(&mut b);
+        b
+    };
+    let mut strings = Vec::new();
+    for (k, v) in [
+        ("CompanyName", "Washi"),
+        ("FileDescription", "Washi Note"),
+        ("FileVersion", "0.1.0.0"),
+        ("InternalName", "washi"),
+        ("OriginalFilename", "washi.exe"),
+        ("ProductName", "Washi Note"),
+        ("ProductVersion", "0.1.0.0"),
+    ] {
+        strings.extend(text(k, v));
+    }
+    let mut table = block("040904B0", 1, 0, &[], &strings);
+    pad(&mut table);
+    let mut sfi = block("StringFileInfo", 1, 0, &[], &table);
+    pad(&mut sfi);
+    let mut var = block("Translation", 0, 4, &[0x09, 0x04, 0xB0, 0x04], &[]);
+    pad(&mut var);
+    let mut vfi = block("VarFileInfo", 1, 0, &[], &var);
+    pad(&mut vfi);
+    let mut fixed = Vec::new();
+    for v in [0xFEEF04BDu32, 0x0001_0000, 0x0000_0001, 0, 0x0000_0001, 0, 0x3F, 0, 4, 1, 0, 0, 0] {
+        fixed.extend_from_slice(&v.to_le_bytes());
+    }
+    let mut children = sfi;
+    children.extend(vfi);
+    block("VS_VERSION_INFO", 0, 52, &fixed, &children)
 }

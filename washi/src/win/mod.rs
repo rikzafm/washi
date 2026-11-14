@@ -67,6 +67,9 @@ pub fn set_window_icon(hwnd: isize) {
             let icon = LoadImageW(module, 1 as _, IMAGE_ICON, cx, cy, LR_SHARED);
             if !icon.is_null() {
                 SendMessageW(hwnd as _, WM_SETICON, kind as usize, icon as isize);
+                // The taskbar's preview list falls back to the window class icon for its title row.
+                let slot = if kind == ICON_BIG { GCLP_HICON } else { GCLP_HICONSM };
+                SetClassLongPtrW(hwnd as _, slot, icon as isize);
             }
         }
     }
