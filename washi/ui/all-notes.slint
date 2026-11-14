@@ -5,6 +5,7 @@
 // keeps its place on screen. The sidebar is drawn in the window's left strip, tilted -1deg like
 // the mockup, with a slate backing so the dark text reads on any wallpaper.
 
+import { Theme } from "theme.slint";
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { Frame, Tilt, TRect } from "toolbar.slint";
@@ -61,7 +62,7 @@ component SidebarRow inherits Rectangle {
         width: SidebarPanel.label-w * 1px;
         height: 52px;
         text: root.item.title;
-        font-size: 22px;
+        font-size: 22px * Theme.ui-fit;
         font-weight: root.selected ? 700 : 400;
         vertical-alignment: center;
         overflow: elide;
@@ -185,7 +186,7 @@ export component AllNotesSidebar inherits Rectangle {
         x: Tilt.x(root.pf, -113.0, root.top-v + 8.0) * 1px;
         y: Tilt.y(root.pf, -113.0, root.top-v + 8.0) * 1px;
         text: "Notes";
-        font-size: 44px;
+        font-size: 44px * Theme.ui-fit;
         halo: root.halo;
     }
 
@@ -223,7 +224,7 @@ export component AllNotesSidebar inherits Rectangle {
         x: Tilt.x(root.pf, -113.0, root.top-v + 68.0) * 1px;
         y: Tilt.y(root.pf, -113.0, root.top-v + 68.0) * 1px;
         text: root.open-count + " open · " + root.closed-count + " closed";
-        font-size: 18px;
+        font-size: 18px * Theme.ui-fit;
         ink: #5B616B;
         halo: root.halo;
     }
@@ -248,7 +249,7 @@ export component AllNotesSidebar inherits Rectangle {
             x: Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
             y: Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 4.0 - root.scroll-y) * 1px;
             text: "OPEN";
-            font-size: 18px;
+            font-size: 18px * Theme.ui-fit;
             letter-spacing: 0.72px;
             ink: #5B616B;
             halo: root.halo;
@@ -269,7 +270,7 @@ export component AllNotesSidebar inherits Rectangle {
             x: Tilt.x(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) * 1px;
             y: Tilt.y(root.lf, -119.0, root.top-v + root.header-h + 30.0 + root.n-open * root.row-pitch + 18.0 - root.scroll-y) * 1px;
             text: "CLOSED";
-            font-size: 18px;
+            font-size: 18px * Theme.ui-fit;
             letter-spacing: 0.72px;
             ink: #5B616B;
             halo: root.halo;
@@ -318,8 +319,8 @@ export component AllNotesSidebar inherits Rectangle {
         width: 100px;
         height: 44px;
         text: "New note";
-        font-family: "Shadows Into Light";
-        font-size: 21px;
+        font-family: Theme.handwriting;
+        font-size: 21px * Theme.ui-fit;
         color: #FFFFFD;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -521,8 +522,8 @@ export component AllNotesActionBar inherits Rectangle {
             height: 22px;
             text: "Delete";
             wrap: no-wrap;
-            font-family: "Shadows Into Light";
-            font-size: 15.4px;
+            font-family: Theme.handwriting;
+            font-size: 15.4px * Theme.ui-fit;
             color: #2B2F36;
             vertical-alignment: center;
         }
@@ -533,8 +534,8 @@ export component AllNotesActionBar inherits Rectangle {
             height: 22px;
             text: "for";
             wrap: no-wrap;
-            font-family: "Shadows Into Light";
-            font-size: 15.4px;
+            font-family: Theme.handwriting;
+            font-size: 15.4px * Theme.ui-fit;
             color: #2B2F36;
             vertical-alignment: center;
         }
@@ -545,8 +546,8 @@ export component AllNotesActionBar inherits Rectangle {
             height: 22px;
             text: "good?";
             wrap: no-wrap;
-            font-family: "Shadows Into Light";
-            font-size: 15.4px;
+            font-family: Theme.handwriting;
+            font-size: 15.4px * Theme.ui-fit;
             color: #2B2F36;
             vertical-alignment: center;
         }
@@ -568,8 +569,8 @@ export component AllNotesActionBar inherits Rectangle {
             width: 54px;
             height: 30px;
             text: "Keep";
-            font-family: "Shadows Into Light";
-            font-size: 14.2px;
+            font-family: Theme.handwriting;
+            font-size: 14.2px * Theme.ui-fit;
             color: #2B2F36;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -604,8 +605,8 @@ export component AllNotesActionBar inherits Rectangle {
             width: 60px;
             height: 30px;
             text: "Delete";
-            font-family: "Shadows Into Light";
-            font-size: 13.8px;
+            font-family: Theme.handwriting;
+            font-size: 13.8px * Theme.ui-fit;
             color: #FFFFFD;
             horizontal-alignment: center;
             vertical-alignment: center;

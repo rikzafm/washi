@@ -253,7 +253,7 @@ export component StyleTab inherits Rectangle {
                 height: 44px;
                 text: "px";
                 font-family: Theme.handwriting;
-                font-size: 19px;
+                font-size: 19px * Theme.ui-fit;
                 color: #5B616B;
                 vertical-alignment: center;
             }
@@ -310,7 +310,7 @@ export component StyleTab inherits Rectangle {
                     height: 26px;
                     text: root.font-name;
                     font-family: Theme.handwriting;
-                    font-size: 20px;
+                    font-size: 20px * Theme.ui-fit;
                     color: #2B2F36;
                     vertical-alignment: center;
                     overflow: elide;
@@ -322,8 +322,8 @@ export component StyleTab inherits Rectangle {
                     width: parent.width - 24px;
                     height: 17px;
                     text: root.font-summary;
-                    font-family: "Shadows Into Light";
-                    font-size: 14px;
+                    font-family: Theme.handwriting;
+                    font-size: 14px * Theme.ui-fit;
                     color: #5B616B;
                     vertical-alignment: center;
                     overflow: elide;

@@ -265,6 +265,37 @@ pub fn set_size(size: u32) {
     SIZE.with(|s| s.set(size.clamp(*FONT_SIZE_RANGE.start(), *FONT_SIZE_RANGE.end())));
 }
 
+// ---- The UI fit: how much UI text shrinks for a wide font ----
+
+/// Mean advance of the characters of [`SAMPLE_UI_TEXT`] a face has, in em (what
+/// `FontMetrics::avg_advance_em` is for a baked face).
+pub fn avg_advance_em(face: &Face) -> f32 {
+    let upem = face.units_per_em() as f32;
+    let advances: Vec<f32> = SAMPLE_UI_TEXT
+        .chars()
+        .filter_map(|c| face.glyph_index(c).and_then(|g| face.glyph_hor_advance(g)))
+        .map(f32::from)
+        .collect();
+    if advances.is_empty() {
+        return 0.0;
+    }
+    advances.iter().sum::<f32>() / advances.len() as f32 / upem
+}
+
+/// The lowest UI fit: a font wider than the Default font by more than 1 / 0.70 is not shrunk further.
+pub const UI_FIT_FLOOR: f32 = 0.70;
+
+/// The UI fit of a font whose labels average `font_avg` em, against the Default font's average:
+/// `clamp(default / font, 0.70, 1.0)`. Exactly 1 when the font is no wider than the Default font.
+pub fn ui_fit_for(font_avg: f32) -> f32 {
+    static DEFAULT_AVG: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    let default_avg = *DEFAULT_AVG.get_or_init(|| avg_advance_em(&Face::parse(REGULAR, 0).expect("embedded font parses")));
+    if font_avg <= 0.0 || default_avg <= 0.0 {
+        return 1.0;
+    }
+    (default_avg / font_avg).clamp(UI_FIT_FLOOR, 1.0)
+}
+
 /// The font the notes' text is laid out in and drawn with.
 pub struct ActiveFont {
     /// `Theme.handwriting`: the family the words are drawn in.
@@ -273,6 +304,8 @@ pub struct ActiveFont {
     pub caret_family: String,
     pub faces: FaceData,
     pub metrics: ThemeMetrics,
+    /// `Theme.ui-fit`: what every UI font size is multiplied by ([`ui_fit_for`]); 1 for the Default font.
+    pub ui_fit: f32,
     /// Differs for every font made by [`set_current`] (0 until then): layouts built for another
     /// font are stale (`Tokens::font_epoch`).
     pub epoch: u32,
@@ -287,6 +320,7 @@ impl ActiveFont {
             caret_family: DEFAULT_CARET_FAMILY.into(),
             faces: FaceData::new(blobs).expect("embedded font parses"),
             metrics: ThemeMetrics::DEFAULT,
+            ui_fit: 1.0,
             epoch: 0,
         }
     }
@@ -296,7 +330,8 @@ impl ActiveFont {
     pub fn new(text_family: &str, caret_family: &str, blobs: [Cow<'static, [u8]>; 4]) -> Result<ActiveFont, ttf_parser::FaceParsingError> {
         let faces = FaceData::new(blobs)?;
         let metrics = ThemeMetrics::of(faces.face(false, false));
-        Ok(ActiveFont { text_family: text_family.into(), caret_family: caret_family.into(), faces, metrics, epoch: 0 })
+        let ui_fit = ui_fit_for(avg_advance_em(faces.face(false, false)));
+        Ok(ActiveFont { text_family: text_family.into(), caret_family: caret_family.into(), faces, metrics, ui_fit, epoch: 0 })
     }
 
     /// The active font for a baked [`FaceSet`], already registered with Slint under its families.
@@ -307,6 +342,7 @@ impl ActiveFont {
             caret_family: set.caret_family.clone(),
             faces: FaceData::new(blobs)?,
             metrics: ThemeMetrics::from_engine(&set.metrics),
+            ui_fit: ui_fit_for(set.metrics.avg_advance_em),
             epoch: 0,
         })
     }
@@ -321,6 +357,7 @@ impl ActiveFont {
         theme.set_lean_room(self.metrics.lean_room_em);
         theme.set_descender_room(self.metrics.descender_room_em);
         theme.set_italic_overhang(self.metrics.italic_overhang_em);
+        theme.set_ui_fit(self.ui_fit);
         SizeTokens::at(size()).apply(theme);
         theme.set_text_epoch(theme.get_text_epoch().wrapping_add(1));
     }

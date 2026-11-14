@@ -45,6 +45,7 @@ impl ContextMenu {
     ) -> Result<Self, slint::PlatformError> {
         let popup = Popup::new(ContextMenuWindow::new()?);
         let ui = popup.ui();
+        crate::fonts::current().apply(&ui.global::<crate::note_window::Theme>());
         let areas: Rc<Vec<ScreenRect>> = Rc::new(work_areas.to_vec());
         {
             let (weak, scale, areas) = (ui.as_weak(), popup.scale().clone(), areas.clone());

@@ -2,6 +2,7 @@
 // two cannot drift apart: only what is drawn on the panel differs. Window px, in the strip the
 // Sidebar adds left of the Paper. The panel's backdrop (its Theme) is drawn by `SidebarBackdrop`.
 
+import { Theme } from "theme.slint";
 import { Frame, TRect } from "toolbar.slint";
 import { PaperTheme } from "paper-theme.slint";
 
@@ -94,8 +95,8 @@ export component HaloText inherits Rectangle {
         width: root.width;
         height: root.height;
         text: root.text;
-        font-family: "Shadows Into Light";
-        font-size: root.font-size;
+        font-family: Theme.handwriting;
+        font-size: root.font-size * Theme.ui-fit;
         font-weight: root.font-weight;
         letter-spacing: root.letter-spacing;
         color: SidebarThemes.halo-color;
@@ -109,8 +110,8 @@ export component HaloText inherits Rectangle {
         width: root.width;
         height: root.height;
         text: root.text;
-        font-family: "Shadows Into Light";
-        font-size: root.font-size;
+        font-family: Theme.handwriting;
+        font-size: root.font-size * Theme.ui-fit;
         font-weight: root.font-weight;
         letter-spacing: root.letter-spacing;
         color: root.ink;

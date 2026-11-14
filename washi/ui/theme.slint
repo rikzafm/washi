@@ -36,6 +36,8 @@ export global Theme {
     // The note text's family and the other font-dependent numbers below are set from Rust, on every
     // window, from the active font (src/fonts); the values here are the Default font's.
     in-out property <string> handwriting: "Shadows Into Light";
+    // UI text is drawn at its size times this: clamp(Default font's average advance / the Font in use's, 0.70, 1.0) over a sample of UI labels, so a wide font takes the room the Default font took. 1 for the Default font. Note text never uses it. Set from Rust with the font.
+    in-out property <float> ui-fit: 1;
     // Extra space after every character of a note's text, in em of its size (Settings › Font &
     // Style › Letter spacing; 0 is the font's own). The app sets it from the saved choice, and
     // src/textflow.rs lays the lines out with the same spacing.

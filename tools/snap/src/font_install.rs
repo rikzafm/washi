@@ -56,6 +56,42 @@ impl Harness {
         self.app().with_note(self.id(note), |n| n.ui().global::<washi::note_window::Theme>().get_handwriting().to_string()).unwrap()
     }
 
+    /// The family and UI fit factor of every open UI surface (Settings, All notes, the Dropdown menu,
+    /// the right-click menu, the Delete dialog), by name, in that order.
+    pub fn ui_surfaces(&self) -> Vec<(&'static str, String, f32)> {
+        use washi::note_window::Theme;
+        macro_rules! of {
+            ($name:expr, $ui:expr) => {{
+                let t = $ui.global::<Theme>();
+                ($name, t.get_handwriting().to_string(), t.get_ui_fit())
+            }};
+        }
+        let app = self.app();
+        let mut v = Vec::new();
+        if let Some(s) = app.settings() {
+            v.push(of!("settings", s.ui()));
+        }
+        if let Some(a) = app.all_notes() {
+            let ui = a.ui();
+            v.push(of!("all notes", ui));
+        }
+        if let Some(d) = app.dropdown() {
+            v.push(of!("dropdown", d.ui()));
+        }
+        if let Some(m) = app.context_menu() {
+            v.push(of!("context menu", m.ui()));
+        }
+        if let Some(d) = app.delete_dialog() {
+            v.push(of!("delete dialog", d.ui()));
+        }
+        v
+    }
+
+    /// The body text size of a note's Theme (note text: the UI fit never touches it).
+    pub fn note_body_size(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.ui().global::<washi::note_window::Theme>().get_body_size()).unwrap()
+    }
+
     /// The family the open Settings page draws in.
     pub fn settings_font_family(&self) -> String {
         self.fonts_ui().global::<washi::note_window::Theme>().get_handwriting().to_string()

@@ -220,7 +220,7 @@ export component NumberBox inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
         font-family: Theme.handwriting;
-        font-size: root.compact ? 14px : 19px;
+        font-size: (root.compact ? 14px : 19px) * Theme.ui-fit;
         color: #FFFFFD;
         selection-background-color: #6FA2F5;
         selection-foreground-color: #FFFFFD;
