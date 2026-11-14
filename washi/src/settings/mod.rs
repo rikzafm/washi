@@ -190,6 +190,9 @@ impl SettingsView {
         view.reserve(window_bounds(view.morph_from.get(), 0.0), window_bounds(view.morph_to.get(), SIDEBAR_STRIP));
         view.apply(grow_pose(view.morph_from.get(), view.morph_to.get(), 0.0));
         let _ = view.ui.show();
+        if let Some(h) = crate::popup::hwnd_of(view.ui.window()) {
+            crate::win::set_window_icon(h);
+        }
         view.scale.resync(view.ui.window(), true);
         view.start_ticking();
         Ok(view)

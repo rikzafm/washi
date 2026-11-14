@@ -133,9 +133,9 @@ pub fn note_title(content: &str) -> Option<String> {
     Some(format!("{}…", cut.trim_end()))
 }
 
-/// Window title: the note's title, or "Washi" when the note is empty.
+/// Window title: the note's title, or "Washi Note" when the note is empty.
 pub fn window_title(content: &str) -> String {
-    note_title(content).unwrap_or_else(|| "Washi".into())
+    note_title(content).unwrap_or_else(|| "Washi Note".into())
 }
 
 pub fn app_icon() -> slint::Image {
@@ -327,6 +327,9 @@ impl Note {
         ui.on_open_dropdown(forward(NoteEvent::OpenDropdown));
 
         ui.show()?;
+        if let Some(h) = crate::popup::hwnd_of(ui.window()) {
+            crate::win::set_window_icon(h);
+        }
         if scale.resync(ui.window(), true) {
             editor.relayout(&ui);
         }
@@ -464,6 +467,9 @@ impl Note {
     pub fn set_visible(&self, visible: bool) {
         if visible {
             let _ = self.ui.show();
+            if let Some(h) = crate::popup::hwnd_of(self.ui.window()) {
+                crate::win::set_window_icon(h);
+            }
         } else {
             let _ = self.ui.hide();
         }

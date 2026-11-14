@@ -67,6 +67,29 @@ impl ContextMenu {
         Ok(Self { note_id, popup })
     }
 
+    /// Lift the menu back above every other window (a note that was just pinned is topmost too).
+    pub fn ensure_on_top(&self) {
+        self.popup.raise();
+    }
+
+    /// Keep lifting the menu for a moment. The note's new topmost state lands at a moment we can't
+    /// see (it differs between notes), so a few fixed raises can miss it and the menu shows covered.
+    /// Raising every few milliseconds puts it back within a frame whenever that happens.
+    pub fn keep_on_top_briefly(self: &Rc<Self>) {
+        self.ensure_on_top();
+        let menu = Rc::downgrade(self);
+        let ticks = std::cell::Cell::new(0u32);
+        let timer = Rc::new(slint::Timer::default());
+        let handle = timer.clone();
+        timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(4), move || {
+            ticks.set(ticks.get() + 1);
+            match menu.upgrade() {
+                Some(m) if ticks.get() <= 50 => m.ensure_on_top(),
+                _ => handle.stop(),
+            }
+        });
+    }
+
     pub fn note_id(&self) -> NoteId {
         self.note_id
     }

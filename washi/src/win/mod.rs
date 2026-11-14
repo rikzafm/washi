@@ -52,6 +52,26 @@ impl Clock for SystemClock {
     }
 }
 
+/// Give a window the Washi logo (the .exe's icon resource, id 1) for its taskbar button, thumbnail
+/// and Alt+Tab entry. Slint's own `icon` property does not reach these for our frameless windows.
+pub fn set_window_icon(hwnd: isize) {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    // SAFETY: plain Win32 calls; the icons are shared (LR_SHARED), so they need no cleanup.
+    unsafe {
+        let module = GetModuleHandleW(std::ptr::null());
+        for (kind, cx, cy) in [
+            (ICON_BIG, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON)),
+            (ICON_SMALL, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)),
+        ] {
+            let icon = LoadImageW(module, 1 as _, IMAGE_ICON, cx, cy, LR_SHARED);
+            if !icon.is_null() {
+                SendMessageW(hwnd as _, WM_SETICON, kind as usize, icon as isize);
+            }
+        }
+    }
+}
+
 /// Group every note's taskbar button under one Washi identity. Call once at startup, before
 /// any window exists.
 pub fn set_app_identity() {

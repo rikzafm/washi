@@ -3,7 +3,7 @@ name = "washi"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Washi: lightweight encrypted sticky notes for Windows"
+description = "Washi Note: lightweight encrypted sticky notes for Windows"
 license = "MIT"
 build = "build.rs"
 
@@ -44,6 +44,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_Media",
     "Win32_Security_Cryptography",
     "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
     "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
     "Win32_System_Memory",

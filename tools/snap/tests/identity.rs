@@ -7,7 +7,7 @@ use snap::Harness;
 fn window_title_is_washi_when_empty_and_follows_the_first_line() {
     let mut h = Harness::new();
     h.start().unwrap();
-    assert_eq!(h.window_title(0), "Washi");
+    assert_eq!(h.window_title(0), "Washi Note");
     h.type_text(0, "shopping list");
     assert_eq!(h.window_title(0), "shopping list");
     h.press_enter(0);
@@ -17,7 +17,7 @@ fn window_title_is_washi_when_empty_and_follows_the_first_line() {
         h.press_backspace(0);
     }
     assert_eq!(h.note_text(0), "");
-    assert_eq!(h.window_title(0), "Washi");
+    assert_eq!(h.window_title(0), "Washi Note");
 }
 
 #[test]

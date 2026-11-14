@@ -181,6 +181,9 @@ impl ImageViewer {
         }
 
         ui.show()?;
+        if let Some(h) = hwnd_of(&ui) {
+            crate::win::set_window_icon(h);
+        }
         scale.resync(ui.window(), true);
         Ok(ImageViewer { ui, scale })
     }

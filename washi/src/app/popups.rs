@@ -412,6 +412,7 @@ impl App {
                 app.set_always_on_top(id, on);
                 if let Some(m) = app.context_menu() {
                     m.ui().set_pinned(on);
+                    m.keep_on_top_briefly();
                 }
             });
         }

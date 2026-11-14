@@ -14,7 +14,7 @@ pub fn suggested_name(title: &str) -> String {
     let clean: String = title.chars().map(|c| if c.is_control() || "\\/:*?\"<>|".contains(c) { ' ' } else { c }).collect();
     let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
     let clean = clean.trim_end_matches('.').trim();
-    format!("{}.md", if clean.is_empty() || clean == "Washi" { "Washi note" } else { clean })
+    format!("{}.md", if clean.is_empty() || clean == "Washi Note" { "Washi note" } else { clean })
 }
 
 /// The Markdown of `content` (a note's stored text); `image_file` names the file of each picture
@@ -104,7 +104,7 @@ mod tests {
     fn the_suggested_name_is_a_valid_file_name() {
         assert_eq!(suggested_name("Endfield Note"), "Endfield Note.md");
         assert_eq!(suggested_name("a/b: c?"), "a b c.md");
-        assert_eq!(suggested_name("Washi"), "Washi note.md");
+        assert_eq!(suggested_name("Washi Note"), "Washi note.md");
         assert_eq!(suggested_name(""), "Washi note.md");
     }
 }

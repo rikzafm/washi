@@ -166,7 +166,7 @@ impl App {
             })
             .or_else(|| {
                 let text = self.0.db.content(id).ok().flatten()?;
-                let title = note_title(&text).unwrap_or_else(|| "Washi".to_string());
+                let title = note_title(&text).unwrap_or_else(|| "Washi Note".to_string());
                 Some((text, title))
             })
         else {

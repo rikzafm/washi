@@ -56,8 +56,8 @@ export component NoteWindow inherits Window {
     out property <length> menu-button-width: ToolbarMetrics.menu-button-width;
     out property <length> menu-button-height: ToolbarMetrics.menu-button-height;
 
-    // Taskbar button text and thumbnail tooltip: the note's title, or "Washi" when empty.
-    in property <string> window-title: "Washi";
+    // Taskbar button text and thumbnail tooltip: the note's title, or "Washi Note" when empty.
+    in property <string> window-title: "Washi Note";
     in property <bool> pinned: false;
     /// The note's Tape color (an index into `TapePalette`) and the shape of a recolored tape.
     in property <int> tape-style: 0;

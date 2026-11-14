@@ -52,12 +52,12 @@ fn run_dialog(save: bool, name: &str, filter: &str) -> Option<PathBuf> {
 impl Dialogs for Win32Dialogs {
     fn confirm(&self, message: &str) -> bool {
         // SAFETY: both strings are NUL-terminated and live across the call.
-        unsafe { MessageBoxW(std::ptr::null_mut(), wide(message).as_ptr(), wide("Washi").as_ptr(), MB_YESNO | MB_ICONWARNING) == IDYES }
+        unsafe { MessageBoxW(std::ptr::null_mut(), wide(message).as_ptr(), wide("Washi Note").as_ptr(), MB_YESNO | MB_ICONWARNING) == IDYES }
     }
     fn error(&self, message: &str) {
         // SAFETY: as above.
         unsafe {
-            MessageBoxW(std::ptr::null_mut(), wide(message).as_ptr(), wide("Washi").as_ptr(), MB_OK | MB_ICONERROR);
+            MessageBoxW(std::ptr::null_mut(), wide(message).as_ptr(), wide("Washi Note").as_ptr(), MB_OK | MB_ICONERROR);
         }
     }
     fn pick_open_file(&self, filter: &str) -> Option<PathBuf> {
