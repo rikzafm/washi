@@ -128,11 +128,15 @@
       "heading": {
         "first_baseline_v": 132.4,
         "ink_height": 22.7,
-        "line_pitch": 29.3
+        "line_pitch": 29.3,
+        "app_line_pitch": 34,
+        "app_line_pitch_note": "the app spaces heading lines 34 px apart (1.42 em), chosen 2026-11-14 so the handwriting does not touch; see .scratch/text-render-fixes"
       },
       "body": {
         "first_baseline_v": 198.4,
         "line_pitch": 29.1,
+        "app_line_pitch": 33,
+        "app_line_pitch_note": "the app spaces body lines 33 px apart (1.46 em), see heading",
         "ink_height_first_line": 26.0
       },
       "ink_color": "#2B2F36",

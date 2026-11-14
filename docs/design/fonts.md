@@ -49,7 +49,7 @@ Bold, italic, underline and strike apply to any stretch of text, but a Slint `Te
 one face. So the note draws the words itself while editing too (from its own layout, each piece in its face), and
 the fields lay their text out in **Washi Caret**: Shadows Into Light with every outline removed and every advance
 kept. Its ascent and descent are cut down to 861 and 100 units (0.94 em together, under every line pitch of the
-note), because a field draws its caret as tall as the larger of the line pitch and ascent + descent: with the
+note; the heading and body pitch are 34 and 33 px, about 1.45 em), because a field draws its caret as tall as the larger of the line pitch and ascent + descent: with the
 handwriting's own 1.61 em the caret stuck out of the body lines and was cut at the field's edges, off-center on
 a paragraph's first and last line. `caret-line-em` in `washi/ui/theme.slint` is that sum over the units per em. The field still places the caret, draws the selection and breaks the lines (and handles the
 input method) exactly over the drawn words, but shows no ink of its own. The caret itself is drawn by the note,

@@ -78,11 +78,11 @@ fn the_run_model_carries_each_runs_ink_and_the_markers_their_color() {
     let markers = h.markers(0);
     assert_eq!(markers.iter().map(|m| m.4).collect::<Vec<_>>(), [0xFDECC8, 0xDBEDDB]);
     // under the words: the phrase's marker spans from its first piece to its last (the space between
-    // the two words is inside it) and is the line box (29 px at scale 1) minus 2 px
+    // the two words is inside it) and is the line box (33 px at scale 1) minus 2 px
     let (first, last) = (&runs[run_of("highlightedstretch", 0)], &runs[run_of("highlightedstretch", 17)]);
     let m = markers[0];
     assert!((m.0 - first.1).abs() < 0.01 && (m.0 + m.2 - (last.1 + last.5)).abs() < 0.01, "{m:?}");
-    assert!((m.1 - (first.2 + 1.0)).abs() < 0.01 && (m.3 - (29.0 - 2.0)).abs() < 0.01, "{m:?}");
+    assert!((m.1 - (first.2 + 1.0)).abs() < 0.01 && (m.3 - (33.0 - 2.0)).abs() < 0.01, "{m:?}");
 }
 
 #[test]

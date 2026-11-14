@@ -238,13 +238,14 @@ fn every_bar_is_drawn(scale: f32, open: &str, close: &str) {
     h.advance(Duration::from_millis(1000));
     let (_, _, marked) = h.redraw(0);
     let rules = h.text_rules(0);
+    let view = h.text_view_height(0);
     assert!(rules.len() >= 3, "{} bars", rules.len());
     let (mut missing, mut seen) = (vec![], 0);
     for (block, x, y, width, height) in rules {
         let (x0, x1) = ((x * scale).floor() as u32, ((x + width) * scale).ceil() as u32);
         let (y0, y1) = ((y * scale).floor() as u32, ((y + height) * scale).ceil() as u32);
-        if y1 + 1 >= plain.len() as u32 / w || x1 + 1 >= w {
-            continue; // below the window: the note scrolls
+        if y1 + 1 >= plain.len() as u32 / w || x1 + 1 >= w || y + height > view {
+            continue; // below the window or under the toolbar band: the note scrolls
         }
         seen += 1;
         let changed = (y0..y1.max(y0 + 1)).any(|py| (x0..x1).any(|px| plain[(py * w + px) as usize] != marked[(py * w + px) as usize]));

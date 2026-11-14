@@ -42,11 +42,13 @@ fn ctrl_a_washes_the_note_as_before() {
     h.press_ctrl(0, 'a');
     h.advance(ms(400));
     let (n, bb) = wash(&h);
-    // measured on the per-word wash this replaces: 25620 px inside (74, 80, 363, 322)
+    // measured on the per-word wash this replaces: 25620 px inside (74, 80, 363, 322), at the mockup's
+    // 29 px line pitch; the app's roomier pitch (33 px, see .scratch/text-render-fixes) makes the boxes
+    // taller: 29400 px now
     // (the new wash is one box per line, so the gaps between words and the wrap pad are washed
     // too: about 9% more)
-    assert!((n as f64 - 25620.0).abs() < 25620.0 * 0.12, "{n} wash pixels");
-    for (got, want) in [bb.0, bb.1, bb.2, bb.3].into_iter().zip([74, 80, 363, 322]) {
+    assert!((n as f64 - 29400.0).abs() < 29400.0 * 0.12, "{n} wash pixels");
+    for (got, want) in [bb.0, bb.1, bb.2, bb.3].into_iter().zip([74, 80, 363, 344]) {
         assert!((got as i64 - want).abs() <= 6, "wash box {bb:?}");
     }
 }

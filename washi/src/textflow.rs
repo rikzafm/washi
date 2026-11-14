@@ -57,6 +57,15 @@ pub struct Style {
     pub pitch: f64,
 }
 
+/// Font size and line pitch of the heading and the body, logical px. The same values as
+/// `Theme.heading-*` and `Theme.body-*` in `ui/theme.slint` (a test in `editor/tests.rs` checks it).
+/// The pitch is about 1.45 em: the handwriting's tails and ascenders need that much room to not
+/// touch the next line (see .scratch/text-render-fixes).
+pub const HEADING_SIZE: f64 = 24.0;
+pub const HEADING_PITCH: f64 = 34.0;
+pub const BODY_SIZE: f64 = 22.65;
+pub const BODY_PITCH: f64 = 33.0;
+
 /// How far a check item's text is indented from the text area's left edge (its box takes the room).
 /// The same value as `Theme.check-indent` in `ui/theme.slint`, where the edit field is moved by it.
 pub const CHECK_INDENT: f64 = 26.0;

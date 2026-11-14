@@ -442,3 +442,14 @@ fn the_check_button_and_its_state_follow_the_paragraph_holding_the_caret() {
     assert!(!ui.get_fmt_check());
     assert_eq!(editor.text(), "# t\nbuy milk");
 }
+
+#[test]
+fn the_default_tokens_are_the_themes() {
+    // the app lays words out from `default_tokens` when there is no window, and the fields from the
+    // theme: the two must agree or the caret leaves its words
+    let (_dir, editor, ui) = test_editor_with_ui("x");
+    let (with, without) = (editor.tokens(&ui), editor.default_tokens());
+    for (a, b) in [(with.heading, without.heading), (with.body, without.body), (with.title, without.title)] {
+        assert!((a.size - b.size).abs() < 0.01 && (a.pitch - b.pitch).abs() < 0.5, "{a:?} vs {b:?}");
+    }
+}

@@ -23,3 +23,7 @@ Final: paper, shadow, tape_pink, tape_blue pass on hover; on idle everything but
 | # | Region | Property | Before -> after | Change |
 |---|---|---|---|---|
 | 9 | tape_pink, tape_blue | bbox y0 / y1, both mockups | idle blue y1 -4 (known failure) | `layout.window_margin` 40 -> 42 (spec, `PaperTheme.margin`, snap `WINDOW_MARGIN`); `paper-shift-y` removed, the paper is centered again. Both tapes fit in the window; `idle:tape_blue` leaves the baseline |
+
+### Decision: roomier line spacing (2026-11-14)
+
+Heading pitch 29.3 -> 34 px and body pitch 29.1 -> 33 px (about 1.45 em): at the mockup's 1.22 to 1.28 em the handwriting's tails and ascenders touched the next line. A deliberate departure from the mockup; `text.heading.line_pitch` and `text.body.line_pitch` in spec.json stay the measured values. See `.scratch/text-render-fixes`.

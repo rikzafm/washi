@@ -35,6 +35,7 @@ Lightweight encrypted sticky notes for Windows. One exe, no installer needed.
 
 - Body font match IoU 0.825 accepted.
 - Remaining rows in `docs/design/fidelity-baseline.txt` (hover:title, hover:body, hover:image, idle:image, invariants:fonts) stay baselined.
+- Heading and body lines are spaced about 1.45 em (the mockup's 1.22 to 1.28 em made the handwriting's lines touch).
 - Text is tilted with a stepped baseline at rest and level while editing.
 - Live capture was not run at 150%; human sign-off pending.
 

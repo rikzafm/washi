@@ -57,15 +57,17 @@ fn mockup(paper: (f64, f64)) -> Vec<Line> {
     lines(&snapshot(&o).unwrap(), paper, o.scale)
 }
 
-// (baseline v, left u, right u) of the mockup lines in the paper frame.
+// (baseline v, left u, right u) of the mockup lines in the paper frame. The baselines of the heading and the body are the
+// mockup's moved down by the app's roomier line pitch (34 and 33 px, see
+// .scratch/text-render-fixes); the title, the lines' left edges and their widths are the mockup's.
 const EXPECTED: [(f64, f64, f64); 7] = [
     (81.0, 33.8, 205.2),  // title
-    (132.4, 32.5, 257.2), // heading: "Thermite Cutter : POG &"
-    (161.7, 31.9, 94.6),  // heading: "Akekuri"
-    (198.4, 32.9, 311.6), // body: "Currently POG no Weapon : Ideal"
-    (226.4, 32.9, 321.7), // body: "for him are Never Rest or White"
-    (256.4, 33.1, 308.5), // body: "Night Nova. The last can be get"
-    (285.7, 33.2, 100.5), // body: "in a box"
+    (134.0, 32.5, 257.2), // heading: "Thermite Cutter : POG &"
+    (168.0, 31.9, 94.6),  // heading: "Akekuri"
+    (208.7, 32.9, 311.6), // body: "Currently POG no Weapon : Ideal"
+    (242.7, 32.9, 321.7), // body: "for him are Never Rest or White"
+    (276.0, 33.1, 308.5), // body: "Night Nova. The last can be get"
+    (308.7, 33.2, 100.5), // body: "in a box"
 ];
 
 #[test]
