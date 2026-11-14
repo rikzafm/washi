@@ -526,14 +526,14 @@ impl Harness {
         self.app().with_note(self.id(note), |n| n.ui().get_picker_caption().to_string()).unwrap()
     }
 
-    fn paper_size(&self, note: usize) -> (f32, f32) {
+    pub fn paper_size(&self, note: usize) -> (f32, f32) {
         let (w, h) = self.note_size(note);
         let margin = self.app().with_note(self.id(note), |n| n.ui().get_window_margin()).unwrap();
         (w as f32 - 2.0 * margin, h as f32 - 2.0 * margin)
     }
 
     /// A point `(u, v)` px from the paper's top-left corner (untilted frame), in window coordinates.
-    fn paper_point(&self, note: usize, u: f32, v: f32) -> (f32, f32) {
+    pub fn paper_point(&self, note: usize, u: f32, v: f32) -> (f32, f32) {
         let (w, h) = self.note_size(note);
         let (pw, ph) = self.paper_size(note);
         let (du, dv) = (u - pw / 2.0, v - ph / 2.0);

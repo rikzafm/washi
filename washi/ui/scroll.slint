@@ -15,6 +15,8 @@ export global ScrollMetrics {
     out property <length> bar-pad: 4px;
     out property <length> min-thumb: 24px;
     out property <length> hit-width: 12px;
+    // The least room between the text's right edge and the thumb's hit area.
+    out property <length> text-gap: 4px;
     out property <duration> fade: 120ms;
     out property <duration> hold: 600ms;
 }
@@ -65,14 +67,27 @@ export component ScrollBar inherits Rectangle {
     // Only the thumb takes the pointer, not the whole track: the bar is invisible until hovered, and
     // a track along the text's right margin swallowed clicks meant for the text beside it (a press
     // there scrolled instead of placing the caret, and could scroll the focused field out of view).
+    // While the bar is hidden the thumb takes only a thin strip around its own middle, so a click
+    // in the margin beside it still places the caret; once shown it can be grabbed anywhere along
+    // its tilted length. Either way the hit area is level (a TouchArea cannot tilt), so its left
+    // edge stays a gap right of the text's tilted right edge at the area's top, where that edge
+    // leans furthest right: it never reaches into the text area, at any size.
     property <length> thumb-top: root.ly - root.thumb / 2;
     property <length> thumb-bottom: root.ly + root.thumb / 2;
-    property <length> hit-x0: max(
-        root.cx + root.paper-w / 2 - Theme.text-inset-right + 4px,
-        PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-bottom) - ScrollMetrics.hit-width / 2);
-    property <length> hit-x1: PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-top) + ScrollMetrics.hit-width / 2;
     property <length> hit-y0: PaperGeometry.y(root.cx, root.cy, root.lx, root.thumb-top) - ScrollMetrics.bar-pad;
     property <length> hit-y1: PaperGeometry.y(root.cx, root.cy, root.lx, root.thumb-bottom) + ScrollMetrics.bar-pad;
+    // (the words lie level while they are edited, tilted at rest: the further right of the two)
+    property <length> text-edge-x: max(
+        root.cx + root.paper-w / 2 - Theme.text-inset-right,
+        PaperGeometry.x(root.cx, root.cy, root.paper-w / 2 - Theme.text-inset-right, root.thumb-top - ScrollMetrics.bar-pad));
+    property <length> hit-x0: max(
+        root.text-edge-x + ScrollMetrics.text-gap,
+        root.shown
+            ? PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-bottom) - ScrollMetrics.hit-width / 2
+            : root.thumb-x - ScrollMetrics.hit-width / 2);
+    property <length> hit-x1: root.shown
+        ? PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-top) + ScrollMetrics.hit-width / 2
+        : root.thumb-x + ScrollMetrics.hit-width / 2;
     property <length> grab-dv: 0px;
 
     function scroll-to-v(target-ly: length) {
