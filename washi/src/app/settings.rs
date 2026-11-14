@@ -189,6 +189,22 @@ impl App {
                     }
                 }
             }),
+            font_axis_moved: Rc::new({
+                let app = app.clone();
+                move |axis, v| {
+                    if let Some(a) = app() {
+                        a.axis_moved(axis, v);
+                    }
+                }
+            }),
+            font_axis_committed: Rc::new({
+                let app = app.clone();
+                move |axis, v| {
+                    if let Some(a) = app() {
+                        a.axis_committed(axis, v);
+                    }
+                }
+            }),
             letter_spacing_changed: Rc::new({
                 let app = app.clone();
                 move |em| {

@@ -5,6 +5,7 @@
 
 pub mod caret;
 pub mod fakes;
+mod font_axes;
 mod font_install;
 mod font_manager;
 mod harness;
@@ -20,6 +21,7 @@ pub mod shot;
 
 pub use caret::ms;
 pub use fakes::WindowCommand;
+pub use font_axes::{axis, AxisInfo};
 pub use font_manager::ManagerRow;
 pub use harness::{Harness, MenuState, TAPE_COLORS};
 pub use settings_appearance::tab;

@@ -13,8 +13,22 @@
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PX, PaperFrame, TapeShape, PText, PBox, PRect, PShadow, VTape } from "settings-widgets.slint";
+import { PSlider, NumberBox } from "controls.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { ScrollBar } from "scroll.slint";
+
+/// One line of the Axis panel: a slider and a number box over whole numbers, or "Not in this font".
+export struct AxisRow {
+    label: string,
+    present: bool,
+    min: int,
+    max: int,
+    value: int,
+    step: int,
+    pull: int,
+    snaps: [int],
+    unit: string,
+}
 
 /// One Font in the list.
 export struct FontListRow {
@@ -32,6 +46,8 @@ export struct FontListRow {
     /// Where the row starts in the list, and how tall it is.
     top: length,
     height: length,
+    /// The Axis panel under the row: Weight, Width and Slant lines (the Font in use only).
+    axes: [AxisRow],
 }
 
 export global ManagerMetrics {
@@ -53,6 +69,89 @@ export global ManagerMetrics {
     out property <length> slide: 150px;
 }
 
+/// One line of the Axis panel: its label, a slider and a small number box with the unit, or "Not in
+/// this font". The controls are level (the tilt only moves where they are), laid out at paper
+/// coordinates (`a`, `b`) like everything else in the frame `pf`; `b` is the line's top.
+component AxisLine inherits Rectangle {
+    in property <PaperFrame> pf;
+    in property <AxisRow> data;
+    in property <float> b;
+    /// Dragging the slider: the value so far. `committed`: let go, or a number was typed.
+    callback moved(int);
+    callback committed(int);
+
+    /// The value both controls show; the slider and the box move it, and each other with it.
+    property <int> value: root.data.value;
+    property <float> mid: root.b + 25.0;
+
+    x: 0px;
+    y: 0px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
+
+    PText {
+        pf: root.pf;
+        a: 60.0;
+        b: root.mid - 14.0;
+        width: 70px;
+        height: 28px;
+        text: root.data.label;
+        font-size: 17px;
+        vertical-alignment: center;
+    }
+
+    if !root.data.present : PText {
+        pf: root.pf;
+        a: 134.0;
+        b: root.mid - 14.0;
+        width: 200px;
+        height: 28px;
+        text: "Not in this font";
+        font-size: 16px;
+        color: #8B919A;
+        vertical-alignment: center;
+    }
+
+    if root.data.present : PSlider {
+        x: PX.x(root.pf, 199.0, root.mid) - self.width / 2;
+        y: PX.y(root.pf, 199.0, root.mid) - self.height / 2;
+        width: 130px;
+        minimum: root.data.min;
+        maximum: root.data.max;
+        step: root.data.step;
+        pull: root.data.pull;
+        snaps: root.data.snaps;
+        accessible-name: root.data.label;
+        value <=> root.value;
+        moved(v) => { root.moved(v); }
+        committed(v) => { root.committed(v); }
+    }
+
+    if root.data.present : NumberBox {
+        x: PX.x(root.pf, 299.0, root.mid) - self.width / 2;
+        y: PX.y(root.pf, 299.0, root.mid) - self.height / 2;
+        compact: true;
+        minimum: root.data.min;
+        maximum: root.data.max;
+        step: root.data.step;
+        accessible-name: root.data.label;
+        value <=> root.value;
+        committed(v) => { root.committed(v); }
+    }
+
+    if root.data.present && root.data.unit != "" : PText {
+        pf: root.pf;
+        a: 326.0;
+        b: root.mid - 14.0;
+        width: 22px;
+        height: 28px;
+        text: root.data.unit;
+        font-size: 15px;
+        color: #5B616B;
+        vertical-alignment: center;
+    }
+}
+
 /// A row of the list: radio dot, the Font's name in its own face, a subtitle, and at the right the
 /// lock and "Default" or "Remove". `pf` is the list's frame; the row sits `row.top` down the list.
 component FontRowItem inherits Rectangle {
@@ -60,6 +159,9 @@ component FontRowItem inherits Rectangle {
     in property <FontListRow> data;
     callback clicked();
     callback remove();
+    /// An Axis slider of the panel moved to a value (dragging), or let go at it / a number was typed.
+    callback axis-moved(int, int);
+    callback axis-committed(int, int);
 
     x: 0px;
     y: 0px;
@@ -69,6 +171,9 @@ component FontRowItem inherits Rectangle {
     property <float> pw: root.pf.pw;
     property <float> b: (ManagerMetrics.head-h + root.data.top) / 1px;
     property <float> h: root.data.height / 1px;
+    /// The row's own part (`ROW_H`): the dot, the lock, the tag and the press area sit in it, and the
+    /// Axis panel of the Font in use under it.
+    property <float> oh: 64.0;
     property <float> tag-a: root.pw - 24.0 - tag-t.preferred-width / 1px;
 
     if pick.has-hover || root.data.active : PRect {
@@ -85,7 +190,7 @@ component FontRowItem inherits Rectangle {
     PRect {
         pf: root.pf;
         a: 26.0;
-        b: root.b + root.h / 2.0 - 10.0;
+        b: root.b + root.oh / 2.0 - 10.0;
         w: 20.0;
         h: 20.0;
         r: 10.0;
@@ -95,7 +200,7 @@ component FontRowItem inherits Rectangle {
     PRect {
         pf: root.pf;
         a: 28.0;
-        b: root.b + root.h / 2.0 - 8.0;
+        b: root.b + root.oh / 2.0 - 8.0;
         w: 16.0;
         h: 16.0;
         r: 8.0;
@@ -105,7 +210,7 @@ component FontRowItem inherits Rectangle {
     if root.data.active : PRect {
         pf: root.pf;
         a: 31.0;
-        b: root.b + root.h / 2.0 - 5.0;
+        b: root.b + root.oh / 2.0 - 5.0;
         w: 10.0;
         h: 10.0;
         r: 5.0;
@@ -139,8 +244,8 @@ component FontRowItem inherits Rectangle {
     }
 
     if root.data.locked : Path {
-        x: PX.x(root.pf, root.tag-a - 14.0, root.b + root.h / 2.0) - 8px;
-        y: PX.y(root.pf, root.tag-a - 14.0, root.b + root.h / 2.0) - 8px;
+        x: PX.x(root.pf, root.tag-a - 14.0, root.b + root.oh / 2.0) - 8px;
+        y: PX.y(root.pf, root.tag-a - 14.0, root.b + root.oh / 2.0) - 8px;
         width: 16px;
         height: 16px;
         viewbox-width: 24;
@@ -155,7 +260,7 @@ component FontRowItem inherits Rectangle {
     tag-t := PText {
         pf: root.pf;
         a: root.tag-a;
-        b: root.b + root.h / 2.0 - 14.0;
+        b: root.b + root.oh / 2.0 - 14.0;
         width: self.preferred-width;
         height: 28px;
         text: root.data.tag;
@@ -166,10 +271,10 @@ component FontRowItem inherits Rectangle {
 
     // The row (the Font in use is picked by pressing it) and, over it, the tag of a removable one.
     pick := TouchArea {
-        x: PX.x(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.h / 2.0) - (root.pw - 28.0) * 0.5px;
-        y: PX.y(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.h / 2.0) - root.h * 0.5px;
+        x: PX.x(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.oh / 2.0) - (root.pw - 28.0) * 0.5px;
+        y: PX.y(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.oh / 2.0) - root.oh * 0.5px;
         width: (root.pw - 28.0) * 1px;
-        height: root.h * 1px;
+        height: root.oh * 1px;
         mouse-cursor: pointer;
         accessible-role: list-item;
         accessible-label: root.data.name;
@@ -179,14 +284,23 @@ component FontRowItem inherits Rectangle {
     }
 
     if !root.data.locked : TouchArea {
-        x: PX.x(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.h / 2.0) - tag-t.preferred-width / 2 - 6px;
-        y: PX.y(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.h / 2.0) - 16px;
+        x: PX.x(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.oh / 2.0) - tag-t.preferred-width / 2 - 6px;
+        y: PX.y(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.oh / 2.0) - 16px;
         width: tag-t.preferred-width + 12px;
         height: 32px;
         mouse-cursor: pointer;
         accessible-role: button;
         accessible-label: root.data.tag + " " + root.data.name;
         clicked => { root.remove(); }
+    }
+
+    // The Axis panel of the Font in use: a line each for Weight, Width and Slant, under the row.
+    for ax[k] in root.data.axes : AxisLine {
+        pf: root.pf;
+        data: ax;
+        b: root.b + root.oh + k * 50.0;
+        moved(v) => { root.axis-moved(k, v); }
+        committed(v) => { root.axis-committed(k, v); }
     }
 }
 
@@ -211,6 +325,8 @@ export component FontManager inherits Rectangle {
     callback row-clicked(int);
     callback remove-clicked(int);
     callback install-clicked();
+    callback axis-moved(int, int);
+    callback axis-committed(int, int);
     /// Pressing the tape drags the whole window.
     callback start-move();
     /// The wheel or the bar moved the list: the window hides the bar again a moment after the last one.
@@ -344,6 +460,8 @@ export component FontManager inherits Rectangle {
                 data: row;
                 clicked => { root.row-clicked(i); }
                 remove => { root.remove-clicked(i); }
+                axis-moved(axis, v) => { root.axis-moved(axis, v); }
+                axis-committed(axis, v) => { root.axis-committed(axis, v); }
             }
         }
     }

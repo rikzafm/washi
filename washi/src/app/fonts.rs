@@ -9,9 +9,13 @@
 use super::{App, Env};
 use crate::fonts::registry;
 use crate::fonts::store::FontStore;
-use crate::fonts::{bake, read_package, ActiveFont, AxisRanges, BakeError, DEFAULT_TEXT_FAMILY};
+use crate::fonts::{
+    apply_regular_preview, bake, bake_regular, default_package, read_package, ActiveFont, AxisRanges, AxisValues, BakeError, FontPackage, ThemeMetrics,
+    DEFAULT_TEXT_FAMILY,
+};
 use crate::settings::fonts::{self as manager, RowSpec};
 use crate::storage::{Db, FontRow};
+use slint::ComponentHandle;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -52,6 +56,42 @@ fn prepare(path: &std::path::Path, store: &FontStore) -> InstallResult {
     Ok((id, pkg.family))
 }
 
+/// While a slider of the Axis panel is dragged, Regular is remade at most this often.
+const DRAG_EVERY: Duration = Duration::from_millis(30);
+
+/// The font an Axis slider is changing, held from the first move of a drag to its release.
+struct DragTarget {
+    /// `"default"` or the installed font's id.
+    key: String,
+    pkg: FontPackage,
+    axes: AxisRanges,
+    /// The values as saved, and as dragged to so far.
+    saved: AxisValues,
+    values: AxisValues,
+    /// A Regular-only preview is showing in the Settings window.
+    previewed: bool,
+}
+
+/// A slider drag in progress, and when Regular was last remade for it.
+#[derive(Default)]
+pub(super) struct AxisDrag {
+    target: Option<DragTarget>,
+    last_bake: Option<Duration>,
+    later: slint::Timer,
+}
+
+/// The Face set of the Default font at its saved slant: the bundled faces themselves when it is
+/// upright, else Shadows Into Light baked and sheared.
+fn make_default(db: &Db) -> Result<ActiveFont, String> {
+    let Some(slant) = db.default_font_slant().filter(|s| *s > 0.0) else {
+        registry::deactivate();
+        return Ok(ActiveFont::default_font());
+    };
+    let set = bake(&default_package(), AxisValues { slant: Some(slant), ..Default::default() }).map_err(|e: BakeError| e.to_string())?;
+    registry::activate(&set);
+    ActiveFont::from_face_set(&set).map_err(|_| "The font could not be prepared.".to_string())
+}
+
 /// Make the Face set of an installed font and register it with Slint.
 fn make_font(store: &FontStore, row: &FontRow) -> Result<ActiveFont, String> {
     let pkg = store.load(&row.id).map_err(|e| e.to_string())?;
@@ -88,7 +128,12 @@ pub(super) fn load_startup(env: &Env, db: &Db) {
             None => report = Some(format!("The font in use could not be found, so Washi is using {DEFAULT_TEXT_FAMILY}.")),
         }
     }
-    if crate::fonts::current().text_family != DEFAULT_TEXT_FAMILY {
+    // the Default font, at its saved slant
+    if db.default_font_slant().is_some_and(|s| s > 0.0) {
+        if let Ok(font) = make_default(db) {
+            crate::fonts::set_current(font);
+        }
+    } else if crate::fonts::current().text_family != DEFAULT_TEXT_FAMILY {
         crate::fonts::set_current(ActiveFont::default_font());
         registry::deactivate();
     }
@@ -210,9 +255,13 @@ impl App {
     /// Put the Default font (Shadows Into Light, bundled) back in use, in every window, and save it.
     fn activate_default(&self) {
         let already = self.0.db.font_active() == "default";
-        if !already || crate::fonts::current().text_family != DEFAULT_TEXT_FAMILY {
-            self.set_active_font(ActiveFont::default_font());
-            registry::deactivate();
+        let leaning = self.0.db.default_font_slant().is_some_and(|s| s > 0.0);
+        if !already || (!leaning && crate::fonts::current().text_family != DEFAULT_TEXT_FAMILY) {
+            let font = make_default(&self.0.db).unwrap_or_else(|_| {
+                registry::deactivate();
+                ActiveFont::default_font()
+            });
+            self.set_active_font(font);
         }
         if let Err(e) = self.0.db.set_font_active("default") {
             self.0.env.dialogs.error(&format!("Washi could not save that setting: {e}"));
@@ -259,6 +308,12 @@ impl App {
         let store = self.font_store();
         let mut rows = vec![manager::default_row(active == "default")];
         let (mut name, mut summary) = (rows[0].name.clone(), rows[0].subtitle.clone());
+        if active == "default" {
+            let values = AxisValues { slant: self.0.db.default_font_slant(), ..Default::default() };
+            summary = manager::summary(&AxisRanges::default(), values);
+            rows[0].axes = manager::axis_panel(&AxisRanges::default(), values);
+            rows[0].extra = manager::PANEL_H;
+        }
         for f in &fonts {
             let axes = self.axes_of(&f.id);
             let family = registry::preview(&f.id)
@@ -272,7 +327,8 @@ impl App {
                 active: is_active,
                 locked: false,
                 tag: "Remove".into(),
-                extra: 0.0,
+                extra: if is_active { manager::PANEL_H } else { 0.0 },
+                axes: if is_active { manager::axis_panel(&axes, f.axes) } else { Vec::new() },
             };
             if is_active {
                 name = f.family.clone();
@@ -293,7 +349,124 @@ impl App {
         manager::show(settings.ui(), &rows, &name, &summary, shown);
     }
 
-    /// The axes ranges of the Font in use, if it is an installed font (Axis sliders, ticket 07).
+    /// The font the Axis sliders change: the Font in use, its package, ranges and saved values.
+    fn drag_target(&self) -> Option<DragTarget> {
+        let active = self.0.db.font_active();
+        let (pkg, saved) = if active == "default" {
+            (default_package(), AxisValues { slant: self.0.db.default_font_slant(), ..Default::default() })
+        } else {
+            let row = self.0.db.fonts().into_iter().find(|f| f.id == active)?;
+            (self.font_store().load(&row.id).ok()?, row.axes)
+        };
+        Some(DragTarget { key: active, axes: pkg.axes, pkg, saved, values: saved, previewed: false })
+    }
+
+    /// Put the font's Axis values on the Font row's summary.
+    fn show_summary(&self, axes: &AxisRanges, values: AxisValues) {
+        if let Some(settings) = self.settings() {
+            settings.ui().set_font_summary(manager::summary(axes, values).into());
+        }
+    }
+
+    /// An Axis slider is being dragged to `value` (`axis`: 0 Weight, 1 Width, 2 Slant). Only Regular
+    /// is remade, at most once per 30 ms, and only the Settings window follows; the Font in use
+    /// and every other window wait for the release (`axis_committed`).
+    pub(super) fn axis_moved(&self, axis: i32, value: i32) {
+        let now = self.0.env.clock.monotonic();
+        let due = {
+            let mut drag = self.0.axis_drag.borrow_mut();
+            if drag.target.as_ref().is_none_or(|t| t.key != self.0.db.font_active()) {
+                drag.target = self.drag_target();
+            }
+            let AxisDrag { target, last_bake, later } = &mut *drag;
+            let Some(t) = target.as_mut() else { return };
+            let Some(values) = manager::with_axis(&t.axes, t.values, axis, value) else { return };
+            t.values = values;
+            self.show_summary(&t.axes, values);
+            let wait = last_bake.map_or(Duration::ZERO, |last| DRAG_EVERY.saturating_sub(now.saturating_sub(last)));
+            if wait.is_zero() {
+                later.stop();
+                true
+            } else {
+                if !later.running() {
+                    let weak = Rc::downgrade(&self.0);
+                    later.start(slint::TimerMode::SingleShot, wait, move || {
+                        if let Some(inner) = weak.upgrade() {
+                            App(inner).drag_preview();
+                        }
+                    });
+                }
+                false
+            }
+        };
+        if due {
+            self.drag_preview();
+        }
+    }
+
+    /// Remake Regular at the values dragged to, and show it in the Settings window alone.
+    fn drag_preview(&self) {
+        let now = self.0.env.clock.monotonic();
+        let (family, metrics) = {
+            let mut drag = self.0.axis_drag.borrow_mut();
+            let Some(t) = drag.target.as_mut() else { return };
+            let Ok(face) = bake_regular(&t.pkg, t.values) else { return };
+            t.previewed = true;
+            let family = registry::drag_face(&face);
+            drag.last_bake = Some(now);
+            (family, ThemeMetrics::from_engine(&face.metrics))
+        };
+        if let Some(settings) = self.settings() {
+            apply_regular_preview(&settings.ui().global::<crate::note_window::Theme>(), &family, &metrics);
+        }
+    }
+
+    /// An Axis slider was let go at `value` (or a number was typed in its box): clamp it into the
+    /// font's range, save it for that font, make the full Face set and update every window.
+    pub(super) fn axis_committed(&self, axis: i32, value: i32) {
+        let (key, axes, saved, values, previewed) = {
+            let mut drag = self.0.axis_drag.borrow_mut();
+            drag.later.stop();
+            if drag.target.as_ref().is_none_or(|t| t.key != self.0.db.font_active()) {
+                drag.target = self.drag_target();
+            }
+            let Some(t) = drag.target.as_mut() else { return };
+            if let Some(values) = manager::with_axis(&t.axes, t.values, axis, value) {
+                t.values = values;
+            }
+            (t.key.clone(), t.axes, t.saved, t.values, t.previewed)
+        };
+        let same = manager::axis_panel(&axes, saved) == manager::axis_panel(&axes, values);
+        if same && !previewed {
+            self.0.axis_drag.borrow_mut().target = None;
+            return;
+        }
+        let saving = if key == "default" {
+            self.0.db.set_default_font_slant(values.slant.filter(|s| *s > 0.0))
+        } else {
+            self.0.db.set_font_axes(&key, values)
+        };
+        if let Err(e) = saving {
+            self.0.env.dialogs.error(&format!("Washi could not save that setting: {e}"));
+        }
+        let made = if key == "default" {
+            make_default(&self.0.db)
+        } else {
+            match self.0.db.fonts().into_iter().find(|f| f.id == key) {
+                Some(row) => make_font(&self.font_store(), &row),
+                None => Err("The font is gone.".into()),
+            }
+        };
+        *self.0.axis_drag.borrow_mut() = AxisDrag::default();
+        registry::end_drag();
+        match made {
+            Ok(font) => self.set_active_font(font),
+            Err(e) => self.0.env.dialogs.error(&format!("Washi could not use that font: {e}")),
+        }
+        self.show_summary(&axes, values);
+    }
+
+    /// The axes ranges of the Font in use, if it is an installed font.
     pub fn font_in_use(&self) -> Option<(FontRow, AxisRanges)> {
         let id = self.0.db.font_active();
         let row = self.0.db.fonts().into_iter().find(|f| f.id == id)?;

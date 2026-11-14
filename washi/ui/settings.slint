@@ -352,6 +352,10 @@ export component SettingsWindow inherits Window {
     callback manager-row-clicked(int);
     callback manager-remove-clicked(int);
     callback manager-install-clicked();
+    /// An Axis slider of the Font in use moved (axis 0 Weight, 1 Width, 2 Slant; dragging), or was let
+    /// go at a value / had a number typed in its box.
+    callback manager-axis-moved(int, int);
+    callback manager-axis-committed(int, int);
     /// The slip's list: how far it is scrolled, whether it is being scrolled (shows its bar), and
     /// the bar's hide timer (Rust hides the bar again a moment after the last scroll).
     in-out property <length> manager-scroll <=> manager.scroll;
@@ -767,6 +771,8 @@ export component SettingsWindow inherits Window {
             row-clicked(i) => { fs.focus(); root.manager-row-clicked(i); }
             remove-clicked(i) => { fs.focus(); root.manager-remove-clicked(i); }
             install-clicked => { fs.focus(); root.manager-install-clicked(); }
+            axis-moved(axis, v) => { root.manager-axis-moved(axis, v); }
+            axis-committed(axis, v) => { root.manager-axis-committed(axis, v); }
             start-move => { root.start-move(); }
             scroll-activity => { root.manager-scroll-activity(); }
         }

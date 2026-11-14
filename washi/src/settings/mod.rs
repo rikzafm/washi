@@ -71,6 +71,12 @@ pub struct Hooks {
     pub font_removed: Rc<dyn Fn(usize)>,
     /// The "Install a font" area was pressed: ask for a file and install it.
     pub font_install: Rc<dyn Fn()>,
+    /// An Axis slider of the Font in use moved while being dragged: (axis, value). Only the preview
+    /// follows.
+    pub font_axis_moved: Rc<dyn Fn(i32, i32)>,
+    /// An Axis slider was let go at (axis, value), or a number was typed: save it, make the full
+    /// Face set and update every window.
+    pub font_axis_committed: Rc<dyn Fn(i32, i32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -440,6 +446,9 @@ impl SettingsView {
             self.ui.on_manager_row_clicked(move |i| picked(i.max(0) as usize));
             self.ui.on_manager_remove_clicked(move |i| removed(i.max(0) as usize));
             self.ui.on_manager_install_clicked(move || install());
+            let (moved, committed) = (self.hooks.font_axis_moved.clone(), self.hooks.font_axis_committed.clone());
+            self.ui.on_manager_axis_moved(move |axis, v| moved(axis, v));
+            self.ui.on_manager_axis_committed(move |axis, v| committed(axis, v));
         }
         {
             let me = me.clone();
