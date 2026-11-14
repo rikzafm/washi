@@ -25,6 +25,15 @@ pub const MIGRATIONS: &[&str] = &[
        data     BLOB    NOT NULL
      );
      CREATE INDEX idx_notes_open ON notes(is_open);",
+    // v2: installed fonts (Settings > Font & Style > Font manager). A NULL axis is the font's default.
+    "CREATE TABLE fonts (
+       id           TEXT PRIMARY KEY,
+       family       TEXT NOT NULL,
+       wght         REAL,
+       wdth         REAL,
+       slnt         REAL,
+       installed_at INTEGER NOT NULL
+     );",
 ];
 
 pub fn current_version() -> u32 {
