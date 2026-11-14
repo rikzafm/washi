@@ -2,6 +2,7 @@
 
 mod all_notes;
 mod exit;
+mod font_drop;
 mod fonts;
 mod notes;
 mod pictures;
