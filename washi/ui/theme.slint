@@ -38,6 +38,11 @@ export global Theme {
     // Style › Letter spacing; 0 is the font's own). The app sets it from the saved choice, and
     // src/textflow.rs lays the lines out with the same spacing.
     in-out property <float> letter-spacing-em: 0;
+    // Bumped by the app after every scale change of a window showing a note (`reshape_text_soon`, src/note_window.rs). The
+    // note's words and edit fields read it in their font size (times zero), so a change makes Slint
+    // shape them again. Slint keeps text shaped while the window briefly had the monitor's own scale
+    // at startup (before the UI size goes back on top) and drew it that big.
+    in-out property <int> text-epoch: 0;
     // The edit fields' face: the handwriting's advances, no outlines, a lower ascent and descent
     // (made with `tools/fonts.py blank`; see `caret-line-em`). The fields only place the caret and the selection.
     out property <string> caret-font: "Washi Caret";

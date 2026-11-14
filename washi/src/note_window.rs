@@ -105,6 +105,22 @@ impl Autosave {
     }
 }
 
+/// Make Slint shape the note's words and edit fields again (see `Theme.text-epoch`), on the next
+/// turn of the event loop. Called after every scale change of a window that shows a note. At
+/// startup the window briefly has the monitor's own scale before the UI size goes back on top;
+/// text Slint shaped in that moment kept the monitor's size (drawn too big for its place, so
+/// letters overlapped) until something else made it shape again, such as a resize. Bumping right
+/// in the scale callback is too early: the stale text is drawn after it.
+pub(crate) fn reshape_text_soon(ui: &NoteWindow) {
+    let weak = ui.as_weak();
+    Timer::single_shot(Duration::ZERO, move || {
+        if let Some(ui) = weak.upgrade() {
+            let theme = ui.global::<Theme>();
+            theme.set_text_epoch(theme.get_text_epoch().wrapping_add(1));
+        }
+    });
+}
+
 /// A note's title: its first non-blank text, cut to about 40 characters. `None` for an empty note.
 pub fn note_title(content: &str) -> Option<String> {
     const MAX: usize = 40;
@@ -241,6 +257,7 @@ impl Note {
                     if scale.resync(ui.window(), false) {
                         editor.relayout(&ui);
                     }
+                    reshape_text_soon(&ui);
                 }
             });
         }

@@ -19,7 +19,7 @@ pub struct Options {
     pub paper: (f64, f64),
     /// Move a real pointer over the note before drawing.
     pub hover: bool,
-    /// Move the pointer over the scrollbar track before drawing.
+    /// Move the pointer over the scrollbar thumb before drawing.
     pub hover_scrollbar: bool,
     /// The note has the keyboard focus (level text fields, caret shown) instead of resting
     /// (words on the tilted baseline).
@@ -105,8 +105,9 @@ pub fn snapshot(o: &Options) -> Result<Snapshot, String> {
         r.render(&mut vec![PremultipliedRgbaColor::default(); (pw * ph) as usize], pw as usize);
     });
     if o.hover_scrollbar {
-        let x = (WINDOW_MARGIN + o.paper.0 - 10.0) as f32;
-        win.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, (lh / 2.0) as f32) });
+        // on the thumb: only the thumb takes the pointer, not the rest of the track
+        let (x, y) = h.scrollbar_thumb(0);
+        win.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
     } else if o.hover {
         win.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new((lw / 2.0) as f32, (lh / 2.0) as f32) });
     }

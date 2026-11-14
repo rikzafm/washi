@@ -192,3 +192,19 @@ fn text_never_reaches_the_toolbar_band() {
     let paper_h = window_h as f32 - 84.0;
     assert!(h.text_view_height(0) <= paper_h - 44.0 - 4.0 + 0.5, "view {}", h.text_view_height(0));
 }
+
+#[test]
+fn a_click_in_the_right_margin_away_from_the_thumb_places_the_caret_instead_of_scrolling() {
+    let mut h = note(&long_text());
+    assert_eq!(h.scroll_offset(0), 0.0);
+    // the thumb sits at the top of the track; well below it, still in the bar's column, is the
+    // margin to the right of a line of text
+    let (tx, ty) = h.scrollbar_thumb(0);
+    let y = ty + 150.0;
+    h.click(0, tx, y);
+    h.advance(ms(400));
+    assert_eq!(h.scroll_offset(0), 0.0, "the track does not take the press: no jump");
+    let ((ab, ao), (fb, fo)) = h.selection(0);
+    assert!(fb > 0 && (ab, ao) == (fb, fo), "the caret went to a line of text: {:?}", h.selection(0));
+    assert_eq!(h.text_focused_block(0), fb as i32, "and its field has the keyboard focus");
+}

@@ -373,7 +373,7 @@ export component BlockView inherits Rectangle {
         // lays its text out in a blank face with the same advances, so its caret and selection
         // sit on those words. While an input method composes it shows its own text instead.
         font-family: root.composing ? Theme.handwriting : Theme.caret-font;
-        font-size: root.size;
+        font-size: root.size + 0px * Theme.text-epoch;
         font-weight: root.composing && root.bold ? 700 : 400;
         font-italic: root.composing && root.italic;
         // the same spacing as the words, or the field would break its lines elsewhere

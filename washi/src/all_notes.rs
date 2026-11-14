@@ -349,6 +349,7 @@ impl AllNotesView {
                     if scale.resync(ui.window(), false) {
                         editor.relayout(&ui);
                     }
+                    crate::note_window::reshape_text_soon(&ui);
                 }
             });
         }

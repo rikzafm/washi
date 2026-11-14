@@ -503,7 +503,7 @@ export component TextLayer inherits Rectangle {
             width: parent.width - self.x;
             height: r.pitch + r.size * root.descender-room;
             font-family: Theme.handwriting;
-            font-size: r.size;
+            font-size: r.size + 0px * Theme.text-epoch;
             letter-spacing: r.size * Theme.letter-spacing-em;
             font-weight: r.bold ? 700 : 400;
             font-italic: r.italic;

@@ -62,12 +62,17 @@ export component ScrollBar inherits Rectangle {
     property <bool> shown: root.scrolling || hit.has-hover || root.dragging;
     out property <float> bar-opacity: (root.shown && root.overflowing) ? 1 : 0;
 
+    // Only the thumb takes the pointer, not the whole track: the bar is invisible until hovered, and
+    // a track along the text's right margin swallowed clicks meant for the text beside it (a press
+    // there scrolled instead of placing the caret, and could scroll the focused field out of view).
+    property <length> thumb-top: root.ly - root.thumb / 2;
+    property <length> thumb-bottom: root.ly + root.thumb / 2;
     property <length> hit-x0: max(
         root.cx + root.paper-w / 2 - Theme.text-inset-right + 4px,
-        PaperGeometry.x(root.cx, root.cy, root.lx, root.track-bottom) - ScrollMetrics.hit-width / 2);
-    property <length> hit-x1: PaperGeometry.x(root.cx, root.cy, root.lx, root.track-top) + ScrollMetrics.hit-width / 2;
-    property <length> hit-y0: PaperGeometry.y(root.cx, root.cy, root.lx, root.track-top) - ScrollMetrics.bar-pad;
-    property <length> hit-y1: PaperGeometry.y(root.cx, root.cy, root.lx, root.track-bottom) + ScrollMetrics.bar-pad;
+        PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-bottom) - ScrollMetrics.hit-width / 2);
+    property <length> hit-x1: PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-top) + ScrollMetrics.hit-width / 2;
+    property <length> hit-y0: PaperGeometry.y(root.cx, root.cy, root.lx, root.thumb-top) - ScrollMetrics.bar-pad;
+    property <length> hit-y1: PaperGeometry.y(root.cx, root.cy, root.lx, root.thumb-bottom) + ScrollMetrics.bar-pad;
     property <length> grab-dv: 0px;
 
     function scroll-to-v(target-ly: length) {
