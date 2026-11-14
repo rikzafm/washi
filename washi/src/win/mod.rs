@@ -75,6 +75,20 @@ pub fn set_window_icon(hwnd: isize) {
     }
 }
 
+/// Like [`set_window_icon`] for a window that was just shown: winit creates the native window a
+/// little after `show()`, so there is no handle yet. Look again every few ms until it exists.
+pub fn set_window_icon_when_ready<W: slint::ComponentHandle + 'static>(ui: &W) {
+    fn attempt<W: slint::ComponentHandle + 'static>(weak: slint::Weak<W>, tries: u32) {
+        let Some(ui) = weak.upgrade() else { return };
+        if let Some(h) = crate::popup::hwnd_of(ui.window()) {
+            set_window_icon(h);
+        } else if tries < 400 {
+            slint::Timer::single_shot(Duration::from_millis(5), move || attempt(weak, tries + 1));
+        }
+    }
+    attempt(ui.as_weak(), 0);
+}
+
 /// Group every note's taskbar button under one Washi identity. Call once at startup, before
 /// any window exists.
 pub fn set_app_identity() {

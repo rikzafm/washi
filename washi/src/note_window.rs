@@ -327,9 +327,7 @@ impl Note {
         ui.on_open_dropdown(forward(NoteEvent::OpenDropdown));
 
         ui.show()?;
-        if let Some(h) = crate::popup::hwnd_of(ui.window()) {
-            crate::win::set_window_icon(h);
-        }
+        crate::win::set_window_icon_when_ready(&ui);
         if scale.resync(ui.window(), true) {
             editor.relayout(&ui);
         }
@@ -467,9 +465,7 @@ impl Note {
     pub fn set_visible(&self, visible: bool) {
         if visible {
             let _ = self.ui.show();
-            if let Some(h) = crate::popup::hwnd_of(self.ui.window()) {
-                crate::win::set_window_icon(h);
-            }
+            crate::win::set_window_icon_when_ready(&self.ui);
         } else {
             let _ = self.ui.hide();
         }
