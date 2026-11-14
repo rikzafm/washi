@@ -119,3 +119,49 @@ fn each_note_has_its_own_history() {
     assert_eq!(h.note_text(1), "");
     assert_eq!(h.note_text(0), "# first");
 }
+
+/// The smallest note, holding `text`, with the caret at byte `offset` of `block`.
+fn smallest_note(text: &str, block: usize, offset: usize) -> Harness {
+    let mut h = note(text);
+    h.resize_note(0, 300, 300);
+    h.place_caret_at(0, block, offset);
+    h.advance(ms(5));
+    h
+}
+
+#[test]
+fn undo_and_redo_of_a_tick_leave_the_caret_where_it_was() {
+    let mut h = smallest_note("# Jadwal\n- [ ] Selasa\nsome words to type in", 2, 4);
+    let (at, scroll) = (h.selection(0), h.scroll_offset(0));
+    assert_eq!(at, ((2, 4), (2, 4)));
+    let (x, y) = h.check_box_center(0, 0);
+    h.click(0, x, y);
+    assert_eq!(h.note_text(0), "# Jadwal\n- [x] Selasa\nsome words to type in", "the click ticks the box");
+    assert_eq!(h.selection(0), at, "a tick does not move the caret");
+    h.press_ctrl(0, 'z');
+    assert_eq!(h.note_text(0), "# Jadwal\n- [ ] Selasa\nsome words to type in");
+    assert_eq!(h.selection(0), at, "undo of a tick leaves the caret");
+    assert_eq!(h.scroll_offset(0), scroll);
+    h.press_ctrl(0, 'y');
+    assert_eq!(h.note_text(0), "# Jadwal\n- [x] Selasa\nsome words to type in");
+    assert_eq!(h.selection(0), at, "redo of a tick leaves the caret");
+    assert_eq!(h.scroll_offset(0), scroll);
+    h.type_text(0, "X");
+    assert_eq!(h.note_text(0), "# Jadwal\n- [x] Selasa\nsomeX words to type in", "typing still lands at the caret");
+}
+
+#[test]
+fn undo_and_redo_of_a_check_toggle_keep_the_caret_in_its_paragraph() {
+    let mut h = smallest_note("# t\nbuy milk now", 1, 4);
+    h.press_ctrl_shift(0, 'c');
+    assert_eq!(h.note_text(0), "# t\n- [ ] buy milk now");
+    assert_eq!(h.selection(0), ((1, 4), (1, 4)));
+    h.press_ctrl(0, 'z');
+    assert_eq!(h.note_text(0), "# t\nbuy milk now");
+    assert_eq!(h.selection(0), ((1, 4), (1, 4)), "undo of a toggle keeps the caret's place");
+    h.press_ctrl(0, 'y');
+    assert_eq!(h.note_text(0), "# t\n- [ ] buy milk now");
+    assert_eq!(h.selection(0), ((1, 4), (1, 4)), "redo of a toggle keeps the caret's place");
+    h.type_text(0, "X");
+    assert_eq!(h.note_text(0), "# t\n- [ ] buy Xmilk now", "typing still lands at the caret");
+}

@@ -153,6 +153,19 @@ component HandleShape inherits Path {
     Close { }
 }
 
+/// When the box (and tick) of a check item is drawn. Only what hides the box hides it: while an
+/// input method composes in the item, the field shows its own words (so the note's words and
+/// rules are hidden) but not a box, so the box and tick stay. A box is left out once all of it is
+/// above the paper's tilted top edge (`edge`, at the box); one partly above is cut along the edge.
+export global CheckDrawing {
+    pure public function box-shown(c: CheckData, composing-block: int, edge: length) -> bool {
+        return c.y + c.size >= edge;
+    }
+    pure public function tick-shown(c: CheckData, composing-block: int, edge: length) -> bool {
+        return c.checked && CheckDrawing.box-shown(c, composing-block, edge);
+    }
+}
+
 // The box of a check item and its tick. Like the frame of a picture, they follow the paper's tilt
 // (`ts` is how much of it is on: 1 at rest, 0 while editing), as Paths whose corners are moved onto
 // the tilted baseline.
@@ -163,11 +176,18 @@ component CheckShape inherits Path {
     in property <length> shift-y;
     in property <length> paper-w;
     in property <length> paper-h;
+    /// How far down the clip the shape is drawn in starts (the paper's top edge at the box), so
+    /// the shape is drawn where it would be without it.
+    in property <length> lift: 0px;
     property <float> sn: Theme.text-tilt.sin();
     property <float> cs: Theme.text-tilt.cos();
     property <float> u0: root.c.x / 1px;
     property <float> v0: root.c.y / 1px;
     property <float> s: root.c.size / 1px;
+    /// The box's centre across, as drawn (where the paper's top edge is taken for the cut).
+    out property <length> mid-x: root.px(root.u0 + root.s / 2, root.v0 + root.s / 2) * 1px;
+    /// The bottom of the shape as drawn, without the lift.
+    out property <length> foot: root.oy * 1px + root.height;
     pure function px(u: float, v: float) -> float {
         return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
     }
@@ -178,7 +198,7 @@ component CheckShape inherits Path {
     property <float> ox: min(root.px(root.u0, root.v0), root.px(root.u0, root.v0 + root.s)) - root.pad;
     property <float> oy: min(root.py(root.u0, root.v0), root.py(root.u0 + root.s, root.v0)) - root.pad;
     x: root.ox * 1px;
-    y: root.oy * 1px;
+    y: root.oy * 1px - root.lift;
     width: (max(root.px(root.u0 + root.s, root.v0), root.px(root.u0 + root.s, root.v0 + root.s)) - root.ox + root.pad) * 1px;
     height: (max(root.py(root.u0, root.v0 + root.s), root.py(root.u0 + root.s, root.v0 + root.s)) - root.oy + root.pad) * 1px;
     viewbox-width: self.width / 1px;
@@ -201,11 +221,18 @@ component TickShape inherits Path {
     in property <length> shift-y;
     in property <length> paper-w;
     in property <length> paper-h;
+    /// How far down the clip the shape is drawn in starts (the paper's top edge at the box), so
+    /// the shape is drawn where it would be without it.
+    in property <length> lift: 0px;
     property <float> sn: Theme.text-tilt.sin();
     property <float> cs: Theme.text-tilt.cos();
     property <float> u0: root.c.x / 1px;
     property <float> v0: root.c.y / 1px;
     property <float> s: root.c.size / 1px;
+    /// The box's centre across, as drawn (where the paper's top edge is taken for the cut).
+    out property <length> mid-x: root.px(root.u0 + root.s / 2, root.v0 + root.s / 2) * 1px;
+    /// The bottom of the shape as drawn, without the lift.
+    out property <length> foot: root.oy * 1px + root.height;
     pure function px(u: float, v: float) -> float {
         return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
     }
@@ -223,7 +250,7 @@ component TickShape inherits Path {
     property <float> ox: min(min(root.px(root.ax, root.ay), root.px(root.bx, root.by)), root.px(root.cx, root.cy)) - root.pad;
     property <float> oy: min(min(root.py(root.ax, root.ay), root.py(root.bx, root.by)), root.py(root.cx, root.cy)) - root.pad;
     x: root.ox * 1px;
-    y: root.oy * 1px;
+    y: root.oy * 1px - root.lift;
     width: (max(max(root.px(root.ax, root.ay), root.px(root.bx, root.by)), root.px(root.cx, root.cy)) - root.ox + root.pad) * 1px;
     height: (max(max(root.py(root.ax, root.ay), root.py(root.bx, root.by)), root.py(root.cx, root.cy)) - root.oy + root.pad) * 1px;
     viewbox-width: self.width / 1px;
@@ -524,25 +551,43 @@ export component TextLayer inherits Rectangle {
         background: r.done ? Theme.ink-done : Theme.ink;
     }
 
-    // the boxes (and ticks) of the check items
-    for c in root.checks: CheckShape {
-        c: c;
-        ts: root.tilt-scale;
-        shift-x: root.shift-x;
-        shift-y: root.shift-y;
-        paper-w: root.paper-w;
-        paper-h: root.paper-h;
-        visible: c.block != root.composing-block && c.y + c.size >= root.edge-y(c.x + c.size / 2);
+    // The boxes (and ticks) of the check items. Like the words, each is drawn in a clip whose top
+    // is the paper's tilted top edge at the box, so a box scrolled partly under the top is cut
+    // there (and the tick, which overshoots its box, too) instead of showing above the paper.
+    for c in root.checks: Rectangle {
+        property <length> cut: root.edge-y(box.mid-x);
+        visible: CheckDrawing.box-shown(c, root.composing-block, root.edge-y(c.x + c.size / 2));
+        y: self.cut;
+        width: root.width;
+        height: max(0px, box.foot - self.cut);
+        clip: true;
+        box := CheckShape {
+            c: c;
+            ts: root.tilt-scale;
+            shift-x: root.shift-x;
+            shift-y: root.shift-y;
+            paper-w: root.paper-w;
+            paper-h: root.paper-h;
+            lift: parent.cut;
+        }
     }
 
-    for c in root.checks: TickShape {
-        c: c;
-        ts: root.tilt-scale;
-        shift-x: root.shift-x;
-        shift-y: root.shift-y;
-        paper-w: root.paper-w;
-        paper-h: root.paper-h;
-        visible: c.checked && c.block != root.composing-block && c.y + c.size >= root.edge-y(c.x + c.size / 2);
+    for c in root.checks: Rectangle {
+        property <length> cut: root.edge-y(tick.mid-x);
+        visible: CheckDrawing.tick-shown(c, root.composing-block, root.edge-y(c.x + c.size / 2));
+        y: self.cut;
+        width: root.width;
+        height: max(0px, tick.foot - self.cut);
+        clip: true;
+        tick := TickShape {
+            c: c;
+            ts: root.tilt-scale;
+            shift-x: root.shift-x;
+            shift-y: root.shift-y;
+            paper-w: root.paper-w;
+            paper-h: root.paper-h;
+            lift: parent.cut;
+        }
     }
 
     /// Blocks of one rhythm (line pitch) have no gap between them; a change opens one (the same

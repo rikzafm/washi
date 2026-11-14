@@ -291,6 +291,12 @@ impl Editor {
         self.focus_at(ui, START);
     }
 
+    /// [`Self::reveal`] the caret (the selection's moving end) where it is now.
+    pub fn reveal_caret(&self, ui: &NoteWindow) {
+        let c = self.selection.get().focus;
+        self.reveal(ui, c.block, c.offset);
+    }
+
     pub fn reveal(&self, ui: &NoteWindow, block: usize, offset: usize) {
         let layout = self.layout(ui);
         let tokens = layout.tokens();
