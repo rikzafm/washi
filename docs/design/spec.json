@@ -55,6 +55,16 @@
         "color": "#F0F0EE"
       }
     },
+    "app_toolbar": {
+      "kind": "icons",
+      "rect": [110, 683, 552, 732],
+      "cells": 7,
+      "rect_note": "the app's own toolbar, for the size invariants (app snap vs app snap): since 0c2722b it has 7 buttons of 32 px whose top is 40 px above the paper bottom, not the mockup's 6 buttons of 40 px (`toolbar`, 645..725). The top (683) is just above the icons' ink and cuts the top of the active button's fill: the paper is tilted, so on a wide note the text's last line ends lower on the right than the buttons start on the left, and a level rect any taller catches its descenders",
+      "paper": "#FFFFFD",
+      "fill": {
+        "color": "#F0F0EE"
+      }
+    },
     "no_toolbar": {
       "kind": "empty",
       "rect": [100, 595, 480, 670],

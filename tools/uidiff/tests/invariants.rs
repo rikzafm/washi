@@ -8,8 +8,12 @@ fn design_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/design")
 }
 
+/// The spec, for snaps made from the hover mockup: these tests place the mockup image, whose toolbar
+/// is the mockup's (`toolbar`), not the app's smaller one (`app_toolbar`), so the invariants measure that.
 fn spec() -> Spec {
-    serde_json::from_str(&std::fs::read_to_string(design_dir().join("spec.json")).unwrap()).unwrap()
+    let mut s: Spec = serde_json::from_str(&std::fs::read_to_string(design_dir().join("spec.json")).unwrap()).unwrap();
+    s.regions.remove("app_toolbar");
+    s
 }
 
 fn hover() -> Image {

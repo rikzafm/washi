@@ -31,3 +31,7 @@ Heading pitch 29.3 -> 34 px and body pitch 29.1 -> 33 px (about 1.45 em): at the
 ### Fix: toolbar band taller than its buttons (2026-11-14)
 
 `ToolbarMetrics.band-height` 38 -> 44 px. Since 0c2722b (smaller toolbar: 32 px buttons, top 40 px above the paper bottom) the band was 38 px, lower than the buttons' top, so the text ran on to 2 px above them and a cut line of words sat on the icons. With 44 the text ends 8 px above the buttons. `BAND_LOGICAL` in uidiff follows the app (44). The toolbar regions of spec.json still describe the mockup's 40 px buttons, so `hover:toolbar`, `invariants:toolbar` and the icon exclusion of `invariants:text area` still fail until they are measured again for the smaller toolbar.
+
+### Toolbar measured again for the app (2026-11-14)
+
+The size invariants compare two app snaps, so they now measure the app's own toolbar: new spec region `app_toolbar` (7 cells, rect 110,683 to 552,732 at the hover paper). `toolbar` stays the mockup's (6 cells) for `--compare` and the mockup tests. Invariants pass (toolbar, text area). `hover:heading` (34 px heading pitch) and `hover:toolbar` (the smaller toolbar of 0c2722b) are deliberate departures from the mockup and are listed in `fidelity-baseline.txt`.

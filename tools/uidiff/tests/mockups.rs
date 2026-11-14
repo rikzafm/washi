@@ -57,11 +57,12 @@ fn measuring_twice_gives_identical_output() {
 fn hover_checks_every_region_and_idle_checks_paper_tapes_and_no_toolbar() {
     let (spec, _) = load_spec();
     let hover = &spec.mockups["hover"];
-    let mut all: Vec<&String> = spec.regions.keys().filter(|k| *k != "no_toolbar").collect();
+    // app_toolbar is the app's own toolbar, for the size invariants only: no mockup shows it
+    let mut all: Vec<&String> = spec.regions.keys().filter(|k| *k != "no_toolbar" && *k != "app_toolbar").collect();
     all.sort();
     let mut hv: Vec<&String> = hover.check.iter().collect();
     hv.sort();
-    assert!(hover.hover && hv == all, "hover must check every region except no_toolbar (the toolbar is shown there)");
+    assert!(hover.hover && hv == all, "hover must check every region except no_toolbar (the toolbar is shown there) and app_toolbar");
 
     let idle = &spec.mockups["idle"];
     let mut iv = idle.check.clone();

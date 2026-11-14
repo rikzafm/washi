@@ -129,8 +129,10 @@ pub fn check(spec: &Spec, mock: &Image, default: &Image, large: &Image, opts: &O
         r.num("fonts", &format!("{name} ink height"), ld.height, ll.height, TOL, Some(format!("{name}: font size changed with the note size (ink height {} vs {})", fmt(ll.height), fmt(ld.height))));
     }
 
-    // toolbar: anchored at the bottom-left corner
-    if let Some(Region::Icons { rect, cells, paper, fill, ink_lum_max }) = spec.regions.get("toolbar") {
+    // toolbar: anchored at the bottom-left corner. Both snaps are the app's, so this is the app's own
+    // toolbar (`app_toolbar`), which is smaller than the mockup's (`toolbar`); a spec without one
+    // falls back to the mockup's.
+    if let Some(Region::Icons { rect, cells, paper, fill, ink_lum_max }) = spec.regions.get("app_toolbar").or_else(|| spec.regions.get("toolbar")) {
         let reg = |dx: f64, dy: f64| Region::Icons { rect: shifted(rect, dx, dy, 0.0), cells: *cells, paper: paper.clone(), fill: fill.clone(), ink_lum_max: *ink_lum_max };
         let md = measure_region(default, &reg(pd.bl.0 - pm.bl.0, pd.bl.1 - pm.bl.1));
         let ml = measure_region(large, &reg(pl.bl.0 - pm.bl.0, pl.bl.1 - pm.bl.1));

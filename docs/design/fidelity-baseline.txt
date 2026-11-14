@@ -13,6 +13,11 @@
 hover:title
 hover:body
 hover:image
+# The app departs from the mockup on purpose here (see docs/design/fidelity-log.md, 2026-11-14):
+# heading lines are spaced 34 px (mockup 29.3), and the toolbar is the smaller one of 0c2722b
+# (7 buttons of 32 px, the mockup has 6 of 40 px). The size invariants check the app's toolbar instead.
+hover:heading
+hover:toolbar
 
 idle:image
 
