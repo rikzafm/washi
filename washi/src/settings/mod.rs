@@ -136,6 +136,7 @@ impl SettingsView {
     /// Open Settings over the note `host` (its window at `host_window`, logical px).
     pub fn open(host: NoteId, host_window: Geometry, pinned: bool, hooks: Hooks) -> Result<Rc<Self>, slint::PlatformError> {
         let ui = SettingsWindow::new()?;
+        crate::fonts::current().apply(&ui.global::<crate::note_window::Theme>());
         ui.set_app_icon(app_icon());
         ui.set_pinned(pinned);
         ui.set_shortcuts(shortcuts::model());

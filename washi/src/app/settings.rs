@@ -229,6 +229,27 @@ impl App {
         }
     }
 
+    /// Make `font` the active font (`fonts::set_current`) and rebuild every window with it: each
+    /// note's and All Notes' `Layout` is built again and its words are shaped again (like a change of
+    /// Letter spacing), and the other windows' `Theme` families are set. Dropdown and delete dialog
+    /// read the active font when they are created.
+    pub fn set_active_font(&self, font: crate::fonts::ActiveFont) {
+        let font = crate::fonts::set_current(font);
+        let notes: Vec<Rc<Note>> = self.0.notes.borrow().clone();
+        for n in &notes {
+            n.set_font();
+        }
+        if let Some(v) = self.all_notes() {
+            v.set_font();
+        }
+        if let Some(s) = self.settings() {
+            font.apply(&s.ui().global::<crate::note_window::Theme>());
+        }
+        for v in self.0.viewers.borrow().iter() {
+            font.apply(&v.ui().global::<crate::note_window::Theme>());
+        }
+    }
+
     /// The Settings page has closed: drop it on the next turn of the loop, never inside its own callback.
     fn settings_closed(&self) {
         let view = self.0.settings.borrow_mut().take();

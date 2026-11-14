@@ -22,6 +22,7 @@ impl Editor {
             tilt_deg: th.get_text_tilt() as f64,
             max_run: th.get_step_width() as f64,
             letter_spacing: th.get_letter_spacing_em() as f64,
+            font_epoch: crate::fonts::current().epoch,
         }
     }
 
@@ -43,6 +44,7 @@ impl Editor {
             tilt_deg: 1.45,
             max_run: 28.0,
             letter_spacing: 0.0,
+            font_epoch: crate::fonts::current().epoch,
         }
     }
 
