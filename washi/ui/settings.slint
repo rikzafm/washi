@@ -352,6 +352,10 @@ export component SettingsWindow inherits Window {
     callback manager-row-clicked(int);
     callback manager-remove-clicked(int);
     callback manager-install-clicked();
+    /// A file is held over the window while the Font manager is open (the install area lights up), and\r
+    /// the area's text.
+    in property <bool> manager-install-hover: false;
+    out property <string> manager-install-hint: manager.install-hint;
     /// The slip's list: how far it is scrolled, whether it is being scrolled (shows its bar), and
     /// the bar's hide timer (Rust hides the bar again a moment after the last scroll).
     in-out property <length> manager-scroll <=> manager.scroll;
@@ -760,6 +764,7 @@ export component SettingsWindow inherits Window {
             y: root.margin + ManagerMetrics.top-offset - ManagerMetrics.pad;
             progress: root.manager-progress;
             fonts: root.manager-fonts;
+            install-hover: root.manager-install-hover;
             max-h: root.paper-h;
             tape: root.preview-tapes[0];
             tape-base: TapePalette.a-light[style.tape];

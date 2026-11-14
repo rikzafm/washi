@@ -201,6 +201,7 @@ impl App {
         match SettingsView::open(host, geometry, pinned, hooks) {
             Ok(view) => {
                 self.0.env.window_control.bring_to_front(0, view.hwnd());
+                self.watch_settings_drops(view.ui().window());
                 *self.0.settings.borrow_mut() = Some(view);
                 // the Font row and the Font manager's list show the Font in use and the installed fonts
                 self.refresh_font_list(None);

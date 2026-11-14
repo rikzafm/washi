@@ -205,6 +205,8 @@ export component FontManager inherits Rectangle {
     in property <string> heading: "Installed fonts";
     in property <string> install-heading: "Install a font";
     in property <string> install-hint: "Drop a Google Fonts .zip here, or click to browse";
+    /// A file is being held over the window: the install area darkens to say it will take it.
+    in property <bool> install-hover: false;
     /// How far the list is scrolled up, and whether the wheel or the bar moved it a moment ago.
     in-out property <length> scroll: 0px;
     in-out property <bool> scrolling: false;
@@ -348,7 +350,7 @@ export component FontManager inherits Rectangle {
         }
     }
 
-    // The install area: a heading and a box to drop a file on (inert for now).
+    // The install area: a heading and a box to drop a file on (it darkens while one is held over the window).
     PText {
         pf: root.pf;
         a: 28.0;
@@ -368,7 +370,7 @@ export component FontManager inherits Rectangle {
         w: 322.0;
         h: 46.0;
         r: 10.8;
-        fill: #F0F0EE;
+        fill: root.install-hover ? #DADAD6 : #F0F0EE;
     }
 
     PText {
