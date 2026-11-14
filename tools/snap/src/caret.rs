@@ -47,6 +47,20 @@ impl Harness {
             .unwrap()
     }
 
+    /// The center of the `i`th check box (in document order) in the note's window, logical px, as
+    /// laid out level and scrolled: where a click ticks it.
+    pub fn check_box_center(&self, note: usize, i: usize) -> (f32, f32) {
+        self.app()
+            .with_note(self.id(note), |n| {
+                let (ui, editor) = (n.ui(), n.editor());
+                let layout = editor.layout(ui);
+                let b = layout.checks().get(i).expect("the check box exists").clone();
+                let (margin, scroll) = (ui.get_window_margin() as f64, ui.get_scroll_y() as f64);
+                ((margin + b.x + b.size / 2.0) as f32, (margin + b.y + b.size / 2.0 - scroll) as f32)
+            })
+            .unwrap()
+    }
+
     /// Where the caret at byte `offset` of `block` should be drawn when the text stays tilted while
     /// editing: [`Self::laid_out_caret`] carried onto the paper's tilted baseline like a word is (the
     /// offset of the center of its line box), in the same terms: x, top and bottom in logical px.

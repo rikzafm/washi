@@ -164,8 +164,9 @@ impl Editor {
             let editor_weak = editor_weak.clone();
             ui.on_block_history(move |redo| {
                 let Some(editor) = editor_weak.upgrade() else { return };
-                if let Some(caret) = editor.step(redo) {
-                    changed(Some(caret));
+                // a step that changed only kinds (a tick, a toggle) leaves the selection alone
+                if let Some(caret) = editor.history_step(redo) {
+                    changed(caret);
                 }
             });
         }
