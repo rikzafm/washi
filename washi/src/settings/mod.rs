@@ -65,6 +65,12 @@ pub struct Hooks {
     pub letter_spacing_changed: Rc<dyn Fn(f32)>,
     /// The Font size changed (already saved): every note lays its text out at the new size.
     pub font_size_changed: Rc<dyn Fn(u32)>,
+    /// A row of the Font manager's list was pressed (its index; 0 is the Default font): pick it.
+    pub font_picked: Rc<dyn Fn(usize)>,
+    /// A row's "Remove" was pressed.
+    pub font_removed: Rc<dyn Fn(usize)>,
+    /// The "Install a font" area was pressed: ask for a file and install it.
+    pub font_install: Rc<dyn Fn()>,
 }
 
 #[derive(Clone, Debug)]
@@ -428,6 +434,12 @@ impl SettingsView {
                     v.toggle_manager();
                 }
             });
+        }
+        {
+            let (picked, removed, install) = (self.hooks.font_picked.clone(), self.hooks.font_removed.clone(), self.hooks.font_install.clone());
+            self.ui.on_manager_row_clicked(move |i| picked(i.max(0) as usize));
+            self.ui.on_manager_remove_clicked(move |i| removed(i.max(0) as usize));
+            self.ui.on_manager_install_clicked(move || install());
         }
         {
             let me = me.clone();

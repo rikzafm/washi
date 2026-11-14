@@ -15,7 +15,7 @@ fn first_run_shows_one_empty_note() {
     h.start().unwrap();
     assert_eq!(h.open_note_count(), 1);
     assert_eq!(h.note_text(0), "");
-    assert_eq!(h.schema_version(), 1);
+    assert_eq!(h.schema_version(), 2);
 }
 
 #[test]

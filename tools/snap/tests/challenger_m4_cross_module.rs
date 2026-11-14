@@ -750,5 +750,5 @@ fn test_high_stress_interleaved_matrix() {
     assert_eq!(h.viewer_window_sizes().len(), 0);
     assert!(!h.is_all_notes_open());
     assert!(h.open_note_count() >= 1);
-    assert_eq!(h.schema_version(), 1);
+    assert_eq!(h.schema_version(), 2);
 }

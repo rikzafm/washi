@@ -2,7 +2,7 @@
 
 use super::migrations;
 use crate::platform::NoteId;
-use crate::fonts::{FONT_SIZE_DEFAULT, FONT_SIZE_RANGE};
+use crate::fonts::{is_valid_font_id, AxisValues, FONT_SIZE_DEFAULT, FONT_SIZE_RANGE};
 use rusqlite::{Connection, ErrorCode};
 use std::path::Path;
 use zeroize::Zeroizing;
@@ -77,6 +77,15 @@ pub struct ClosedNote {
     pub preview: String,
     /// When the note was last edited (unix ms).
     pub updated_at: i64,
+}
+
+/// An installed font as stored: its folder name, family and its own Axis values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FontRow {
+    pub id: String,
+    pub family: String,
+    pub axes: AxisValues,
+    pub installed_at: i64,
 }
 
 pub struct Db {
@@ -315,6 +324,76 @@ impl Db {
     /// Save the font size, clamped to 12..=40.
     pub fn set_font_size(&self, size: u32) -> Result<(), DbError> {
         self.set_meta("font_size", &size.clamp(*FONT_SIZE_RANGE.start(), *FONT_SIZE_RANGE.end()).to_string())
+    }
+
+    /// The installed fonts, oldest install first. Axis values are `None` until the user moves a slider.
+    pub fn fonts(&self) -> Vec<FontRow> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, family, wght, wdth, slnt, installed_at FROM fonts ORDER BY installed_at, id") else {
+            return Vec::new();
+        };
+        let rows = stmt.query_map([], |r| {
+            Ok(FontRow {
+                id: r.get(0)?,
+                family: r.get(1)?,
+                axes: AxisValues {
+                    weight: r.get::<_, Option<f64>>(2)?.map(|v| v as f32),
+                    width: r.get::<_, Option<f64>>(3)?.map(|v| v as f32),
+                    slant: r.get::<_, Option<f64>>(4)?.map(|v| v as f32),
+                },
+                installed_at: r.get(5)?,
+            })
+        });
+        rows.map(|r| r.filter_map(Result::ok).filter(|f| is_valid_font_id(&f.id)).collect()).unwrap_or_default()
+    }
+
+    /// Record an installed font. Installing a family again (same `id`) keeps its axis values and
+    /// only takes the new name and install time.
+    pub fn add_font(&self, id: &str, family: &str, now_ms: i64) -> Result<(), DbError> {
+        self.conn.execute(
+            "INSERT INTO fonts(id, family, installed_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET family = excluded.family, installed_at = excluded.installed_at",
+            rusqlite::params![id, family, now_ms],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_font(&self, id: &str) -> Result<(), DbError> {
+        self.conn.execute("DELETE FROM fonts WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Save a font's own Axis values (`None` = the font's default).
+    pub fn set_font_axes(&self, id: &str, axes: AxisValues) -> Result<(), DbError> {
+        self.conn.execute(
+            "UPDATE fonts SET wght = ?2, wdth = ?3, slnt = ?4 WHERE id = ?1",
+            rusqlite::params![id, axes.weight.map(f64::from), axes.width.map(f64::from), axes.slant.map(f64::from)],
+        )?;
+        Ok(())
+    }
+
+    /// The Font in use: `"default"` (Shadows Into Light) or an installed font's id. The Default
+    /// font when never set or when the stored value is not a well-formed id.
+    pub fn font_active(&self) -> String {
+        self.meta("font_active").filter(|v| v == "default" || is_valid_font_id(v)).unwrap_or_else(|| "default".into())
+    }
+
+    pub fn set_font_active(&self, id: &str) -> Result<(), DbError> {
+        self.set_meta("font_active", id)
+    }
+
+    /// The Default font's slant in degrees (it has no row in `fonts`); `None` = upright.
+    pub fn default_font_slant(&self) -> Option<f32> {
+        self.meta("font_default_slnt").and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite())
+    }
+
+    pub fn set_default_font_slant(&self, slant: Option<f32>) -> Result<(), DbError> {
+        match slant {
+            Some(v) => self.set_meta("font_default_slnt", &v.to_string()),
+            None => {
+                self.conn.execute("DELETE FROM meta WHERE key = 'font_default_slnt'", [])?;
+                Ok(())
+            }
+        }
     }
 
     /// The Theme a Sidebar is drawn with (each Sidebar's is stored, even while they are shared).
@@ -777,6 +856,63 @@ mod tests {
         for junk in ["", "big", "12.5", "-3", "11", "41", "9999999999999"] {
             db.set_meta("font_size", junk).unwrap();
             assert_eq!(db.font_size(), 22, "{junk:?} reads as 22");
+        }
+    }
+
+    #[test]
+    fn installed_fonts_are_listed_in_install_order_and_survive_reopening() {
+        let (dir, db) = test_db();
+        assert!(db.fonts().is_empty(), "nothing installed yet");
+        db.add_font("zed-1", "Zed", 5000).unwrap();
+        db.add_font("alpha-2", "Alpha", 6000).unwrap();
+        db.add_font("mid-3", "Mid", 5500).unwrap();
+        let ids = |db: &Db| db.fonts().into_iter().map(|f| f.id).collect::<Vec<_>>();
+        assert_eq!(ids(&db), ["zed-1", "mid-3", "alpha-2"], "by install time");
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert_eq!(ids(&db), ["zed-1", "mid-3", "alpha-2"]);
+        assert_eq!(db.fonts()[0].family, "Zed");
+        assert_eq!(db.fonts()[0].axes, AxisValues::default(), "axes are null until a slider moves");
+        db.remove_font("mid-3").unwrap();
+        assert_eq!(ids(&db), ["zed-1", "alpha-2"]);
+    }
+
+    #[test]
+    fn reinstalling_a_font_keeps_its_axis_values_and_takes_the_new_install_time() {
+        let (_dir, db) = test_db();
+        db.add_font("sans-1", "Sans", 1000).unwrap();
+        let axes = AxisValues { weight: Some(600.0), width: None, slant: Some(5.0) };
+        db.set_font_axes("sans-1", axes).unwrap();
+        db.add_font("sans-1", "Sans", 9000).unwrap();
+        let f = &db.fonts()[0];
+        assert_eq!(f.axes, axes);
+        assert_eq!(f.installed_at, 9000);
+        assert_eq!(db.fonts().len(), 1, "one row, not two");
+    }
+
+    #[test]
+    fn the_active_font_is_default_until_set_survives_reopening_and_falls_back_on_nonsense() {
+        let (dir, db) = test_db();
+        assert_eq!(db.font_active(), "default");
+        db.set_font_active("sans-1").unwrap();
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert_eq!(db.font_active(), "sans-1");
+        for junk in ["", "  ", "../evil", "a/b", "A B", r"x\y"] {
+            db.set_meta("font_active", junk).unwrap();
+            assert_eq!(db.font_active(), "default", "{junk:?} reads as the Default font");
+        }
+    }
+
+    #[test]
+    fn the_default_fonts_slant_is_zero_until_set_and_falls_back_on_nonsense() {
+        let (_dir, db) = test_db();
+        assert_eq!(db.default_font_slant(), None);
+        db.set_default_font_slant(Some(5.0)).unwrap();
+        assert_eq!(db.default_font_slant(), Some(5.0));
+        for junk in ["", "lean", "NaN", "inf"] {
+            db.set_meta("font_default_slnt", junk).unwrap();
+            assert_eq!(db.default_font_slant(), None, "{junk:?}");
         }
     }
 

@@ -2,6 +2,7 @@
 
 mod all_notes;
 mod exit;
+mod fonts;
 mod notes;
 mod pictures;
 mod popups;
@@ -93,6 +94,12 @@ struct Inner {
     all_notes: RefCell<Option<Rc<AllNotesView>>>,
     /// Currently open Settings page, if any.
     settings: RefCell<Option<Rc<SettingsView>>>,
+    /// Fonts being installed on their worker threads, and the timer that collects them (it runs
+    /// only while there are any).
+    font_installs: RefCell<Vec<fonts::FontInstall>>,
+    font_timer: slint::Timer,
+    /// The axes of the installed fonts read so far.
+    font_axes: RefCell<fonts::AxesCache>,
 }
 
 #[derive(Clone)]
@@ -135,6 +142,9 @@ impl App {
         crate::ui_scale::set_app_scale(db.ui_scale());
         // and every note's text at the saved Font size
         crate::fonts::set_size(db.font_size());
+        // and in the saved font: loaded here, before any window exists (a missing or broken one
+        // falls back to the Default font and is reported once)
+        fonts::load_startup(&env, &db);
 
         let mut rows = db.open_notes().map_err(StartError::Db)?;
         if rows.is_empty() {
@@ -161,6 +171,9 @@ impl App {
             menus_opened: Cell::new(0),
             all_notes: RefCell::new(None),
             settings: RefCell::new(None),
+            font_installs: RefCell::new(Vec::new()),
+            font_timer: slint::Timer::default(),
+            font_axes: RefCell::new(Default::default()),
         });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));

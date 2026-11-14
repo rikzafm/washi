@@ -13,7 +13,9 @@
 
 mod bake;
 mod package;
+pub mod registry;
 mod source;
+pub mod store;
 
 pub use bake::{bake, bake_regular, package_from_font, BakeError, FaceSet, FontMetrics, RegularFace, SAMPLE_UI_TEXT};
 pub use package::{read_package, PackageError, MAX_ARCHIVE_BYTES, MAX_ENTRIES, MAX_FONT_BYTES};
@@ -21,6 +23,12 @@ pub use package::{read_package, PackageError, MAX_ARCHIVE_BYTES, MAX_ENTRIES, MA
 /// Families Washi ships; an installed font may not take their names (nor start with "Washi ",
 /// which the private family names of a Face set use).
 pub const BUNDLED_FAMILIES: [&str; 4] = ["Shadows Into Light", "Gelasio", "Noto Serif", "Washi Caret"];
+
+/// Whether `id` is a well-formed installed font id: the name of a folder under the fonts folder
+/// (lowercase letters, digits and dashes). Anything else is never used as a path.
+pub fn is_valid_font_id(id: &str) -> bool {
+    (1..=80).contains(&id.len()) && id != "default" && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
 
 /// The largest lean, in degrees, the UI offers for a font without a slant axis (it is sheared).
 pub const SHEAR_MAX_DEG: f32 = 12.0;
