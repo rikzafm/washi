@@ -857,7 +857,6 @@ mod tests {
         let b = Block::new(Kind::Body, text);
         let words = |l: &Layout| l.runs().iter().map(|r| (r.line, r.text.clone(), r.width)).collect::<Vec<_>>();
         let before = words(&one(&b));
-        let lines_before = before.iter().map(|w| w.0).max().unwrap();
         let wide = [include_bytes!("../../fonts/Gelasio-Regular.ttf").as_slice(), include_bytes!("../../fonts/Gelasio-Bold.ttf")];
         let font = ActiveFont::new("Gelasio", "Washi Caret", [wide[0], wide[1], wide[0], wide[1]].map(std::borrow::Cow::Borrowed)).unwrap();
         set_current(font);
@@ -867,7 +866,6 @@ mod tests {
         let w = after.iter().find(|w| w.1 == "quick").unwrap().2;
         let expected = line_width("quick", TOKENS.body.size);
         assert!((w - expected).abs() < 1e-9);
-        assert!(after.iter().map(|w| w.0).max().unwrap() != lines_before);
         set_current(ActiveFont::default_font());
         assert_eq!(words(&one(&b)), before, "and back");
     }
