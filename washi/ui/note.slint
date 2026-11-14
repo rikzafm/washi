@@ -252,6 +252,9 @@ export component NoteWindow inherits Window {
     callback caret-moved(int, int, int);
     // What the note scrolls through: the app's layout, or the edit fields if they run longer.
     property <length> content: max(root.content-height, text-layer.fields-bottom);
+    /// Where the edit fields end (the bottom of the last one), in the paper's frame: the lines the
+    /// fields wrap to, which the app's layout must match.
+    out property <length> fields-bottom: text-layer.fields-bottom;
     property <length> max-scroll: max(0px, root.content - root.text-view-height);
     changed max-scroll => { if (root.scroll-y > root.max-scroll) { root.scroll-y = root.max-scroll; } }
     /// Opacity of the scrollbar (0 unless actively scrolling, hovered, or dragged while overflowing).

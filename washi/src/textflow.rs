@@ -191,75 +191,90 @@ struct Word {
     off: usize,
 }
 
-/// Add a word to the last line (`wrap` always starts with one line, and only ever adds more).
-fn push_word(lines: &mut [Vec<Word>], word: Word) {
-    if let Some(line) = lines.last_mut() {
-        line.push(word);
-    }
-}
-
-/// Break one block's text into lines of words.
+/// Break one block's text into lines: the words of each line, and the byte offset each line starts at.
 ///
-/// Lines break at the Unicode line-break opportunities (UAX #14), as Slint's own text layout does:
-/// after spaces, but also after a hyphen, a slash and the like. Breaking at spaces only would put
-/// fewer lines here than the edit fields show for text such as paths, and the note would then
-/// scroll short of its end and move the caret to the wrong lines.
-fn wrap(text: &str, avail: f64, m: &Measure) -> Vec<Vec<Word>> {
+/// This is the edit fields' own rule (Slint lays a `TextInput` out with parley, `word-wrap` being
+/// parley's `overflow-wrap: anywhere`), so the words, the caret and the fields break in the same
+/// places, whatever the text:
+///
+/// - Characters are laid along the line one by one. Lines break at the Unicode line-break
+///   opportunities (UAX #14): after spaces, but also after a hyphen, a slash and the like. When a
+///   character does not fit, the line breaks at the last opportunity on it (the next line starts
+///   with the word that did not fit).
+/// - A space that does not fit hangs past the line's end, and the line breaks right after it. So a
+///   run of spaces wider than the line is not one gap: it fills the line, one space hangs, and the
+///   rest go on onto the next line, which can be a line of spaces only. Leading spaces count like
+///   any other: a word that does not fit after them goes to the next line.
+/// - A word with no opportunity on its line (a word wider than the line) breaks before the character
+///   that does not fit.
+/// - An opportunity at the very start of a line does not count (it would make an empty line).
+///
+/// Breaking at spaces only would put fewer lines here than the edit fields show for text such as
+/// paths, and the note would then scroll short of its end and move the caret to the wrong lines.
+fn wrap(text: &str, avail: f64, m: &Measure) -> Wrapped {
     count(Count::Wrap);
-    let mut lines: Vec<Vec<Word>> = vec![vec![]];
+    let breaks: std::collections::BTreeSet<usize> = unicode_linebreak::linebreaks(text).map(|(i, _)| i).collect();
+    let mut starts = vec![0];
     let mut x = 0.0;
-    let mut pending = 0.0; // trailing spaces since the last word
-    let mut at_line_start = true;
-    let mut start = 0; // byte offset of the current fragment
-    for (end, _) in unicode_linebreak::linebreaks(text) {
-        if end <= start {
-            continue;
-        }
-        let fragment = &text[start..end];
-        let word_pos = start;
-        start = end;
-        let word = fragment.trim_end_matches(' ');
-        let trailing = m.width(&fragment[word.len()..]);
-        if word.is_empty() {
-            pending += trailing;
-            continue;
-        }
-        let w = m.width(word);
-        if !at_line_start && x + pending + w > avail + 1e-6 {
-            lines.push(vec![]);
-            x = 0.0;
-            pending = 0.0;
-            at_line_start = true;
-        }
-        if at_line_start && w > avail {
-            // a word wider than the line breaks anywhere
-            let mut chunk = String::new();
-            let mut chunk_off = word_pos;
-            let mut cw = 0.0;
-            for (ci, c) in word.char_indices() {
-                let a = m.advance(c);
-                if cw + a > avail && !chunk.is_empty() {
-                    push_word(&mut lines, Word { text: std::mem::take(&mut chunk), at: 0.0, off: chunk_off });
-                    lines.push(vec![]);
-                    chunk_off = word_pos + ci;
-                    cw = 0.0;
-                }
-                chunk.push(c);
-                cw += a;
+    // the last opportunity on this line, and the last character a word could be broken before
+    let (mut boundary, mut emergency): (Option<usize>, Option<usize>) = (None, None);
+    let mut i = 0;
+    while let Some(c) = text[i..].chars().next() {
+        let next = i + c.len_utf8();
+        if x != 0.0 {
+            if breaks.contains(&i) {
+                boundary = Some(i);
+            } else {
+                emergency = Some(i);
             }
-            push_word(&mut lines, Word { text: chunk, at: 0.0, off: chunk_off });
-            x = cw;
-            pending = trailing;
-            at_line_start = false;
+        }
+        let a = m.advance(c);
+        if x + a <= avail + 1e-6 {
+            x += a;
+            i = next;
             continue;
         }
-        let at = x + pending;
-        push_word(&mut lines, Word { text: word.to_string(), at, off: word_pos });
-        x = at + w;
-        pending = trailing;
-        at_line_start = false;
+        let start = if matches!(c, ' ' | '\u{a0}') {
+            // the space hangs, and the line breaks after it
+            Some(next)
+        } else {
+            boundary.or(emergency)
+        };
+        match start {
+            Some(s) => {
+                starts.push(s);
+                (x, boundary, emergency) = (0.0, None, None);
+                i = s;
+            }
+            None => {
+                // nowhere to break: the character overflows
+                x += a;
+                i = next;
+            }
+        }
     }
-    lines
+    let mut lines = Vec::with_capacity(starts.len());
+    for (li, &s) in starts.iter().enumerate() {
+        let e = starts.get(li + 1).copied().unwrap_or(text.len());
+        let mut words = vec![];
+        // the words: the stretches between opportunities, less their spaces
+        // (the last line is empty when the text ends with a space that hung)
+        let mut cuts: Vec<usize> = if s < e { breaks.range(s + 1..e).copied().collect() } else { vec![] };
+        cuts.push(e);
+        let mut from = s;
+        for to in cuts {
+            let piece = &text[from..to];
+            let lead = piece.len() - piece.trim_start_matches(' ').len();
+            let word = piece.trim_matches(' ');
+            if !word.is_empty() {
+                let off = from + lead;
+                words.push(Word { text: word.to_string(), at: m.width(&text[s..off]), off });
+            }
+            from = to;
+        }
+        lines.push(words);
+    }
+    Wrapped { lines, starts }
 }
 
 /// Split a word into pieces of at most `max` width (at least one character each).
@@ -335,24 +350,8 @@ pub struct CaretLine {
     pub x: f64,
 }
 
-fn line_starts(lines: &[Vec<Word>]) -> Vec<usize> {
-    let mut starts = Vec::with_capacity(lines.len());
-    let mut prev = 0;
-    for (i, l) in lines.iter().enumerate() {
-        if i == 0 {
-            starts.push(0);
-        } else if let Some(w) = l.first() {
-            prev = w.off;
-            starts.push(w.off);
-        } else {
-            starts.push(prev);
-        }
-    }
-    starts
-}
-
 /// The visual line and x of the caret at byte `offset` of a block's text, wrapped to `starts` (its
-/// [`line_starts`]). Where a line wraps without a space the same offset ends one line and starts the
+/// [`Wrapped::starts`]). Where a line wraps without a space the same offset ends one line and starts the
 /// next: this is the start of the next, or with `line_end` the end of the one before.
 fn caret_line_in(text: &str, starts: &[usize], m: &Measure, offset: usize, line_end: bool) -> CaretLine {
     let mut offset = offset.min(text.len());
@@ -375,8 +374,14 @@ fn offset_in(text: &str, lines: &[Vec<Word>], starts: &[usize], m: &Measure, lin
     let line_words = &lines[line];
     let line_text_end = if line == lines.len() - 1 {
         text.len()
+    } else if let Some(w) = line_words.last() {
+        // the spaces after the line's last word are where it wraps: not a place on it
+        w.off + w.text.len()
     } else {
-        line_words.last().map_or(text.len(), |w| w.off + w.text.len())
+        // a line of spaces only (a run wider than the line): every place on it but its end, which
+        // is where the next line starts
+        let end = starts[line + 1];
+        text[start..end].char_indices().last().map_or(start, |(i, _)| start + i)
     };
     let mut best = (start, f64::MAX);
     let mut at = 0.0;
@@ -631,18 +636,16 @@ impl Layout {
             if b.kind == Kind::Image {
                 let image = image_size(b).map_or((0.0, avail, st.pitch), |px| b.image_box(avail, px));
                 // a picture has one empty line, as far as the caret is concerned
-                let lines = vec![vec![]];
-                let starts = line_starts(&lines);
-                laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(Wrapped { lines, starts }), image: Some(image) });
+                let lines = Wrapped { lines: vec![vec![]], starts: vec![0] };
+                laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(lines), image: Some(image) });
                 top += image.2;
                 continue;
             }
             let m = t.measure(st.size);
             let lines = wrap(&b.text, avail - indent(b.kind), &m);
-            draw_block(b, bi, top, &lines, &m, paper, t, &mut runs, &mut rules, &mut markers, &mut checks);
-            let starts = line_starts(&lines);
-            let count = lines.len();
-            laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(Wrapped { lines, starts }), image: None });
+            draw_block(b, bi, top, &lines.lines, &m, paper, t, &mut runs, &mut rules, &mut markers, &mut checks);
+            let count = lines.lines.len();
+            laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(lines), image: None });
             // every block takes at least one line, even when empty
             top += count as f64 * st.pitch;
         }
@@ -1004,6 +1007,31 @@ mod tests {
         let runs = runs_of(Document::parse(&format!("t
 {long}")).blocks(), PAPER, &TOKENS);
         assert!(runs.iter().filter(|r| r.block == 1).map(|r| r.line).max().unwrap() >= 1);
+    }
+
+    #[test]
+    fn a_run_of_spaces_wider_than_the_line_takes_lines_of_its_own_like_the_edit_fields() {
+        let space = Measure::new(false, false, TOKENS.body.size).advance(' ');
+        let avail = PAPER.0 - TOKENS.inset_left - TOKENS.inset_right;
+        let per_line = (avail / space).floor() as usize + 1; // the spaces that fit, and one that hangs
+        let sp = " ".repeat(2 * per_line + 3);
+        // in the middle: the word, two lines of spaces, the rest of them and the next word
+        let b = Block::new(Kind::Body, &format!("left{sp}right"));
+        let l = one(&b);
+        let lines = caret_line(&b, b.text.len()).lines;
+        assert_eq!(lines, 3, "{per_line} spaces a line");
+        let right = l.runs().iter().find(|r| r.text == "right").unwrap();
+        assert_eq!(right.line, 2);
+        // a line of spaces only: a click on it stays on it, and its end is the next line's start
+        let (o, _) = l.offset_on_line(0, 1, 1e6).unwrap();
+        assert_eq!(caret_line(&b, o).line, 1);
+        assert_eq!(caret_line(&b, o + 1).line, 2);
+        // leading spaces count: a word that does not fit after them goes to the next line
+        let lead = Block::new(Kind::Body, &format!("{}word", " ".repeat(per_line - 2)));
+        assert_eq!(caret_line(&lead, lead.text.len()).lines, 2);
+        assert_eq!(one(&lead).runs()[0].x, TOKENS.inset_left);
+        // and the text is kept as it is
+        assert_eq!(l.runs().iter().map(|r| r.text.as_str()).collect::<Vec<_>>(), ["left", "right"]);
     }
 
     #[test]
