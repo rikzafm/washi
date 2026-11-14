@@ -12,8 +12,10 @@ import "../../fonts/NotoSerif-Italic.ttf";
 import "../../fonts/NotoSerif-Regular.ttf";
 
 export global ToolbarMetrics {
-    /// Height of the band at the bottom of the paper. Always reserved, shown or not.
-    out property <length> band-height: 38px;
+    /// Height of the band at the bottom of the paper. Always reserved, shown or not. Taller than
+    /// `button-top-above-bottom` (40): the text ends `Theme.text-bottom-gap` above the band, so with
+    /// 44 it stops 8 px clear of the buttons (at 38 a cut line of text sat on top of them).
+    out property <length> band-height: 44px;
     /// Fade in (quick, so the toolbar answers the pointer at once) and out (gentler, so it does not
     /// blink away when the pointer brushes past the edge).
     out property <duration> fade: 100ms;

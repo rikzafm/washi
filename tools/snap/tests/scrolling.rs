@@ -187,8 +187,8 @@ fn moving_the_caret_back_up_scrolls_back_to_it() {
 #[test]
 fn text_never_reaches_the_toolbar_band() {
     let h = note(&long_text());
-    // the text area is shorter than the paper by the toolbar band (38), the gap (4) and the tilt allowance
+    // the text area is shorter than the paper by the toolbar band (44), the gap (4) and the tilt allowance
     let (_, window_h) = h.note_size(0);
     let paper_h = window_h as f32 - 84.0;
-    assert!(h.text_view_height(0) <= paper_h - 38.0 - 4.0 + 0.5, "view {}", h.text_view_height(0));
+    assert!(h.text_view_height(0) <= paper_h - 44.0 - 4.0 + 0.5, "view {}", h.text_view_height(0));
 }

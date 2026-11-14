@@ -13,8 +13,9 @@ use serde_json::Value;
 pub const TILT_DEG: f64 = 1.5;
 pub const TOL_TILT: f64 = 0.1;
 pub const TOL: f64 = 1.0;
-/// Height of the toolbar band at the bottom of the paper, in logical px.
-pub const BAND_LOGICAL: f64 = 56.0;
+/// Height of the toolbar band at the bottom of the paper, in logical px: the app's
+/// `ToolbarMetrics.band-height` (the mockup's band was 56, see `toolbar.app_band_height` in spec.json).
+pub const BAND_LOGICAL: f64 = 44.0;
 
 pub struct Options {
     /// Snapshot pixels per logical pixel.

@@ -25,6 +25,8 @@ pub struct Harness {
     last_ids: Vec<NoteId>,
 }
 
+/// The toolbar band at the bottom of the paper, logical px (`ToolbarMetrics.band-height`).
+pub const BAND: f32 = 44.0;
 /// The Tape color list of the right-click menu, in the order of its index.
 pub const TAPE_COLORS: [&str; 4] = ["Pink + blue", "Yellow + green", "Lavender + peach", "Slate + rose"];
 
@@ -497,20 +499,20 @@ impl Harness {
     /// A point inside the color popover's body, in window coordinates (the caption row, clear of
     /// the swatches and of Clear): 22 px from the paper's left edge plus and 30 px above the band.
     pub fn picker_point(&self, note: usize) -> (f32, f32) {
-        self.paper_point(note, 22.0 + 110.0, self.paper_size(note).1 - 38.0 - 10.0 - 20.0)
+        self.paper_point(note, 22.0 + 110.0, self.paper_size(note).1 - BAND - 10.0 - 20.0)
     }
 
     /// The center of an ink dot (`row` 0) or marker chip (`row` 1) `i` of the open popover, in
     /// window coordinates.
     pub fn swatch_point(&self, note: usize, row: usize, i: usize) -> (f32, f32) {
-        let top = self.paper_size(note).1 - 38.0 - 10.0 - 116.0;
+        let top = self.paper_size(note).1 - BAND - 10.0 - 116.0;
         let v = top + if row == 0 { 14.0 } else { 47.0 } + 10.5;
         self.paper_point(note, 22.0 + 67.0 + 10.5 + i as f32 * 26.0, v)
     }
 
     /// The center of the popover's Clear link, in window coordinates.
     pub fn clear_point(&self, note: usize) -> (f32, f32) {
-        let top = self.paper_size(note).1 - 38.0 - 10.0 - 116.0;
+        let top = self.paper_size(note).1 - BAND - 10.0 - 116.0;
         self.paper_point(note, 22.0 + 330.0 - 14.0 - 20.0, top + 80.0 + 13.0)
     }
 

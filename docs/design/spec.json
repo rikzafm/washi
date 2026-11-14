@@ -105,6 +105,8 @@
     },
     "toolbar": {
       "band_height": 56,
+      "app_band_height": 44,
+      "app_note": "the app's toolbar is smaller than the mockup's (buttons 32 px, radius 8.6, top 40 px above the paper bottom, since 0c2722b); its band is 44 px so the text ends 8 px above the buttons",
       "rule": "band is always reserved at the bottom of the paper; the scrolling text area ends at the band's top edge; the note does not change size when the toolbar appears",
       "button_size": [40, 40],
       "button_radius": 10.8,

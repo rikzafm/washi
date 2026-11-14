@@ -27,3 +27,7 @@ Final: paper, shadow, tape_pink, tape_blue pass on hover; on idle everything but
 ### Decision: roomier line spacing (2026-11-14)
 
 Heading pitch 29.3 -> 34 px and body pitch 29.1 -> 33 px (about 1.45 em): at the mockup's 1.22 to 1.28 em the handwriting's tails and ascenders touched the next line. A deliberate departure from the mockup; `text.heading.line_pitch` and `text.body.line_pitch` in spec.json stay the measured values. See `.scratch/text-render-fixes`.
+
+### Fix: toolbar band taller than its buttons (2026-11-14)
+
+`ToolbarMetrics.band-height` 38 -> 44 px. Since 0c2722b (smaller toolbar: 32 px buttons, top 40 px above the paper bottom) the band was 38 px, lower than the buttons' top, so the text ran on to 2 px above them and a cut line of words sat on the icons. With 44 the text ends 8 px above the buttons. `BAND_LOGICAL` in uidiff follows the app (44). The toolbar regions of spec.json still describe the mockup's 40 px buttons, so `hover:toolbar`, `invariants:toolbar` and the icon exclusion of `invariants:text area` still fail until they are measured again for the smaller toolbar.
