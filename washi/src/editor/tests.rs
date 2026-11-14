@@ -453,3 +453,30 @@ fn the_default_tokens_are_the_themes() {
         assert!((a.size - b.size).abs() < 0.01 && (a.pitch - b.pitch).abs() < 0.5, "{a:?} vs {b:?}");
     }
 }
+
+#[test]
+fn the_check_item_indent_is_the_themes() {
+    // the layout indents a check item's words by its own constant and the theme moves the edit field
+    // by `check-indent`: if they differ, the caret leaves the words of every check item
+    let (_dir, _editor, ui) = test_editor_with_ui("x");
+    let theme = ui.global::<Theme>().get_check_indent() as f64;
+    assert!((textflow::CHECK_INDENT - theme).abs() < 1e-6, "layout {} vs theme {theme}", textflow::CHECK_INDENT);
+}
+
+#[test]
+fn a_check_items_box_and_tick_stay_drawn_while_an_input_method_composes_in_it() {
+    // the harness has no input method: ask the note's own drawing rule. While composing, the field
+    // shows the item's words itself (so the note hides its own), but it has no box
+    let (_dir, _editor, ui) = test_editor_with_ui("x");
+    let draw = ui.global::<crate::note_window::CheckDrawing>();
+    let ticked = CheckData { block: 2, x: 40.0, y: 100.0, size: 17.0, dx: 0.0, dy: 0.0, checked: true };
+    let open = CheckData { checked: false, ..ticked.clone() };
+    let edge = 0.0;
+    assert!(draw.invoke_box_shown(open.clone(), 2, edge), "the box of the item being composed in");
+    assert!(draw.invoke_box_shown(ticked.clone(), 2, edge));
+    assert!(draw.invoke_tick_shown(ticked.clone(), 2, edge), "the tick of the item being composed in");
+    assert!(!draw.invoke_tick_shown(open.clone(), 2, edge), "an open box has no tick");
+    // scrolled wholly above the paper's top edge: left out (a box partly above it is cut, not hidden)
+    assert!(!draw.invoke_box_shown(ticked.clone(), -1, 118.0));
+    assert!(draw.invoke_box_shown(ticked, -1, 110.0));
+}

@@ -86,6 +86,10 @@ impl Editor {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return };
                 if editor.format(what) {
                     changed(None);
+                    if what == FORMAT_CHECK || what == FORMAT_LIST {
+                        // the paragraph's indent changed, so it rewrapped: keep the caret in view
+                        editor.reveal_caret(&ui);
+                    }
                 } else {
                     editor.show_formats(&ui);
                 }
@@ -160,8 +164,9 @@ impl Editor {
             let editor_weak = editor_weak.clone();
             ui.on_block_history(move |redo| {
                 let Some(editor) = editor_weak.upgrade() else { return };
-                if let Some(caret) = editor.step(redo) {
-                    changed(Some(caret));
+                // a step that changed only kinds (a tick, a toggle) leaves the selection alone
+                if let Some(caret) = editor.history_step(redo) {
+                    changed(caret);
                 }
             });
         }
@@ -261,6 +266,11 @@ impl Editor {
                 }
                 editor.paper.set(paper);
                 editor.relayout(&ui);
+                // the words rewrapped and the view changed height: keep the caret in view, but leave
+                // a selection being dragged to the drag (it scrolls the note itself)
+                if !editor.pointer.get().down {
+                    editor.reveal_caret(&ui);
+                }
             });
         }
 
