@@ -71,9 +71,16 @@ pub const CHECK_INDENT: f64 = 26.0;
 /// The side of a check box, logical px.
 pub const CHECK_BOX: f64 = 17.0;
 
+/// The title's size and pitch, and the space above the first heading and the first body block, at
+/// Font size 22 (`Theme.title-*`, `Theme.heading-gap`, `Theme.body-gap`).
+pub const TITLE_SIZE: f64 = 37.3;
+pub const TITLE_PITCH: f64 = 60.0;
+pub const HEADING_GAP: f64 = 10.0;
+pub const BODY_GAP: f64 = 8.1;
+
 /// The indent of a block's text from the text area's left edge.
-fn indent(kind: Kind) -> f64 {
-    if kind.is_check() { CHECK_INDENT } else { 0.0 }
+fn indent(t: &Tokens, kind: Kind) -> f64 {
+    if kind.is_check() { t.check_indent } else { 0.0 }
 }
 
 /// Fixed logical values from `ui/theme.slint`.
@@ -100,6 +107,10 @@ pub struct Tokens {
     /// that differ, so the editor builds its `Layout` again through the path a change of the other
     /// tokens (letter spacing) takes.
     pub font_epoch: u32,
+    /// How far a check item's text is indented for its box, and the box's side (they scale with
+    /// the Font size, like the sizes and pitches above).
+    pub check_indent: f64,
+    pub check_box: f64,
 }
 
 impl Tokens {
@@ -479,7 +490,7 @@ fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, 
     let st = t.style(b.kind);
     let base = baseline(m, st.pitch);
     let thick = (st.size / 20.0).max(1.0);
-    let left = t.inset_left + indent(b.kind);
+    let left = t.inset_left + indent(t, b.kind);
     let done = b.kind == Kind::Checked;
     let bar = |rules: &mut Vec<Rule>, x: f64, y: f64, width: f64, height: f64| {
         let mut at = 0.0;
@@ -495,9 +506,9 @@ fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, 
         bar(rules, t.inset_left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
     }
     if b.kind.is_check() {
-        let (x, y) = (t.inset_left, top + base - 0.3 * st.size - CHECK_BOX / 2.0);
-        let (dx, dy) = tilt_offset(x + CHECK_BOX / 2.0, y + CHECK_BOX / 2.0, paper, t.tilt_deg);
-        checks.push(CheckBox { block: bi, x, y, size: CHECK_BOX, dx, dy, checked: done });
+        let (x, y) = (t.inset_left, top + base - 0.3 * st.size - t.check_box / 2.0);
+        let (dx, dy) = tilt_offset(x + t.check_box / 2.0, y + t.check_box / 2.0, paper, t.tilt_deg);
+        checks.push(CheckBox { block: bi, x, y, size: t.check_box, dx, dy, checked: done });
     }
     for (li, line) in lines.iter().enumerate() {
         let y = top + li as f64 * st.pitch;
@@ -646,7 +657,7 @@ impl Layout {
                 continue;
             }
             let m = t.measure(&font, st.size);
-            let lines = wrap(&b.text, avail - indent(b.kind), &m);
+            let lines = wrap(&b.text, avail - indent(t, b.kind), &m);
             draw_block(b, bi, top, &lines.lines, &m, paper, t, &mut runs, &mut rules, &mut markers, &mut checks);
             let count = lines.lines.len();
             laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(lines), image: None });
@@ -692,7 +703,7 @@ impl Layout {
 
     /// How far block `block`'s text is indented from the text area's left edge.
     pub fn indent(&self, block: usize) -> f64 {
-        self.blocks.get(block).map_or(0.0, |b| indent(b.kind))
+        self.blocks.get(block).map_or(0.0, |b| indent(&self.tokens, b.kind))
     }
 
     /// The markers behind colored text.
@@ -742,7 +753,7 @@ impl Layout {
         let pitch = self.tokens.style(b.kind).pitch;
         let at = caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, line_end);
         let y = b.top + at.line as f64 * pitch;
-        Some((self.tokens.inset_left + indent(b.kind) + at.x, y, y + pitch))
+        Some((self.tokens.inset_left + indent(&self.tokens, b.kind) + at.x, y, y + pitch))
     }
 
     /// The top and bottom of the line holding the caret (byte `offset` of block `block`).
@@ -774,7 +785,7 @@ impl Layout {
         }
         let pitch = self.tokens.style(b.kind).pitch;
         let line = ((point.1 - b.top) / pitch).floor().max(0.0) as usize;
-        let (offset, line_end) = offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, point.0 - self.tokens.inset_left - indent(b.kind));
+        let (offset, line_end) = offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, point.0 - self.tokens.inset_left - indent(&self.tokens, b.kind));
         (Caret { block, offset }, line_end)
     }
 
@@ -797,7 +808,7 @@ impl Layout {
             }
             let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
             let to = if bi == end.block { end.offset.min(b.text.len()) } else { b.text.len() };
-            wash_block(&b.text, &b.lines.starts, &self.measure(b), t.style(b.kind), t.inset_left + indent(b.kind), b.top, (from, to), bi < end.block, &mut out);
+            wash_block(&b.text, &b.lines.starts, &self.measure(b), t.style(b.kind), t.inset_left + indent(t, b.kind), b.top, (from, to), bi < end.block, &mut out);
         }
         out
     }
@@ -828,6 +839,8 @@ mod tests {
         max_run: f64::MAX,
         letter_spacing: 0.0,
         font_epoch: 0,
+        check_indent: CHECK_INDENT,
+        check_box: CHECK_BOX,
     };
 
     const PAPER: (f64, f64) = (363.0, 433.0);

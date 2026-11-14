@@ -1,10 +1,11 @@
 // The Font & Style tab of the Settings page (UI only).
 //
-// Font, Text size and Tape color update the preview note and nothing else: their state lives in
-// properties of this component (bound to the Settings window, which is created fresh each time Settings
-// opens, so the defaults come back). Rust never reads these properties except in tests. Letter spacing
-// is the exception: Rust sets `spacing` from the saved choice and saves a new one (`set-spacing`), and
-// every note follows it.
+// Font and Tape color update the preview note and nothing else: their state lives in properties of
+// this component (bound to the Settings window, which is created fresh each time Settings opens, so
+// the defaults come back). Rust never reads these properties except in tests. Letter spacing and Font
+// size are the exceptions: Rust sets `spacing` and `size` from the saved choices and saves a new one
+// (`set-spacing`, `set-size`), and every note follows. Dragging the size slider only moves the
+// preview (`size`); the size is saved when the slider is released or the number box commits.
 // Laid out like the mockup's CSS in the Paper's tilted frame `pf`: the preview card, then four rows;
 // `bottom` (paper coordinates) is where the last row ends.
 //
@@ -14,6 +15,8 @@
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PX, PaperFrame, TapeShape, TapePalette, TextMetrics, PText, PBox, PRect, PShadow, VTape, SettingRow, PillButton, PickerButton, ListItem, ListPanel } from "settings-widgets.slint";
+import { PSlider, NumberBox } from "controls.slint";
+import { Theme } from "theme.slint";
 
 export component StyleTab inherits Rectangle {
     in property <PaperFrame> pf;
@@ -22,21 +25,31 @@ export component StyleTab inherits Rectangle {
     in property <[TapeShape]> tapes;
 
     in-out property <int> font: 0;
-    in-out property <int> size: 1;
+    /// The Font size, 12 to 40 (22 is today's look); while the slider is dragged, the one shown.
+    in-out property <int> size: 22;
+    callback set-size(int);
+    /// What the size number box shows, and whether it has the keyboard (for tests).
+    out property <string> size-text: size-box.shown;
+    out property <bool> size-editing: size-box.editing;
+    /// A press on a blank part of the tab: the number box under edit lets go of the keyboard.
+    callback blank-pressed();
     in-out property <int> tape: 0;
     /// Letter spacing: 0 Tight, 1 Normal, 2 Loose (as `LetterSpacing` in src/storage/db.rs).
     in-out property <int> spacing: 1;
     callback set-spacing(int);
     /// -1 none, 0 the font list, 1 the tape list.
     in-out property <int> open-list: -1;
-    out property <length> preview-font-size: [19px, 24px, 30px][root.size];
+    // The preview's 24px at Font size 22, scaled like the notes' text.
+    out property <length> preview-font-size: 24px * root.size / 22;
     out property <float> bottom: root.spacing-row-y + spacing-row.total;
 
     property <[string]> fonts: ["Shadows Into Light", "Patrick Hand", "Caveat", "Gloria Hallelujah", "Indie Flower", "Kalam"];
 
     // The preview card: 16px / 16px / 14px padding around the little paper (12px / 18px padding, the
     // text on 1.4 lines).
-    property <float> text-h: preview-t.preferred-height / 1px;
+    // The card is as tall as the preview text is at Font size 22, whatever the size: the rows below
+    // stay where they are while the slider is dragged, and a bigger preview is cut at the card.
+    property <float> text-h: base-t.preferred-height / 1px;
     property <float> card-h: 16.0 + (24.0 + root.text-h) + 14.0;
     property <float> rows-y: root.top + root.card-h + 18.0;
     // Each plain row is 56px and its 2px rule.
@@ -58,7 +71,8 @@ export component StyleTab inherits Rectangle {
     height: root.pf.f.h * 1px;
 
     /// Where the control `id` is, in the Paper frame's px, for tests: 0 font button, 1 to 6 font
-    /// options, 7 to 9 text sizes, 10 tape button, 11 to 14 tape options, 20 the Text size label (a
+    /// options, 7 the Font size number box, 100 + n the Font size slider where the value n is, 10 tape
+    /// button, 11 to 14 tape options, 20 the Font size label (a
     /// blank part of the paper), 21 to 23 letter spacings.
     public pure function hit-x(id: int) -> length {
         return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
@@ -67,8 +81,11 @@ export component StyleTab inherits Rectangle {
         return PX.y(root.pf, root.hit-a(id), root.hit-b(id));
     }
     pure function hit-a(id: int) -> float {
-        if (id >= 7 && id <= 9) {
-            return 484.0 - 226.4 + (id - 7 + 0.5) * 226.4 / 3.0;
+        if (id == 7) {
+            return 484.0 - 262.0 + 160.0 + 30.0;
+        }
+        if (id >= 100) {
+            return 484.0 - 262.0 + size-slider.x-of(id - 100) / 1px;
         }
         if (id >= 21 && id <= 23) {
             return 484.0 - 226.4 + (id - 21 + 0.5) * 226.4 / 3.0;
@@ -88,7 +105,7 @@ export component StyleTab inherits Rectangle {
         if (id >= 1 && id <= 6) {
             return root.font-row-y + 6.0 + 48.0 + 6.0 + (id - 1) * 42.0 + 21.0;
         }
-        if ((id >= 7 && id <= 9) || id == 20) {
+        if (id == 7 || id == 20 || id >= 100) {
             return root.size-row-y + 28.0;
         }
         if (id >= 21 && id <= 23) {
@@ -101,6 +118,20 @@ export component StyleTab inherits Rectangle {
             return root.tape-row-y + 6.0 + 48.0 + 6.0 + (id - 11) * 42.0 + 21.0;
         }
         return root.font-row-y + 28.0;
+    }
+
+    // A press on a blank part of the tab ends an edit in the number box (it commits). The controls
+    // are above it, so they get their own presses.
+    TouchArea {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.blank-pressed();
+            }
+        }
     }
 
     // ---- the preview card ----
@@ -135,15 +166,28 @@ export component StyleTab inherits Rectangle {
         fill: #FFFFFD;
     }
 
+    base-t := PText {
+        pf: root.pf;
+        visible: false;
+        width: 380px;
+        text: preview-t.text;
+        font-size: 24px;
+        letter-spacing: 24px * root.spacing-em[root.spacing];
+        wrap: word-wrap;
+        line-height-factor: 1.4 / TextMetrics.natural;
+    }
+
     preview-t := PText {
         pf: root.pf;
         a: 70.0;
         b: root.top + 28.0;
         width: 380px;
+        height: root.text-h * 1px;
         text: "Currently POG no Weapon : Ideal for him are Never Rest or White Night Nova.";
         font-size: root.preview-font-size;
         letter-spacing: root.preview-font-size * root.spacing-em[root.spacing];
         wrap: word-wrap;
+        overflow: clip;
         line-height-factor: 1.4 / TextMetrics.natural;
     }
 
@@ -171,11 +215,42 @@ export component StyleTab inherits Rectangle {
         pf: root.pf;
         dots: root.tapes[3];
         row-y: root.size-row-y;
-        label: "Text size";
-        for label[i] in ["Small", "Medium", "Large"] : PillButton {
-            text: label;
-            chosen: i == root.size;
-            clicked => { root.size = i; root.open-list = -1; }
+        label: "Font size";
+        // The group is 262 wide, right-aligned like the Font row's: slider, number box and "px".
+        Rectangle {
+            width: 262px;
+            height: 44px;
+
+            size-slider := PSlider {
+                x: 0px;
+                width: 150px;
+                value <=> root.size;
+                minimum: 12;
+                maximum: 40;
+                snaps: [14, 18, 22, 26, 30, 36];
+                accessible-name: "Font size";
+                committed(v) => { root.open-list = -1; root.set-size(v); }
+            }
+
+            size-box := NumberBox {
+                x: 160px;
+                value <=> root.size;
+                minimum: 12;
+                maximum: 40;
+                accessible-name: "Font size in px";
+                committed(v) => { root.set-size(v); }
+            }
+
+            Text {
+                x: 228px;
+                width: 34px;
+                height: 44px;
+                text: "px";
+                font-family: Theme.handwriting;
+                font-size: 19px;
+                color: #5B616B;
+                vertical-alignment: center;
+            }
         }
     }
 

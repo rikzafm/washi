@@ -1638,6 +1638,77 @@ impl Harness {
         (ui.get_style_font(), ui.get_style_size(), ui.get_style_tape(), ui.get_style_open_list())
     }
 
+    /// The Font size the tab shows (the slider's and the number box's value, 12 to 40).
+    pub fn settings_font_size(&self) -> i32 {
+        self.settings_ui().get_style_size()
+    }
+
+    /// What the Font size number box shows, and whether it has the keyboard.
+    pub fn settings_font_size_box(&self) -> (String, bool) {
+        let ui = self.settings_ui();
+        (ui.get_style_size_text().to_string(), ui.get_style_size_editing())
+    }
+
+    fn settings_pointer(&mut self, ev: impl Fn(slint::LogicalPosition) -> WindowEvent, at: (f32, f32)) {
+        if let Some(app) = &self.app {
+            app.dispatch_settings_event(ev(slint::LogicalPosition::new(at.0, at.1)));
+        }
+    }
+
+    /// Press on the Font size slider where the value `from` is, drag to where `to` is, and release
+    /// there (so the size is saved when the pointer is released).
+    pub fn settings_drag_font_size(&mut self, from: i32, to: i32) {
+        let ui = self.settings_ui();
+        let at = |v: i32| (ui.invoke_style_hit_x(100 + v), ui.invoke_style_hit_y(100 + v));
+        let button = slint::platform::PointerEventButton::Left;
+        let (a, b) = (at(from), at(to));
+        self.settings_pointer(|position| WindowEvent::PointerMoved { position }, a);
+        self.settings_pointer(|position| WindowEvent::PointerPressed { position, button }, a);
+        self.settings_pointer(|position| WindowEvent::PointerMoved { position }, b);
+        self.settings_pointer(|position| WindowEvent::PointerReleased { position, button }, b);
+        self.settle();
+    }
+
+    /// Press the Font size slider at `v` and keep the pointer down (a drag in progress): moves to
+    /// `then` without releasing. Returns after the moves; `settings_release_at_font_size` ends it.
+    pub fn settings_hold_font_size(&mut self, v: i32, then: i32) {
+        let ui = self.settings_ui();
+        let at = |v: i32| (ui.invoke_style_hit_x(100 + v), ui.invoke_style_hit_y(100 + v));
+        let button = slint::platform::PointerEventButton::Left;
+        let (a, b) = (at(v), at(then));
+        self.settings_pointer(|position| WindowEvent::PointerMoved { position }, a);
+        self.settings_pointer(|position| WindowEvent::PointerPressed { position, button }, a);
+        self.settings_pointer(|position| WindowEvent::PointerMoved { position }, b);
+        self.settle();
+    }
+
+    pub fn settings_release_at_font_size(&mut self, v: i32) {
+        let ui = self.settings_ui();
+        let button = slint::platform::PointerEventButton::Left;
+        let a = (ui.invoke_style_hit_x(100 + v), ui.invoke_style_hit_y(100 + v));
+        self.settings_pointer(|position| WindowEvent::PointerReleased { position, button }, a);
+        self.settle();
+    }
+
+    /// Press a key (or type characters) on the Settings window.
+    pub fn settings_press_key(&mut self, key: Key) {
+        if let Some(app) = &self.app {
+            app.dispatch_settings_event(WindowEvent::KeyPressed { text: key.into() });
+            app.dispatch_settings_event(WindowEvent::KeyReleased { text: key.into() });
+        }
+        self.settle();
+    }
+
+    pub fn settings_type(&mut self, text: &str) {
+        if let Some(app) = &self.app {
+            for ch in text.chars() {
+                app.dispatch_settings_event(WindowEvent::KeyPressed { text: ch.to_string().into() });
+                app.dispatch_settings_event(WindowEvent::KeyReleased { text: ch.to_string().into() });
+            }
+        }
+        self.settle();
+    }
+
     /// The Letter spacing chosen: 0 Tight, 1 Normal, 2 Loose.
     pub fn settings_style_spacing(&self) -> i32 {
         self.settings_ui().get_style_spacing()

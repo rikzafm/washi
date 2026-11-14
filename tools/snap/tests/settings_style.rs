@@ -14,8 +14,9 @@ const FONT_BUTTON: i32 = 0;
 const fn font_item(i: i32) -> i32 {
     1 + i
 }
-const fn size_seg(i: i32) -> i32 {
-    7 + i
+/// The Font size slider where the value `v` is (the box and the saving are in font_size.rs).
+const fn size_slider(v: i32) -> i32 {
+    100 + v
 }
 const TAPE_BUTTON: i32 = 10;
 const fn tape_item(i: i32) -> i32 {
@@ -46,18 +47,18 @@ fn started() -> Harness {
 fn the_tab_opens_on_the_defaults() {
     let mut h = started();
     open_style_tab(&mut h);
-    assert_eq!(h.settings_style_state(), (0, 1, 0, -1));
+    assert_eq!(h.settings_style_state(), (0, 22, 0, -1));
     assert_eq!(h.settings_style_preview_font_size(), 24.0);
 }
 
 #[test]
-fn text_size_buttons_resize_the_preview() {
+fn the_font_size_slider_resizes_the_preview() {
     let mut h = started();
     open_style_tab(&mut h);
-    for (seg, px) in [(0, 19.0), (2, 30.0), (1, 24.0)] {
-        h.settings_style_click(size_seg(seg));
-        assert_eq!(h.settings_style_state().1, seg);
-        assert_eq!(h.settings_style_preview_font_size(), px);
+    for (size, px) in [(12, 24.0 * 12.0 / 22.0), (40, 24.0 * 40.0 / 22.0), (22, 24.0)] {
+        h.settings_style_click(size_slider(size));
+        assert_eq!(h.settings_style_state().1, size);
+        assert!((h.settings_style_preview_font_size() - px).abs() < 1e-3, "size {size}: {}", h.settings_style_preview_font_size());
     }
 }
 
@@ -102,7 +103,7 @@ fn opening_one_list_replaces_the_other_and_an_outside_click_closes_it() {
     h.settings_style_click(BLANK_PAPER);
     let s = h.settings_style_state();
     assert_eq!(s.3, -1, "outside click closes");
-    assert_eq!((s.0, s.1, s.2), (0, 1, 0), "and changes nothing");
+    assert_eq!((s.0, s.1, s.2), (0, 22, 0), "and changes nothing");
 }
 
 #[test]
@@ -122,17 +123,18 @@ fn escape_closes_an_open_list_before_it_closes_settings() {
 fn choices_survive_a_tab_switch_but_not_reopening_settings() {
     let mut h = started();
     open_style_tab(&mut h);
-    h.settings_style_click(size_seg(2));
+    h.settings_style_click(TAPE_BUTTON);
+    h.settings_style_click(tape_item(2));
     h.settings_click_tab(tab::GENERAL);
     h.advance_frames(ms(600));
     h.settings_click_tab(tab::STYLE);
     h.advance_frames(ms(600));
-    assert_eq!(h.settings_style_state(), (0, 2, 0, -1));
+    assert_eq!(h.settings_style_state(), (0, 22, 2, -1));
 
     h.settings_close();
     h.advance_frames(ms(600));
     open_style_tab(&mut h);
-    assert_eq!(h.settings_style_state(), (0, 1, 0, -1), "defaults again");
+    assert_eq!(h.settings_style_state(), (0, 22, 0, -1), "defaults again");
 }
 
 #[test]
@@ -173,7 +175,6 @@ fn nothing_the_tab_does_reaches_any_note() {
         let startup = h.startup.enabled.get();
         open_style_tab(&mut h);
         if use_controls {
-            h.settings_style_click(size_seg(2));
             h.settings_style_click(FONT_BUTTON);
             h.settings_style_click(font_item(3));
             h.settings_style_click(TAPE_BUTTON);

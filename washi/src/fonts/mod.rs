@@ -186,6 +186,77 @@ impl ThemeMetrics {
     }
 }
 
+// ---- The Font size: what note text is scaled by ----
+
+/// Settings › Font & Style › Font size: a whole number in this range, 22 by default.
+pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u32> = 12..=40;
+pub const FONT_SIZE_DEFAULT: u32 = 22;
+/// The sizes the Font size slider snaps to.
+pub const FONT_SIZE_SNAPS: [u32; 6] = [14, 18, 22, 26, 30, 36];
+
+/// The note text's sizes, pitches, gaps, check box and list indent at a Font size: the values at
+/// size 22 (today's look) times `size / 22`. Paper insets are not scaled, and neither is any UI text.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SizeTokens {
+    pub title_size: f64,
+    pub title_pitch: f64,
+    pub heading_size: f64,
+    pub heading_pitch: f64,
+    pub body_size: f64,
+    pub body_pitch: f64,
+    pub heading_gap: f64,
+    pub body_gap: f64,
+    pub check_indent: f64,
+    pub check_box: f64,
+}
+
+impl SizeTokens {
+    pub fn at(size: u32) -> SizeTokens {
+        use crate::textflow as t;
+        let k = size.clamp(*FONT_SIZE_RANGE.start(), *FONT_SIZE_RANGE.end()) as f64 / FONT_SIZE_DEFAULT as f64;
+        SizeTokens {
+            title_size: t::TITLE_SIZE * k,
+            title_pitch: t::TITLE_PITCH * k,
+            heading_size: t::HEADING_SIZE * k,
+            heading_pitch: t::HEADING_PITCH * k,
+            body_size: t::BODY_SIZE * k,
+            body_pitch: t::BODY_PITCH * k,
+            heading_gap: t::HEADING_GAP * k,
+            body_gap: t::BODY_GAP * k,
+            check_indent: t::CHECK_INDENT * k,
+            check_box: t::CHECK_BOX * k,
+        }
+    }
+
+    /// Set them on a window's `Theme`.
+    pub fn apply(&self, theme: &crate::note_window::Theme<'_>) {
+        theme.set_title_size(self.title_size as f32);
+        theme.set_title_pitch(self.title_pitch as f32);
+        theme.set_heading_size(self.heading_size as f32);
+        theme.set_heading_pitch(self.heading_pitch as f32);
+        theme.set_body_size(self.body_size as f32);
+        theme.set_body_pitch(self.body_pitch as f32);
+        theme.set_heading_gap(self.heading_gap as f32);
+        theme.set_body_gap(self.body_gap as f32);
+        theme.set_check_indent(self.check_indent as f32);
+    }
+}
+
+thread_local! {
+    static SIZE: std::cell::Cell<u32> = const { std::cell::Cell::new(FONT_SIZE_DEFAULT) };
+}
+
+/// The Font size of this thread (22 until [`set_size`]).
+pub fn size() -> u32 {
+    SIZE.with(|s| s.get())
+}
+
+/// Make `size` (clamped to 12..=40) the Font size of this thread. Windows pick it up when
+/// `ActiveFont::apply` runs on them (`App::set_font_size` does that for every open one).
+pub fn set_size(size: u32) {
+    SIZE.with(|s| s.set(size.clamp(*FONT_SIZE_RANGE.start(), *FONT_SIZE_RANGE.end())));
+}
+
 /// The font the notes' text is laid out in and drawn with.
 pub struct ActiveFont {
     /// `Theme.handwriting`: the family the words are drawn in.
@@ -242,6 +313,7 @@ impl ActiveFont {
         theme.set_lean_room(self.metrics.lean_room_em);
         theme.set_descender_room(self.metrics.descender_room_em);
         theme.set_italic_overhang(self.metrics.italic_overhang_em);
+        SizeTokens::at(size()).apply(theme);
         theme.set_text_epoch(theme.get_text_epoch().wrapping_add(1));
     }
 }

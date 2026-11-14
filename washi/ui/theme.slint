@@ -26,7 +26,7 @@ export global Theme {
     out property <color> check-tick: #1F9D55;
     out property <color> check-box: #8B919A;
     // How far a check item's text is indented for its box (the same as CHECK_INDENT in src/textflow.rs).
-    out property <length> check-indent: 26px;
+    in-out property <length> check-indent: 26px;
     // Select all: the wash over every word of the note.
     out property <color> selection: #BAD3FC;
     // A selection in a field: the same blue, see-through, over the words (drawn under the field).
@@ -79,15 +79,15 @@ export global Theme {
     out property <float> caret-line-em: 0.938477;
 
     // Title
-    out property <length> title-size: 37.3px;
-    out property <length> title-pitch: 60px;
+    in-out property <length> title-size: 37.3px;
+    in-out property <length> title-pitch: 60px;
     // Space above the first heading / first body block
-    out property <length> heading-gap: 10px;
-    out property <length> body-gap: 8.1px;
+    in-out property <length> heading-gap: 10px;
+    in-out property <length> body-gap: 8.1px;
     // Heading (bold face)
-    out property <length> heading-size: 24px;
-    out property <length> heading-pitch: 34px;
+    in-out property <length> heading-size: 24px;
+    in-out property <length> heading-pitch: 34px;
     // Body
-    out property <length> body-size: 22.65px;
-    out property <length> body-pitch: 33px;
+    in-out property <length> body-size: 22.65px;
+    in-out property <length> body-pitch: 33px;
 }

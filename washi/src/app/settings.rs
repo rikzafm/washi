@@ -157,6 +157,14 @@ impl App {
                     }
                 }
             }),
+            font_size_changed: Rc::new({
+                let app = app.clone();
+                move |size| {
+                    if let Some(a) = app() {
+                        a.set_font_size(size);
+                    }
+                }
+            }),
             letter_spacing_changed: Rc::new({
                 let app = app.clone();
                 move |em| {
@@ -234,7 +242,24 @@ impl App {
     /// Letter spacing), and the other windows' `Theme` families are set. Dropdown and delete dialog
     /// read the active font when they are created.
     pub fn set_active_font(&self, font: crate::fonts::ActiveFont) {
-        let font = crate::fonts::set_current(font);
+        crate::fonts::set_current(font);
+        self.refresh_text();
+    }
+
+    /// Make `size` (12..=40, already saved) the Font size and lay every window's note text out at it:
+    /// titles, headings, line pitches, gaps, check boxes and list indents scale by `size / 22`. A
+    /// note whose text got shorter keeps its scroll within the new height (`max-scroll` in note.slint).
+    pub fn set_font_size(&self, size: u32) {
+        if size == crate::fonts::size() {
+            return;
+        }
+        crate::fonts::set_size(size);
+        self.refresh_text();
+    }
+
+    /// Put the active font and Font size on every open window and lay the notes out again.
+    fn refresh_text(&self) {
+        let font = crate::fonts::current();
         let notes: Vec<Rc<Note>> = self.0.notes.borrow().clone();
         for n in &notes {
             n.set_font();

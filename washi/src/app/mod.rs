@@ -133,6 +133,8 @@ impl App {
         let db = Rc::new(db);
         // every window from now on is drawn at the saved UI size
         crate::ui_scale::set_app_scale(db.ui_scale());
+        // and every note's text at the saved Font size
+        crate::fonts::set_size(db.font_size());
 
         let mut rows = db.open_notes().map_err(StartError::Db)?;
         if rows.is_empty() {
