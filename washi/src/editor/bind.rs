@@ -38,6 +38,7 @@ impl Editor {
 
         self.tilted.set(self.db.tilted_editing());
         ui.set_tilted_editing(self.tilted.get());
+        crate::fonts::current().apply(&ui.global::<Theme>());
         ui.global::<Theme>().set_letter_spacing_em(self.db.letter_spacing().em());
         self.relayout(ui);
         self.show_formats(ui);

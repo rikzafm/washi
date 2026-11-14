@@ -78,6 +78,7 @@ impl ImageViewer {
         on_close: Rc<dyn Fn()>,
     ) -> Result<ImageViewer, slint::PlatformError> {
         let ui = ImageViewerWindow::new()?;
+        crate::fonts::current().apply(&ui.global::<crate::note_window::Theme>());
         // drawn at the UI size, like every window
         let scale = Rc::new(crate::ui_scale::WindowScale::attach(ui.window()));
         {

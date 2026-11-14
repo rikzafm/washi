@@ -760,6 +760,11 @@ impl AllNotesView {
         self.editor.set_letter_spacing(&self.ui, em);
     }
 
+    /// The active font changed: use it for the shown note's text from now on.
+    pub fn set_font(&self) {
+        self.editor.set_font(&self.ui);
+    }
+
     pub fn apply_sidebar_layout(&self) {
         let layout = self.db.sidebar_layout(Sidebar::Notes);
         self.ui.set_all_notes_height_mode(layout.height.index());

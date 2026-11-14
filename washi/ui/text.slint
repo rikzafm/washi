@@ -476,13 +476,11 @@ export component TextLayer inherits Rectangle {
 
     // Each word sits in a box whose top follows the paper's tilted top edge, so a word that is
     // partly scrolled off the top is cut there instead of showing whole above the paper.
-    // Room below a word's line box for its descenders, in em (the face descends 0.43 em below
-    // its baseline, which sits less than that above the bottom of a line at the note's pitches).
-    property <float> descender-room: 0.5;
-    // The advance of a space in the handwriting (461 / 1024 em, every face).
-    property <float> lead-em: 0.450195;
-    // How far a glyph reaches back past its origin at most (176 / 1024 em, the j), and a little.
-    property <float> lean-room: 0.2;
+    // The font-dependent room around a word (descenders, the space it is led by, how far a glyph
+    // reaches back, the italic's lean) comes from the active font, through `Theme`.
+    property <float> descender-room: Theme.descender-room;
+    property <float> lead-em: Theme.lead-em;
+    property <float> lean-room: Theme.lean-room;
 
     for r in root.runs: Rectangle {
         property <length> run-x: r.x + (r.dx + root.shift-x) * root.tilt-scale;
@@ -491,7 +489,7 @@ export component TextLayer inherits Rectangle {
         // width: asking Slint for that shapes the word again whenever its row changes, which is
         // every word on every step of a resize (the tilt moves them all), and cost several times
         // the rest of the frame.
-        property <length> run-w: r.width + (r.italic ? r.size * 0.3 : 0px);
+        property <length> run-w: r.width + (r.italic ? r.size * Theme.italic-overhang : 0px);
         property <length> cut: max(self.run-y, root.edge-y(self.run-x + self.run-w / 2));
         visible: r.block != root.composing-block && self.run-y + r.pitch >= root.edge-y(self.run-x + self.run-w / 2);
         // (room before the run for a glyph that reaches back past its origin, the hook of a j,

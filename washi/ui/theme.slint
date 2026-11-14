@@ -33,7 +33,9 @@ export global Theme {
     out property <color> selection-over: #6FA2F566;
     // The "Note Something...." hint of an empty note: light, subtle gray.
     out property <color> ink-hint: #B4B9C0;
-    out property <string> handwriting: "Shadows Into Light";
+    // The note text's family and the other font-dependent numbers below are set from Rust, on every
+    // window, from the active font (src/fonts); the values here are the Default font's.
+    in-out property <string> handwriting: "Shadows Into Light";
     // Extra space after every character of a note's text, in em of its size (Settings › Font &
     // Style › Letter spacing; 0 is the font's own). The app sets it from the saved choice, and
     // src/textflow.rs lays the lines out with the same spacing.
@@ -45,7 +47,7 @@ export global Theme {
     in-out property <int> text-epoch: 0;
     // The edit fields' face: the handwriting's advances, no outlines, a lower ascent and descent
     // (made with `tools/fonts.py blank`; see `caret-line-em`). The fields only place the caret and the selection.
-    out property <string> caret-font: "Washi Caret";
+    in-out property <string> caret-font: "Washi Caret";
 
     // The caret the note draws (the fields' own is hidden, see TextLayer).
     out property <length> caret-width: 1px;
@@ -58,7 +60,16 @@ export global Theme {
     out property <length> text-bottom-gap: 4px;
 
     // Natural line height of the handwriting font in em: (ascent + descent) / units per em.
-    out property <float> handwriting-line-em: 1.6064;
+    in-out property <float> handwriting-line-em: 1.6064;
+    // The advance of a space in the handwriting (461 / 1024 em, every face).
+    in-out property <float> lead-em: 0.450195;
+    // How far a glyph reaches back past its origin at most (176 / 1024 em, the j), and a little.
+    in-out property <float> lean-room: 0.2;
+    // Room below a word's line box for its descenders, in em (the face descends 0.43 em below its
+    // baseline, which sits less than that above the bottom of a line at the note's pitches).
+    in-out property <float> descender-room: 0.5;
+    // How far an italic glyph leans out past its advance, in em (Washi's italic is a 0.25 shear).
+    in-out property <float> italic-overhang: 0.3;
     // The same for the edit fields' face: its ascent and descent are cut down to 961 / 1024 em
     // (`tools/fonts.py blank`). A field's caret and selection are as tall as the larger of the line
     // pitch and the face's ascent + descent; the handwriting's own (1.6064 em) is taller than the
