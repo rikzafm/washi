@@ -39,6 +39,10 @@ unicode-linebreak = "0.1"
 # Advances of the embedded fonts, for the stepped text layout (already in the tree through Slint).
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
 raw-window-handle = "0.6"
+# Font engine (ADR 0003): outlines at a variation location, a TrueType writer, a zip reader.
+skrifa = "0.44"
+write-fonts = "0.50"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Media",
@@ -69,3 +73,5 @@ slint-build = "1.18"
 
 [dev-dependencies]
 tempfile = "3"
+# Reads variable fonts at a location: the independent source of truth for the baked advances.
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout", "variable-fonts"] }
