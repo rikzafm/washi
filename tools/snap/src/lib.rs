@@ -5,6 +5,7 @@
 
 pub mod caret;
 pub mod fakes;
+mod font_manager;
 mod harness;
 mod images;
 pub mod layout_bench;
@@ -18,6 +19,7 @@ pub mod shot;
 
 pub use caret::ms;
 pub use fakes::WindowCommand;
+pub use font_manager::ManagerRow;
 pub use harness::{Harness, MenuState, TAPE_COLORS};
 pub use settings_appearance::tab;
 pub use settings_shots::DESK;

@@ -1,6 +1,7 @@
 import { ToolbarMetrics } from "toolbar.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { PaperGeometry } from "paper.slint";
+import { PaperFrame } from "settings-widgets.slint";
 import { Theme } from "theme.slint";
 
 // Scrolling of a note's text. The wheel or dragging the bar moves the text inside the text area;
@@ -42,10 +43,28 @@ export component ScrollBar inherits Rectangle {
     callback right-click(length, length);
     callback pointer-over();
 
+    /// The frame the bar is drawn in when it is not a note's paper: the centre and the tilt of the
+    /// rectangle it runs down the right edge of (the Font manager's slip). Without it the bar uses
+    /// the paper's tilt, centred in its own box, which is how a note and the Settings Paper use it.
+    in property <PaperFrame> frame;
+    in property <bool> use-frame: false;
+
     property <bool> overflowing: root.content > root.view + 0.5px;
     changed overflowing => { if (!root.overflowing) { root.dragging = false; } }
-    property <length> cx: root.width / 2;
-    property <length> cy: root.height / 2;
+    property <float> cs: root.use-frame ? root.frame.f.cs : PaperTheme.paper-tilt.cos();
+    property <float> sn: root.use-frame ? root.frame.f.sn : PaperTheme.paper-tilt.sin();
+    property <length> cx: root.use-frame ? root.frame.f.cx * 1px : root.width / 2;
+    property <length> cy: root.use-frame ? root.frame.f.cy * 1px : root.height / 2;
+    // Points of the paper along its own axes, at this bar's tilt.
+    pure function gx(lx: length, ly: length) -> length {
+        return PaperGeometry.x-tilted(root.cx, root.cy, lx, ly, root.cs, root.sn);
+    }
+    pure function gy(lx: length, ly: length) -> length {
+        return PaperGeometry.y-tilted(root.cx, root.cy, lx, ly, root.cs, root.sn);
+    }
+    pure function gv(x: length, y: length) -> length {
+        return PaperGeometry.v-tilted(root.cx, root.cy, x, y, root.cs, root.sn);
+    }
     property <length> r: ScrollMetrics.bar-width / 2;
     // Paper-frame coordinates (from the paper's center, along its own axes).
     property <length> lx: root.paper-w / 2 - ScrollMetrics.bar-edge - root.r;
@@ -58,8 +77,8 @@ export component ScrollBar inherits Rectangle {
     property <length> ly: root.track-top + root.thumb / 2 + root.travel * clamp(root.offset / root.range, 0, 1);
     // The rounded ends sit half a thumb up and down along the paper's tilted vertical.
     property <length> half: max(0px, root.thumb / 2 - root.r);
-    out property <length> thumb-x: PaperGeometry.x(root.cx, root.cy, root.lx, root.ly);
-    out property <length> thumb-y: PaperGeometry.y(root.cx, root.cy, root.lx, root.ly);
+    out property <length> thumb-x: root.gx(root.lx, root.ly);
+    out property <length> thumb-y: root.gy(root.lx, root.ly);
 
     property <bool> shown: root.scrolling || hit.has-hover || root.dragging;
     out property <float> bar-opacity: (root.shown && root.overflowing) ? 1 : 0;
@@ -74,19 +93,21 @@ export component ScrollBar inherits Rectangle {
     // leans furthest right: it never reaches into the text area, at any size.
     property <length> thumb-top: root.ly - root.thumb / 2;
     property <length> thumb-bottom: root.ly + root.thumb / 2;
-    property <length> hit-y0: PaperGeometry.y(root.cx, root.cy, root.lx, root.thumb-top) - ScrollMetrics.bar-pad;
-    property <length> hit-y1: PaperGeometry.y(root.cx, root.cy, root.lx, root.thumb-bottom) + ScrollMetrics.bar-pad;
+    property <length> hit-y0: root.gy(root.lx, root.thumb-top) - ScrollMetrics.bar-pad;
+    property <length> hit-y1: root.gy(root.lx, root.thumb-bottom) + ScrollMetrics.bar-pad;
     // (the words lie level while they are edited, tilted at rest: the further right of the two)
     property <length> text-edge-x: max(
         root.cx + root.paper-w / 2 - Theme.text-inset-right,
-        PaperGeometry.x(root.cx, root.cy, root.paper-w / 2 - Theme.text-inset-right, root.thumb-top - ScrollMetrics.bar-pad));
+        root.gx(root.paper-w / 2 - Theme.text-inset-right, root.thumb-top - ScrollMetrics.bar-pad));
+    // (a paper tilted clockwise leans furthest right at the thumb's top; one tilted the other way, at
+    // its bottom)
     property <length> hit-x0: max(
         root.text-edge-x + ScrollMetrics.text-gap,
         root.shown
-            ? PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-bottom) - ScrollMetrics.hit-width / 2
+            ? min(root.gx(root.lx, root.thumb-bottom), root.gx(root.lx, root.thumb-top)) - ScrollMetrics.hit-width / 2
             : root.thumb-x - ScrollMetrics.hit-width / 2);
     property <length> hit-x1: root.shown
-        ? PaperGeometry.x(root.cx, root.cy, root.lx, root.thumb-top) + ScrollMetrics.hit-width / 2
+        ? max(root.gx(root.lx, root.thumb-bottom), root.gx(root.lx, root.thumb-top)) + ScrollMetrics.hit-width / 2
         : root.thumb-x + ScrollMetrics.hit-width / 2;
     property <length> grab-dv: 0px;
 
@@ -111,10 +132,10 @@ export component ScrollBar inherits Rectangle {
             height: root.height;
             viewbox-width: root.width / 1px;
             viewbox-height: root.height / 1px;
-            commands: PaperGeometry.quad(
-                PaperGeometry.x(root.cx, root.cy, root.lx, root.ly),
-                PaperGeometry.y(root.cx, root.cy, root.lx, root.ly),
-                root.r, root.half);
+            commands: PaperGeometry.quad-tilted(
+                root.gx(root.lx, root.ly),
+                root.gy(root.lx, root.ly),
+                root.r, root.half, root.cs, root.sn);
             fill: ToolbarMetrics.ink-muted;
         }
         // A round cap at each end.
@@ -123,8 +144,8 @@ export component ScrollBar inherits Rectangle {
             height: root.height;
             viewbox-width: root.width / 1px;
             viewbox-height: root.height / 1px;
-            property <length> ex: PaperGeometry.x(root.cx, root.cy, root.lx, root.ly + sign * root.half);
-            property <length> ey: PaperGeometry.y(root.cx, root.cy, root.lx, root.ly + sign * root.half);
+            property <length> ex: root.gx(root.lx, root.ly + sign * root.half);
+            property <length> ey: root.gy(root.lx, root.ly + sign * root.half);
             commands: "M " + ((self.ex - root.r) / 1px) + " " + (self.ey / 1px)
                 + " a " + (root.r / 1px) + " " + (root.r / 1px) + " 0 1 0 " + (2 * root.r / 1px) + " 0"
                 + " a " + (root.r / 1px) + " " + (root.r / 1px) + " 0 1 0 " + (-2 * root.r / 1px) + " 0 Z";
@@ -144,7 +165,7 @@ export component ScrollBar inherits Rectangle {
         pointer-event(e) => {
             if (e.kind == PointerEventKind.move) { root.pointer-over(); }
             if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
-                let v = PaperGeometry.v(root.cx, root.cy, self.x + self.mouse-x, self.y + self.mouse-y);
+                let v = root.gv(self.x + self.mouse-x, self.y + self.mouse-y);
                 root.pressed();
                 root.dragging = true;
                 if (abs(v - root.ly) <= root.thumb / 2 + ScrollMetrics.bar-pad) {
@@ -166,7 +187,7 @@ export component ScrollBar inherits Rectangle {
         }
         moved => {
             if (root.dragging) {
-                let v = PaperGeometry.v(root.cx, root.cy, self.x + self.mouse-x, self.y + self.mouse-y);
+                let v = root.gv(self.x + self.mouse-x, self.y + self.mouse-y);
                 root.scroll-to-v(v - root.grab-dv);
             }
         }

@@ -1,16 +1,15 @@
-// The Font & Style tab of the Settings page (UI only).
+// The Font & Style tab of the Settings page.
 //
-// Font and Tape color update the preview note and nothing else: their state lives in properties of
-// this component (bound to the Settings window, which is created fresh each time Settings opens, so
-// the defaults come back). Rust never reads these properties except in tests. Letter spacing and Font
-// size are the exceptions: Rust sets `spacing` and `size` from the saved choices and saves a new one
+// Tape color updates the preview note and nothing else: its state lives in a property of this
+// component (bound to the Settings window, which is created fresh each time Settings opens, so the
+// default comes back). Rust never reads it except in tests. Letter spacing and Font size are the
+// exceptions: Rust sets `spacing` and `size` from the saved choices and saves a new one
 // (`set-spacing`, `set-size`), and every note follows. Dragging the size slider only moves the
 // preview (`size`); the size is saved when the slider is released or the number box commits.
+// The Font row shows the Font in use (`font-name` in its own face, `font-summary` under it) and the
+// manage button that opens the Font manager (`manage-clicked`; Rust owns whether it is open).
 // Laid out like the mockup's CSS in the Paper's tilted frame `pf`: the preview card, then four rows;
 // `bottom` (paper coordinates) is where the last row ends.
-//
-// Only Shadows Into Light is bundled, so the other fonts in the list are labels: the preview and
-// every list entry are drawn in Shadows Into Light whichever one is chosen.
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
@@ -24,7 +23,16 @@ export component StyleTab inherits Rectangle {
     /// The tapes' shapes: 0 the big Paper tape, 1 the preview's mini tape, 2 a chip, 3 the dots.
     in property <[TapeShape]> tapes;
 
-    in-out property <int> font: 0;
+    /// The Font in use: its name (drawn in its own face, `Theme.handwriting`) and a short summary of
+    /// its Axis values ("One style").
+    in property <string> font-name: "Shadows Into Light";
+    in property <string> font-summary: "One style";
+    /// The Font manager is open: the manage button is filled dark.
+    in property <bool> manager-open: false;
+    callback manage-clicked();
+    /// What the manage button is called to a screen reader, and whether it is filled (for tests).
+    out property <string> manage-label: "Manage fonts";
+    out property <bool> manage-filled: root.manager-open;
     /// The Font size, 12 to 40 (22 is today's look); while the slider is dragged, the one shown.
     in-out property <int> size: 22;
     callback set-size(int);
@@ -37,13 +45,11 @@ export component StyleTab inherits Rectangle {
     /// Letter spacing: 0 Tight, 1 Normal, 2 Loose (as `LetterSpacing` in src/storage/db.rs).
     in-out property <int> spacing: 1;
     callback set-spacing(int);
-    /// -1 none, 0 the font list, 1 the tape list.
+    /// -1 none, 1 the tape list.
     in-out property <int> open-list: -1;
     // The preview's 24px at Font size 22, scaled like the notes' text.
     out property <length> preview-font-size: 24px * root.size / 22;
     out property <float> bottom: root.spacing-row-y + spacing-row.total;
-
-    property <[string]> fonts: ["Shadows Into Light", "Patrick Hand", "Caveat", "Gloria Hallelujah", "Indie Flower", "Kalam"];
 
     // The preview card: 16px / 16px / 14px padding around the little paper (12px / 18px padding, the
     // text on 1.4 lines).
@@ -61,19 +67,18 @@ export component StyleTab inherits Rectangle {
     out property <float> spacing-row-y: root.rows-y + 3.0 * root.row-pitch;
     /// The extra space after each letter, in em, for each choice (the values of src/storage/db.rs).
     property <[float]> spacing-em: [-0.03, 0.0, 0.08];
-    /// The lowest point either open list reaches (paper coordinates): the lists hang 48px under their
-    /// button, 6px of padding around six or four 42px entries.
-    out property <float> lists-bottom: max(root.font-row-y + 6.0 + 48.0 + 12.0 + 6 * 42.0, root.tape-row-y + 6.0 + 48.0 + 12.0 + 4 * 42.0);
+    /// The lowest point the open list reaches (paper coordinates): it hangs 48px under its button,
+    /// 6px of padding around four 42px entries.
+    out property <float> lists-bottom: root.tape-row-y + 6.0 + 48.0 + 12.0 + 4 * 42.0;
 
     x: 0px;
     y: 0px;
     width: root.pf.f.w * 1px;
     height: root.pf.f.h * 1px;
 
-    /// Where the control `id` is, in the Paper frame's px, for tests: 0 font button, 1 to 6 font
-    /// options, 7 the Font size number box, 100 + n the Font size slider where the value n is, 10 tape
-    /// button, 11 to 14 tape options, 20 the Font size label (a
-    /// blank part of the paper), 21 to 23 letter spacings.
+    /// Where the control `id` is, in the Paper frame's px, for tests: 0 the manage button, 7 the Font
+    /// size number box, 100 + n the Font size slider where the value n is, 10 tape button, 11 to 14
+    /// tape options, 20 the Font size label (a blank part of the paper), 21 to 23 letter spacings.
     public pure function hit-x(id: int) -> length {
         return PX.x(root.pf, root.hit-a(id), root.hit-b(id));
     }
@@ -93,17 +98,18 @@ export component StyleTab inherits Rectangle {
         if (id == 20) {
             return 140.0;
         }
-        if ((id >= 1 && id <= 6) || (id >= 11 && id <= 14)) {
+        if (id >= 11 && id <= 14) {
             return 484.0 - 130.0;
+        }
+        if (id == 0) {
+            // the manage button: 48 wide, at the group's right end
+            return 484.0 - 24.0;
         }
         return 484.0 - 118.0;
     }
     pure function hit-b(id: int) -> float {
         if (id == 0) {
             return root.font-row-y + 28.0;
-        }
-        if (id >= 1 && id <= 6) {
-            return root.font-row-y + 6.0 + 48.0 + 6.0 + (id - 1) * 42.0 + 21.0;
         }
         if (id == 7 || id == 20 || id >= 100) {
             return root.size-row-y + 28.0;
@@ -282,10 +288,80 @@ export component StyleTab inherits Rectangle {
         dots: root.tapes[3];
         row-y: root.font-row-y;
         label: "Font";
-        PickerButton {
-            text: root.fonts[root.font];
-            open: root.open-list == 0;
-            clicked => { root.open-list = root.open-list == 0 ? -1 : 0; }
+        // The group is 262 wide, right-aligned: the Font in use's name box and the manage button.
+        Rectangle {
+            width: 262px;
+            height: 48px;
+
+            Rectangle {
+                x: 0px;
+                width: 206px;
+                height: 48px;
+                border-radius: 10.8px;
+                background: #F0F0EE;
+                accessible-role: text;
+                accessible-label: root.font-name + ", " + root.font-summary;
+
+                // the name in its own face, and a summary of its Axis values under it
+                Text {
+                    x: 12px;
+                    y: 3px;
+                    width: parent.width - 24px;
+                    height: 26px;
+                    text: root.font-name;
+                    font-family: Theme.handwriting;
+                    font-size: 20px;
+                    color: #2B2F36;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Text {
+                    x: 12px;
+                    y: 28px;
+                    width: parent.width - 24px;
+                    height: 17px;
+                    text: root.font-summary;
+                    font-family: "Shadows Into Light";
+                    font-size: 14px;
+                    color: #5B616B;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            // The manage button: outlined, filled dark while the Font manager is open.
+            manage := Rectangle {
+                x: 214px;
+                width: 48px;
+                height: 48px;
+                border-radius: 10.8px;
+                background: root.manager-open ? #2B2F36 : (manage-hit.has-hover ? #F0F0EE : #FFFFFD);
+                border-width: 1.5px;
+                border-color: #2B2F36;
+                accessible-role: button;
+                accessible-label: root.manage-label;
+                accessible-expanded: root.manager-open;
+
+                // the sliders icon: three lines, each with a knob
+                Path {
+                    x: 12px;
+                    y: 12px;
+                    width: 24px;
+                    height: 24px;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    commands: "M 3 6 H 11.5 M 16.5 6 H 21 M 3 12 H 6.5 M 11.5 12 H 21 M 3 18 H 12.5 M 17.5 18 H 21 M 14 6 m -2.5 0 a 2.5 2.5 0 1 0 5 0 a 2.5 2.5 0 1 0 -5 0 M 9 12 m -2.5 0 a 2.5 2.5 0 1 0 5 0 a 2.5 2.5 0 1 0 -5 0 M 15 18 m -2.5 0 a 2.5 2.5 0 1 0 5 0 a 2.5 2.5 0 1 0 -5 0";
+                    stroke: root.manager-open ? #FFFFFD : #2B2F36;
+                    stroke-width: 1.6px;
+                    stroke-line-cap: round;
+                }
+
+                manage-hit := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.open-list = -1; root.manage-clicked(); }
+                }
+            }
         }
     }
 
@@ -308,26 +384,6 @@ export component StyleTab inherits Rectangle {
     }
 
     // ---- the lists, last so they sit above the rows under them ----
-    if root.open-list == 0 : PBox {
-        pf: root.pf;
-        a: 484.0 - 260.0;
-        b: root.font-row-y + 6.0 + 48.0;
-        width: 260px;
-        height: 12px + 6 * 42px;
-
-        ListPanel {
-            height: parent.height;
-            for name[i] in root.fonts : ListItem {
-                x: 6px;
-                y: 6px + i * 42px;
-                width: parent.width - 12px;
-                text: name;
-                chosen: i == root.font;
-                clicked => { root.font = i; root.open-list = -1; }
-            }
-        }
-    }
-
     if root.open-list == 1 : PBox {
         pf: root.pf;
         a: 484.0 - 260.0;
