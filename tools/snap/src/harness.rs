@@ -1632,10 +1632,10 @@ impl Harness {
         self.settle();
     }
 
-    /// The Font & Style choices: (font, text size, tape, open list).
-    pub fn settings_style_state(&self) -> (i32, i32, i32, i32) {
+    /// The Font & Style choices: (text size, tape, open list).
+    pub fn settings_style_state(&self) -> (i32, i32, i32) {
         let ui = self.settings_ui();
-        (ui.get_style_font(), ui.get_style_size(), ui.get_style_tape(), ui.get_style_open_list())
+        (ui.get_style_size(), ui.get_style_tape(), ui.get_style_open_list())
     }
 
     /// The Font size the tab shows (the slider's and the number box's value, 12 to 40).

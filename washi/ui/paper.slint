@@ -20,6 +20,24 @@ export global PaperGeometry {
     pure public function v(cx: length, cy: length, x: length, y: length) -> length {
         return -(x - cx) * sn + (y - cy) * cs;
     }
+    // The same, for a rectangle with a tilt of its own (`cs` and `sn` are the cosine and sine of it):
+    // the Font manager's slip shares the note's scroll bar.
+    pure public function x-tilted(cx: length, cy: length, lx: length, ly: length, cs: float, sn: float) -> length {
+        return cx + lx * cs - ly * sn;
+    }
+    pure public function y-tilted(cx: length, cy: length, lx: length, ly: length, cs: float, sn: float) -> length {
+        return cy + lx * sn + ly * cs;
+    }
+    pure public function v-tilted(cx: length, cy: length, x: length, y: length, cs: float, sn: float) -> length {
+        return -(x - cx) * sn + (y - cy) * cs;
+    }
+    pure function pt-tilted(cx: length, cy: length, lx: length, ly: length, cs: float, sn: float) -> string {
+        return (x-tilted(cx, cy, lx, ly, cs, sn) / 1px) + " " + (y-tilted(cx, cy, lx, ly, cs, sn) / 1px);
+    }
+    pure public function quad-tilted(cx: length, cy: length, hw: length, hh: length, cs: float, sn: float) -> string {
+        return "M " + pt-tilted(cx, cy, -hw, -hh, cs, sn) + " L " + pt-tilted(cx, cy, hw, -hh, cs, sn)
+            + " L " + pt-tilted(cx, cy, hw, hh, cs, sn) + " L " + pt-tilted(cx, cy, -hw, hh, cs, sn) + " Z";
+    }
     pure function pt(cx: length, cy: length, lx: length, ly: length) -> string {
         return (x(cx, cy, lx, ly) / 1px) + " " + (y(cx, cy, lx, ly) / 1px);
     }

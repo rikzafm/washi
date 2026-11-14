@@ -45,6 +45,10 @@ const GENERAL_COMPARED_H: u32 = 248;
 /// this much of its Paper can be held against the mockup, whose Text size row was three pills and is now
 /// a slider and a number box (Font size). The Letter spacing row and the removed rows differ too.
 const STYLE_COMPARED_H: u32 = 314;
+/// How much of that Paper may be far from the mockup on Font & Style: a little more than the 2% of the
+/// other Tabs, since its Font row (a list picker in the mockup) is now the Font in use's name box and
+/// the manage button, about a dozen blocks of the compared part.
+const STYLE_FAR_BLOCKS: f32 = 0.025;
 /// The Sidebar's header and first tab end about here in a window as tall as the mockup's: the tabs
 /// under it are not the mockup's since Appearance came in second. (On General and Font & Style the
 /// window is not the mockup's height, and the Sidebar, centred on it, is not where the mockup has it.)
@@ -250,7 +254,8 @@ fn every_tab_looks_like_the_mockup() {
         for (shot, want) in parts {
             let (mean, far) = block_difference(&shot, &want);
             assert!(mean < 2.6, "{tab}: blocks differ by {mean:.2} levels on average");
-            assert!(far < 0.02, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+            let allowed = if t == tab::STYLE { STYLE_FAR_BLOCKS } else { 0.02 };
+            assert!(far < allowed, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
         }
     }
 }
@@ -499,7 +504,8 @@ fn the_open_lists_fit_in_the_window_at_the_default_size() {
     let reach = h.settings_style_lists_bottom();
     assert!(reach <= ph + MARGIN - 14.0, "a list reaches {reach} of a {ph} Paper");
     // Open each list and compare it with the mockup's open dropdown.
-    for (button, name) in [(10, "style-tape-list"), (0, "style-font-list")] {
+    // (The mockup's Font list is gone: the Font row opens the Font manager, see font_manager.rs.)
+    for (button, name) in [(10, "style-tape-list")] {
         h.settings_style_click(button);
         h.settings_pointer_away();
         let shot = rendered(&h);
@@ -509,6 +515,6 @@ fn the_open_lists_fit_in_the_window_at_the_default_size() {
         // The Paper above the rows taken out since the mockup (see `STYLE_COMPARED_H`).
         let (mean, far) = block_difference(&paper_top_rows(&shot, STYLE_COMPARED_H), &paper_top_rows(&want, STYLE_COMPARED_H));
         assert!(mean < 2.6, "{name}: blocks differ by {mean:.2} levels on average");
-        assert!(far < 0.02, "{name}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+        assert!(far < STYLE_FAR_BLOCKS, "{name}: {:.1}% of the blocks are far from the mockup", far * 100.0);
     }
 }
