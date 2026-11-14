@@ -23,11 +23,14 @@ impl Editor {
             max_run: th.get_step_width() as f64,
             letter_spacing: th.get_letter_spacing_em() as f64,
             font_epoch: crate::fonts::current().epoch,
+            check_indent: th.get_check_indent() as f64,
+            check_box: crate::fonts::SizeTokens::at(crate::fonts::size()).check_box,
         }
     }
 
     pub fn default_tokens(&self) -> Tokens {
         let scale = self.scale_factor.get();
+        let sz = crate::fonts::SizeTokens::at(crate::fonts::size());
         let style = |size: f64, pitch: f64| Style {
             size,
             pitch: (pitch * scale).round() / scale,
@@ -36,15 +39,17 @@ impl Editor {
             inset_left: 32.0,
             inset_right: 40.0,
             inset_top: 38.2,
-            heading_gap: 10.0,
-            body_gap: 8.1,
-            title: style(37.3, 60.0),
-            heading: style(crate::textflow::HEADING_SIZE, crate::textflow::HEADING_PITCH),
-            body: style(crate::textflow::BODY_SIZE, crate::textflow::BODY_PITCH),
+            heading_gap: sz.heading_gap,
+            body_gap: sz.body_gap,
+            title: style(sz.title_size, sz.title_pitch),
+            heading: style(sz.heading_size, sz.heading_pitch),
+            body: style(sz.body_size, sz.body_pitch),
             tilt_deg: 1.45,
             max_run: 28.0,
             letter_spacing: 0.0,
             font_epoch: crate::fonts::current().epoch,
+            check_indent: sz.check_indent,
+            check_box: sz.check_box,
         }
     }
 

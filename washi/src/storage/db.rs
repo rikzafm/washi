@@ -2,6 +2,7 @@
 
 use super::migrations;
 use crate::platform::NoteId;
+use crate::fonts::{FONT_SIZE_DEFAULT, FONT_SIZE_RANGE};
 use rusqlite::{Connection, ErrorCode};
 use std::path::Path;
 use zeroize::Zeroizing;
@@ -300,6 +301,20 @@ impl Db {
 
     pub fn set_letter_spacing(&self, spacing: LetterSpacing) -> Result<(), DbError> {
         self.set_meta("letter_spacing", spacing.key())
+    }
+
+    /// The size of every note's text, a whole number 12..=40 (Settings › Font & Style › Font size);
+    /// 22 (today's look) when never set or when the stored value is not a whole number in range.
+    pub fn font_size(&self) -> u32 {
+        self.meta("font_size")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .filter(|n| FONT_SIZE_RANGE.contains(n))
+            .unwrap_or(FONT_SIZE_DEFAULT)
+    }
+
+    /// Save the font size, clamped to 12..=40.
+    pub fn set_font_size(&self, size: u32) -> Result<(), DbError> {
+        self.set_meta("font_size", &size.clamp(*FONT_SIZE_RANGE.start(), *FONT_SIZE_RANGE.end()).to_string())
     }
 
     /// The Theme a Sidebar is drawn with (each Sidebar's is stored, even while they are shared).
@@ -748,6 +763,22 @@ mod tests {
         assert_eq!(db.letter_spacing(), LetterSpacing::Normal);
     }
 
+
+    #[test]
+    fn font_size_is_22_until_set_survives_reopening_and_falls_back_on_nonsense() {
+        let (dir, db) = test_db();
+        assert_eq!(db.font_size(), 22, "never set: today's look");
+        db.set_font_size(31).unwrap();
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert_eq!(db.font_size(), 31, "kept across a restart");
+        db.set_font_size(99).unwrap();
+        assert_eq!(db.font_size(), 40, "saved sizes are clamped");
+        for junk in ["", "big", "12.5", "-3", "11", "41", "9999999999999"] {
+            db.set_meta("font_size", junk).unwrap();
+            assert_eq!(db.font_size(), 22, "{junk:?} reads as 22");
+        }
+    }
 
     #[test]
     fn ui_scale_is_large_until_set_survives_reopening_and_falls_back_on_nonsense() {

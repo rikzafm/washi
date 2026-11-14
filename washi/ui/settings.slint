@@ -333,7 +333,11 @@ export component SettingsWindow inherits Window {
     // Font & Style choices: UI only. They live here, so they reset whenever Settings opens, and
     // nothing reads them (see style-tab.slint).
     in-out property <int> style-font <=> style.font;
+    /// The Font size, 12 to 40: set from the saved choice; the slider and number box save a new one.
     in-out property <int> style-size <=> style.size;
+    callback set-font-size(int);
+    out property <string> style-size-text: style.size-text;
+    out property <bool> style-size-editing: style.size-editing;
     in-out property <int> style-tape <=> style.tape;
     /// Letter spacing (0 Tight, 1 Normal, 2 Loose): set from the saved choice, saved by Rust.
     in-out property <int> style-spacing <=> style.spacing;
@@ -619,6 +623,8 @@ export component SettingsWindow inherits Window {
                     top: SettingsMetrics.content-top + root.content-dy;
                     tapes: root.preview-tapes;
                     set-spacing(i) => { root.set-letter-spacing(i); }
+                    set-size(n) => { root.set-font-size(n); }
+                    blank-pressed => { fs.focus(); }
                 }
 
                 shortcuts := ShortcutsPage {

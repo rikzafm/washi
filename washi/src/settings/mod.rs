@@ -62,6 +62,8 @@ pub struct Hooks {
     pub ui_scale_changed: Rc<dyn Fn(f32)>,
     /// The Letter spacing changed (already saved), to this many em: every note lays its text out again.
     pub letter_spacing_changed: Rc<dyn Fn(f32)>,
+    /// The Font size changed (already saved): every note lays its text out at the new size.
+    pub font_size_changed: Rc<dyn Fn(u32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -150,7 +152,7 @@ impl SettingsView {
             hooks.sidebar_themes_changed.clone(),
             hooks.ui_scale_changed.clone(),
         );
-        style::wire(&ui, hooks.general.env.clone(), hooks.general.db.clone(), hooks.letter_spacing_changed.clone());
+        style::wire(&ui, hooks.general.env.clone(), hooks.general.db.clone(), hooks.letter_spacing_changed.clone(), hooks.font_size_changed.clone());
         let scale = crate::ui_scale::WindowScale::attach(ui.window());
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,
