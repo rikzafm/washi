@@ -2,6 +2,30 @@
 
 use super::*;
 
+/// What [`Editor::format`] changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Formatted {
+    /// Nothing in the note (at most the style the next typing takes).
+    Unchanged,
+    /// The style of some words.
+    Restyled,
+    /// Paragraphs' kinds (a check or list toggle): a check item's box indents its words, so they
+    /// may have rewrapped and the caret moved out of view.
+    Reindented,
+}
+
+impl Formatted {
+    /// Whether the note changed (an undo step was made).
+    pub fn changed(self) -> bool {
+        self != Formatted::Unchanged
+    }
+
+    /// Whether the caret's lines may have moved, so it should be scrolled back into view.
+    pub fn rewrapped(self) -> bool {
+        self == Formatted::Reindented
+    }
+}
+
 impl Editor {
     pub fn edit(&self, i: usize, text: &str, cursor: usize) -> Option<Caret> {
         if !text.contains(['\n', '\r']) {
@@ -108,30 +132,30 @@ impl Editor {
         }
     }
 
-    pub fn format(&self, what: i32) -> bool {
+    /// Apply format `what` (a `FORMAT_*`) to the selection, or to the word or typing at the caret,
+    /// and say what it changed.
+    pub fn format(&self, what: i32) -> Formatted {
         let i = self.caret_block();
         let flag = match what {
             FORMAT_BOLD => Flags::BOLD,
             FORMAT_ITALIC => Flags::ITALIC,
             FORMAT_UNDERLINE => Flags::UNDERLINE,
             FORMAT_STRIKE => Flags::STRIKE,
-            FORMAT_CHECK => {
+            FORMAT_CHECK | FORMAT_LIST => {
                 let before = self.doc().clone();
-                let done = self.doc_mut().toggle_check_range(self.selection.get());
-                if done {
-                    self.structural(before);
+                let sel = self.selection.get();
+                let done = if what == FORMAT_CHECK {
+                    self.doc_mut().toggle_check_range(sel)
+                } else {
+                    self.doc_mut().toggle_list_range(sel)
+                };
+                if !done {
+                    return Formatted::Unchanged;
                 }
-                return done;
+                self.structural(before);
+                return Formatted::Reindented;
             }
-            FORMAT_LIST => {
-                let before = self.doc().clone();
-                let done = self.doc_mut().toggle_list_range(self.selection.get());
-                if done {
-                    self.structural(before);
-                }
-                return done;
-            }
-            _ => return false,
+            _ => return Formatted::Unchanged,
         };
         let sel = self.selection.get();
         let (cursor, collapsed) = (sel.focus.offset, sel.anchor == sel.focus);
@@ -153,7 +177,7 @@ impl Editor {
             let style = self.typing_style().toggled(flag);
             self.typing.set(Some((Caret { block: i, offset: cursor }, style)));
         }
-        done
+        if done { Formatted::Restyled } else { Formatted::Unchanged }
     }
 
     pub fn apply_paint(&self, ink: Option<u8>, marker: Option<u8>) -> bool {

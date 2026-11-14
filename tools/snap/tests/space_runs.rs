@@ -2,12 +2,7 @@
 //! below it are where they look, and a click on any of them lets you type there, at the smallest
 //! window and at a large one (.scratch/caret-focus-fixes, bug 1).
 
-use snap::Harness;
-use std::time::Duration;
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
+use snap::{ms, Harness};
 
 /// Notes with a long run of spaces in the title, in a body paragraph and in a check item, leading,
 /// in the middle and trailing, and the fixes Note whose report found the bug. Each with the index
@@ -30,15 +25,6 @@ fn fixtures() -> Vec<(&'static str, String, usize)> {
     ]
 }
 
-fn note(text: &str, size: u32) -> Harness {
-    let mut h = Harness::new();
-    h.start().unwrap();
-    h.resize_note(0, size, size);
-    h.set_note_text(0, text);
-    h.advance(ms(5));
-    h
-}
-
 /// The bottom of the edit fields and of the app's layout for the note made of the first `n`
 /// paragraphs of `text`.
 fn bottoms(h: &mut Harness, text: &str, n: usize) -> (f32, f32) {
@@ -52,7 +38,7 @@ fn bottoms(h: &mut Harness, text: &str, n: usize) -> (f32, f32) {
 fn every_paragraph_takes_as_many_lines_as_its_edit_field_at_the_smallest_and_a_large_window() {
     for size in [300, 1000] {
         for (name, text, _) in fixtures() {
-            let mut h = note(&text, size);
+            let mut h = Harness::sized_note(size, size, &text);
             let blocks = h.blocks(0).len();
             assert_eq!(blocks, text.split('\n').count(), "{name}: one block per stored line");
             // the notes of the first n paragraphs: their fields and their layout end at the same
@@ -68,7 +54,7 @@ fn every_paragraph_takes_as_many_lines_as_its_edit_field_at_the_smallest_and_a_l
 #[test]
 fn the_spaces_are_kept() {
     for (name, text, _) in fixtures() {
-        let h = note(&text, 300);
+        let h = Harness::sized_note(300, 300, &text);
         assert_eq!(h.note_text(0).replace("\r\n", "\n").trim_end_matches('\n'), text.trim_end_matches('\n'), "{name}");
     }
 }
@@ -98,10 +84,38 @@ fn to_top(h: &mut Harness) {
     h.advance(ms(5));
 }
 
+/// The UI scales (monitor DPI / 96) the clicks are made at: user story 28.
+const SCALES: [f32; 4] = [1.0, 1.25, 1.5, 2.0];
+
 #[test]
 fn a_click_on_any_line_below_a_run_of_spaces_lets_you_type_there_at_the_smallest_window() {
+    clicks_below_a_run_of_spaces_type_there(SCALES[0]);
+}
+
+#[test]
+fn a_click_below_a_run_of_spaces_types_there_at_125_percent() {
+    clicks_below_a_run_of_spaces_type_there(SCALES[1]);
+}
+
+#[test]
+fn a_click_below_a_run_of_spaces_types_there_at_150_percent() {
+    clicks_below_a_run_of_spaces_type_there(SCALES[2]);
+}
+
+#[test]
+fn a_click_below_a_run_of_spaces_types_there_at_200_percent() {
+    clicks_below_a_run_of_spaces_type_there(SCALES[3]);
+}
+
+/// At the smallest window on a monitor at `scale`: a click on every line of every paragraph
+/// below a run of spaces focuses that paragraph's field, and a typed character lands in it.
+fn clicks_below_a_run_of_spaces_type_there(scale: f32) {
     for (name, text, run) in fixtures() {
-        let mut h = note(&text, 300);
+        let mut h = Harness::sized_note(300, 300, &text);
+        if scale != 1.0 {
+            h.move_to_monitor(0, scale);
+        }
+        let name = format!("{name} at {scale}x");
         let (_, height) = h.note_size(0);
         let blocks = h.blocks(0);
         let mut clicked = 0;
@@ -146,7 +160,7 @@ fn a_click_on_any_line_below_a_run_of_spaces_lets_you_type_there_at_the_smallest
 fn a_caret_in_or_after_a_run_of_spaces_is_drawn_on_its_line_and_types_where_it_is() {
     let sp = " ".repeat(150);
     let text = format!("# Title\nleft{sp}right\nbelow");
-    let mut h = note(&text, 300);
+    let mut h = Harness::sized_note(300, 300, &text);
     h.set_tilted_editing(false);
     let block = 1;
     let run_end = "left".len() + sp.len();

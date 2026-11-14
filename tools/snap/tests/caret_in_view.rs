@@ -2,14 +2,8 @@
 //! shortcut, the check button, or typing `[] `) and after a resize, scrolling only when its line
 //! would otherwise be outside the text view, and never while a selection is being dragged.
 
-use slint::platform::Key;
 use snap::shot::WINDOW_MARGIN;
-use snap::Harness;
-use std::time::Duration;
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
+use snap::{ms, Harness};
 
 const CENTER: (f32, f32) = (220.0, 200.0);
 
@@ -24,17 +18,6 @@ fn long_text(n: usize) -> String {
         t.push_str(&format!("\n{i}. {LONG}"));
     }
     t
-}
-
-/// A note of `w` × `h` (logical px; clamped to the smallest size) holding `text`.
-fn note(w: u32, h: u32, text: &str) -> Harness {
-    let mut harness = Harness::new();
-    harness.start().unwrap();
-    harness.resize_note(0, w, h);
-    harness.set_note_text(0, text);
-    let _ = harness.render(0);
-    harness.advance(ms(5));
-    harness
 }
 
 /// The caret's line box, top and bottom, in the text view's frame (0 is the view's top edge).
@@ -74,7 +57,7 @@ fn click_check_button(h: &mut Harness) {
 
 #[test]
 fn toggling_a_check_item_with_the_shortcut_keeps_the_caret_in_view() {
-    let mut h = note(300, 300, &long_text(6));
+    let mut h = Harness::sized_note(300, 300, &long_text(6));
     let last = caret_at_the_bottom(&mut h);
     h.press_ctrl_shift(0, 'c');
     h.advance(ms(5));
@@ -88,7 +71,7 @@ fn toggling_a_check_item_with_the_shortcut_keeps_the_caret_in_view() {
 
 #[test]
 fn toggling_a_check_item_with_the_button_keeps_the_caret_in_view() {
-    let mut h = note(300, 300, &long_text(6));
+    let mut h = Harness::sized_note(300, 300, &long_text(6));
     let last = caret_at_the_bottom(&mut h);
     click_check_button(&mut h);
     assert_eq!(h.blocks(0)[last].0, "check", "the paragraph became a check item");
@@ -100,7 +83,7 @@ fn toggling_a_check_item_with_the_button_keeps_the_caret_in_view() {
 
 #[test]
 fn typing_the_check_marker_keeps_the_caret_in_view() {
-    let mut h = note(300, 300, &long_text(6));
+    let mut h = Harness::sized_note(300, 300, &long_text(6));
     caret_at_the_bottom(&mut h);
     h.press_enter(0);
     h.type_text(0, "[] ");
@@ -115,7 +98,7 @@ fn typing_the_check_marker_keeps_the_caret_in_view() {
 #[test]
 fn shrinking_the_note_keeps_the_caret_in_view() {
     // at a large size the whole note fits, so the caret in its last paragraph is in view unscrolled
-    let mut h = note(900, 900, &long_text(4));
+    let mut h = Harness::sized_note(900, 900, &long_text(4));
     let blocks = h.blocks(0);
     let last = blocks.len() - 1;
     h.place_caret_at(0, last, blocks[last].1.len());
@@ -131,7 +114,7 @@ fn shrinking_the_note_keeps_the_caret_in_view() {
 
 #[test]
 fn a_toggle_or_resize_with_the_caret_in_view_does_not_scroll() {
-    let mut h = note(300, 300, &long_text(10));
+    let mut h = Harness::sized_note(300, 300, &long_text(10));
     h.pointer_move(0, CENTER.0, CENTER.1);
     h.wheel(0, CENTER.0, CENTER.1, -300.0);
     h.advance(ms(5));
@@ -161,7 +144,7 @@ fn a_toggle_or_resize_with_the_caret_in_view_does_not_scroll() {
 
 #[test]
 fn a_resize_while_a_selection_is_dragged_does_not_scroll() {
-    let mut h = note(900, 900, &long_text(4));
+    let mut h = Harness::sized_note(900, 900, &long_text(4));
     // press low in the note and drag a little, the button still held
     let blocks = h.blocks(0);
     let last = blocks.len() - 1;

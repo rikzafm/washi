@@ -24,6 +24,11 @@ impl<T: Clone + PartialEq> History<T> {
         &self.current
     }
 
+    /// The last recorded state, to amend what equality leaves out of it.
+    pub fn current_mut(&mut self) -> &mut T {
+        &mut self.current
+    }
+
     /// Make `state` the newest snapshot. A state equal to the current one is no step; a new step
     /// clears the redo steps. True when a step was added.
     pub fn record(&mut self, state: T) -> bool {

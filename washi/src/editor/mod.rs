@@ -1,6 +1,6 @@
 //! Standalone, deep document editor engine.
 //!
-//! Encapsulates Document AST state, History<Document> undo/redo snapshots, textflow layout
+//! Encapsulates Document AST state, History<Snapshot> undo/redo snapshots, textflow layout
 //! and stepped line geometry, ADR-0002 note-level selection wash rects and marker wash overlays,
 //! image resize grips, drag math, hit testing, multi-click selection, Slint view models, and
 //! UI event binding.
@@ -28,6 +28,9 @@ mod layout;
 mod pointer;
 mod selection;
 mod undo;
+
+pub use editing::Formatted;
+pub use undo::{HistoryStep, Snapshot};
 #[cfg(test)]
 mod tests;
 
@@ -247,7 +250,7 @@ pub struct Editor {
     layout_hits: Cell<u32>,
     /// The picture ids of the document as `images` last learned them (see [`Self::sync_model`]).
     image_ids: RefCell<Vec<i64>>,
-    pub history: RefCell<History<Document>>,
+    pub history: RefCell<History<Snapshot>>,
     pub images: NoteImages,
 
     // Slint Model backing stores
@@ -341,7 +344,7 @@ impl Editor {
             #[cfg(debug_assertions)]
             layout_hits: Cell::new(0),
             image_ids: RefCell::new(image_ids(&parsed)),
-            history: RefCell::new(History::new(parsed.clone())),
+            history: RefCell::new(History::new(Snapshot { doc: parsed.clone(), caret: START })),
             images,
             model,
             runs,
@@ -486,7 +489,7 @@ impl Editor {
         self.images.load(&parsed);
         *self.image_ids.borrow_mut() = image_ids(&parsed);
         self.model.set_vec(parsed.blocks().iter().map(|b| self.block_data(b)).collect::<Vec<_>>());
-        *self.history.borrow_mut() = History::new(parsed.clone());
+        *self.history.borrow_mut() = History::new(Snapshot { doc: parsed.clone(), caret: START });
         *self.doc_mut() = parsed;
     }
 

@@ -84,10 +84,10 @@ impl Editor {
             let weak_ui = ui.as_weak();
             ui.on_format(move |what| {
                 let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return };
-                if editor.format(what) {
+                let done = editor.format(what);
+                if done.changed() {
                     changed(None);
-                    if what == FORMAT_CHECK || what == FORMAT_LIST {
-                        // the paragraph's indent changed, so it rewrapped: keep the caret in view
+                    if done.rewrapped() {
                         editor.reveal_caret(&ui);
                     }
                 } else {
@@ -164,9 +164,8 @@ impl Editor {
             let editor_weak = editor_weak.clone();
             ui.on_block_history(move |redo| {
                 let Some(editor) = editor_weak.upgrade() else { return };
-                // a step that changed only kinds (a tick, a toggle) leaves the selection alone
-                if let Some(caret) = editor.history_step(redo) {
-                    changed(caret);
+                if let Some(caret) = editor.history_step(redo).caret() {
+                    changed(Some(caret));
                 }
             });
         }

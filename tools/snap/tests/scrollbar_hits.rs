@@ -3,15 +3,10 @@
 //! past it into the margin beside the thumb, places the caret there; the thumb still shows on hover
 //! and can still be dragged.
 
-use snap::Harness;
-use std::time::Duration;
+use snap::{ms, Harness};
 
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
-
-/// The text's right inset from the paper's right edge (`Theme.text-inset-right`).
-const TEXT_INSET_RIGHT: f32 = 40.0;
+/// The UI scales (monitor DPI / 96) the clicks are made at: user story 28.
+const SCALES: [f32; 4] = [1.0, 1.25, 1.5, 2.0];
 
 /// A Note of `n` long paragraphs below a title.
 fn paragraphs(n: usize) -> String {
@@ -20,17 +15,6 @@ fn paragraphs(n: usize) -> String {
         t.push_str(&format!("\nLine {i} of a long note that keeps going so the text has to scroll: a few more words."));
     }
     t
-}
-
-/// A Note at the given window size holding `text`.
-fn note(w: u32, h: u32, text: &str) -> Harness {
-    let mut hn = Harness::new();
-    hn.start().unwrap();
-    hn.resize_note(0, w, h);
-    hn.set_note_text(0, text);
-    let _ = hn.render(0);
-    hn.advance(ms(5));
-    hn
 }
 
 /// The level tops of the resting lines, in the paper's frame (content px, before scrolling).
@@ -81,11 +65,36 @@ fn count_in(h: &Harness, block: usize, ch: char) -> usize {
 
 #[test]
 fn a_click_at_the_end_of_any_line_beside_the_hidden_thumb_places_the_caret_and_typing_lands_there() {
+    clicks_beside_the_hidden_thumb_type_there(SCALES[0]);
+}
+
+#[test]
+fn a_click_beside_the_hidden_thumb_types_there_at_125_percent() {
+    clicks_beside_the_hidden_thumb_type_there(SCALES[1]);
+}
+
+#[test]
+fn a_click_beside_the_hidden_thumb_types_there_at_150_percent() {
+    clicks_beside_the_hidden_thumb_type_there(SCALES[2]);
+}
+
+#[test]
+fn a_click_beside_the_hidden_thumb_types_there_at_200_percent() {
+    clicks_beside_the_hidden_thumb_type_there(SCALES[3]);
+}
+
+/// On a monitor at `scale`: a click at the end of every visible line, from the text's last 20 px
+/// out to the hidden thumb's strip, puts the caret in that line's paragraph, and typing lands there.
+fn clicks_beside_the_hidden_thumb_type_there(scale: f32) {
     for n in [3, 8] {
         let text = paragraphs(n);
-        let mut h = note(300, 300, &text);
+        let mut h = Harness::sized_note(300, 300, &text);
+        if scale != 1.0 {
+            h.move_to_monitor(0, scale);
+        }
         assert!(h.note_size(0).0 <= 444, "the smallest window: {:?}", h.note_size(0));
         let (pw, _) = h.paper_size(0);
+        let inset_right = h.text_inset_right(0);
         for bottom in [false, true] {
             scroll_to(&mut h, bottom, false);
             assert!(!bottom || h.scroll_offset(0) > 0.0, "the Note overflows");
@@ -94,7 +103,7 @@ fn a_click_at_the_end_of_any_line_beside_the_hidden_thumb_places_the_caret_and_t
                 scroll_to(&mut h, bottom, false);
                 let (mid, _) = click_paper(&mut h, pw / 2.0, v);
                 // from the text's last 20 px out across the margin, up to the thumb's own strip
-                let mut u = pw - TEXT_INSET_RIGHT - 20.0;
+                let mut u = pw - inset_right - 20.0;
                 while u <= pw - 20.0 {
                     if on_menu_button(&h, u, v) {
                         u += 4.0;
@@ -109,7 +118,7 @@ fn a_click_at_the_end_of_any_line_beside_the_hidden_thumb_places_the_caret_and_t
                     scroll_to(&mut h, bottom, false);
                     assert_eq!(h.scrollbar_opacity(0), 0.0, "the bar is hidden");
                     let ((block, offset), focused) = click_paper(&mut h, u, v);
-                    let at = format!("n {n} bottom {bottom} line v {v:.1} u {u:.0}");
+                    let at = format!("{scale}x n {n} bottom {bottom} line v {v:.1} u {u:.0}");
                     assert_eq!(block, mid.0, "the caret went to the clicked paragraph: {at}");
                     assert!(offset >= mid.1, "and to the end side of the line: {at}");
                     assert_eq!(focused, block as i32, "its field has the keyboard focus: {at}");
@@ -126,7 +135,7 @@ fn a_click_at_the_end_of_any_line_beside_the_hidden_thumb_places_the_caret_and_t
 
 #[test]
 fn hovering_the_thumb_at_the_smallest_window_shows_the_bar_and_dragging_it_scrolls() {
-    let mut h = note(300, 300, &paragraphs(8));
+    let mut h = Harness::sized_note(300, 300, &paragraphs(8));
     h.advance(ms(1000));
     assert_eq!(h.scrollbar_opacity(0), 0.0);
     let (tx, ty) = h.scrollbar_thumb(0);
@@ -143,10 +152,34 @@ fn hovering_the_thumb_at_the_smallest_window_shows_the_bar_and_dragging_it_scrol
 
 #[test]
 fn a_click_just_past_the_texts_right_edge_places_the_caret_even_while_the_bar_shows_at_every_size() {
+    clicks_past_the_texts_right_edge_with_the_bar_showing(SCALES[0]);
+}
+
+#[test]
+fn a_click_past_the_texts_right_edge_with_the_bar_showing_at_125_percent() {
+    clicks_past_the_texts_right_edge_with_the_bar_showing(SCALES[1]);
+}
+
+#[test]
+fn a_click_past_the_texts_right_edge_with_the_bar_showing_at_150_percent() {
+    clicks_past_the_texts_right_edge_with_the_bar_showing(SCALES[2]);
+}
+
+#[test]
+fn a_click_past_the_texts_right_edge_with_the_bar_showing_at_200_percent() {
+    clicks_past_the_texts_right_edge_with_the_bar_showing(SCALES[3]);
+}
+
+/// On a monitor at `scale`, at every size: a click just past the text's right edge, with the bar
+/// showing beside it, puts the caret in the clicked line's paragraph and focuses its field.
+fn clicks_past_the_texts_right_edge_with_the_bar_showing(scale: f32) {
     // From the smallest window to a tall one; each Note barely overflows, so its thumb is long and
     // runs beside many lines (a long tilted thumb leans furthest toward the text).
     for (w, wh) in [(300, 300), (600, 700), (500, 1400)] {
-        let mut h = note(w, wh, "# Title");
+        let mut h = Harness::sized_note(w, wh, "# Title");
+        if scale != 1.0 {
+            h.move_to_monitor(0, scale);
+        }
         let mut n = 1;
         loop {
             h.set_note_text(0, &paragraphs(n));
@@ -158,6 +191,7 @@ fn a_click_just_past_the_texts_right_edge_places_the_caret_even_while_the_bar_sh
             n += 1;
         }
         let (pw, _) = h.paper_size(0);
+        let inset_right = h.text_inset_right(0);
         for bottom in [false, true] {
             scroll_to(&mut h, bottom, true);
             for v in visible_line_middles(&h) {
@@ -169,8 +203,8 @@ fn a_click_just_past_the_texts_right_edge_places_the_caret_even_while_the_bar_sh
                 h.advance(ms(5));
                 scroll_to(&mut h, bottom, true);
                 assert_eq!(h.scrollbar_opacity(0), 1.0, "the bar shows");
-                let ((block, _), focused) = click_paper(&mut h, pw - TEXT_INSET_RIGHT + 2.0, v);
-                let at = format!("{w}x{wh} bottom {bottom} line v {v:.1}");
+                let ((block, _), focused) = click_paper(&mut h, pw - inset_right + 2.0, v);
+                let at = format!("{scale}x {w}x{wh} bottom {bottom} line v {v:.1}");
                 assert_eq!(block, mid.0, "the caret went to the clicked paragraph: {at}");
                 assert_eq!(focused, block as i32, "its field has the keyboard focus: {at}");
             }

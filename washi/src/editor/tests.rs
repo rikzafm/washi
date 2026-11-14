@@ -76,17 +76,17 @@ fn test_editor_undo_redo_history() {
     assert_eq!(editor.text(), "# Modified text");
 
     // Undo steps back to initial state
-    let caret = editor.step(false).expect("undo snapshot available");
+    let step = editor.history_step(false);
     assert_eq!(editor.text(), "# Initial text");
-    assert_eq!(caret.block, 0);
+    assert_eq!(step, HistoryStep::Edited(Caret { block: 0, offset: 12 }), "the caret goes to the end of the changed block");
 
     // Redo steps forward to modified state
-    let caret = editor.step(true).expect("redo snapshot available");
+    let step = editor.history_step(true);
     assert_eq!(editor.text(), "# Modified text");
-    assert_eq!(caret.block, 0);
+    assert_eq!(step, HistoryStep::Edited(Caret { block: 0, offset: 13 }));
 
-    // Further redo is None
-    assert!(editor.step(true).is_none());
+    // Further redo is nothing
+    assert_eq!(editor.history_step(true), HistoryStep::Nothing);
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn test_formatting_toggle_unaffected_at_boundaries() {
     });
 
     // Toggle bold when collapsed at word boundary does NOT style "body", applies to typing style
-    assert!(!editor.format(0));
+    assert!(!editor.format(0).changed());
     assert_eq!(editor.text(), "# title\nbody text");
     assert!(editor.typing_style().contains(Flags::BOLD));
 
@@ -206,7 +206,7 @@ fn test_formatting_toggle_unaffected_at_boundaries() {
         anchor: Caret { block: 1, offset: 2 },
         focus: Caret { block: 1, offset: 2 },
     });
-    assert!(editor.format(0));
+    assert_eq!(editor.format(0), Formatted::Restyled, "a style keeps the paragraph's indent");
     assert_eq!(editor.text(), "# title\n**body** text");
 }
 
@@ -254,7 +254,7 @@ fn test_editor_image_resize_grip_and_drag_math() {
 
     // Release grip commits undo checkpoint
     assert!(editor.release_grip());
-    assert!(editor.step(false).is_some(), "undo steps back through grip drag");
+    assert!(editor.history_step(false).caret().is_some(), "undo steps back through grip drag");
     drop(dir);
 }
 
@@ -271,15 +271,15 @@ fn test_editor_formatting_toggle() {
     editor.set_selection(&ui, range);
 
     // Toggle Bold (0)
-    assert!(editor.format(0));
+    assert_eq!(editor.format(0), Formatted::Restyled, "a style keeps the paragraph's indent");
     assert_eq!(editor.text(), "# title\n**body** text");
 
     // Toggle Italic (1)
-    assert!(editor.format(1));
+    assert!(editor.format(1).changed());
     assert_eq!(editor.text(), "# title\n***body*** text");
 
     // Toggle List (4)
-    assert!(editor.format(4));
+    assert_eq!(editor.format(4), Formatted::Reindented, "a list toggle changes the paragraph's kind: it may rewrap");
     assert!(editor.text().contains("- "));
 }
 
@@ -330,7 +330,7 @@ fn test_editor_range_keys_replace_and_cut_copy() {
     assert_eq!(editor.text(), "# Title\nFirst X paragraph");
 
     // Undo restores original text
-    editor.step(false);
+    editor.history_step(false);
     assert_eq!(editor.text(), "# Title\nFirst paragraph\nSecond paragraph");
 }
 
@@ -362,11 +362,11 @@ fn test_editor_multi_block_single_line_paste_with_clipboard_abstraction() {
     assert!(editor.range.get().is_none(), "range cleared after paste");
 
     // Undo restores original multi-block text
-    editor.step(false);
+    editor.history_step(false);
     assert_eq!(editor.text(), "# Block 0\nBlock 1\nBlock 2");
 
     // Redo re-applies paste replacement
-    editor.step(true);
+    editor.history_step(true);
     assert_eq!(editor.text(), "# BloREPLACEDck 2");
 }
 
@@ -425,7 +425,7 @@ fn a_press_on_a_check_box_ticks_the_item_once_and_undo_unticks_it() {
     assert_eq!(editor.text(), "# Jadwal\n- [x] Selasa\n- [x] Rabu\nplain");
     // a press on the text of the item, or on a plain paragraph, is no tick
     assert!(!editor.toggle_check_at(&ui, (box1.x + 120.0, box1.y)));
-    assert!(editor.step(false).is_some());
+    assert!(matches!(editor.history_step(false), HistoryStep::Restored(_)), "a tick changes only a kind");
     assert_eq!(editor.text(), "# Jadwal\n- [ ] Selasa\n- [x] Rabu\nplain");
 }
 
@@ -433,11 +433,11 @@ fn a_press_on_a_check_box_ticks_the_item_once_and_undo_unticks_it() {
 fn the_check_button_and_its_state_follow_the_paragraph_holding_the_caret() {
     let (_dir, editor, ui) = test_editor_with_ui("# t\nbuy milk");
     editor.set_caret(Caret { block: 1, offset: 0 });
-    assert!(editor.format(FORMAT_CHECK));
+    assert_eq!(editor.format(FORMAT_CHECK), Formatted::Reindented, "a toggle rewraps the paragraph");
     editor.show_formats(&ui);
     assert!(ui.get_fmt_check());
     assert_eq!(editor.text(), "# t\n- [ ] buy milk");
-    assert!(editor.format(FORMAT_CHECK));
+    assert!(editor.format(FORMAT_CHECK).changed());
     editor.show_formats(&ui);
     assert!(!ui.get_fmt_check());
     assert_eq!(editor.text(), "# t\nbuy milk");
@@ -464,19 +464,19 @@ fn the_check_item_indent_is_the_themes() {
 }
 
 #[test]
-fn a_check_items_box_and_tick_stay_drawn_while_an_input_method_composes_in_it() {
-    // the harness has no input method: ask the note's own drawing rule. While composing, the field
-    // shows the item's words itself (so the note hides its own), but it has no box
+fn a_check_box_and_its_tick_are_drawn_until_wholly_above_the_papers_top_edge() {
+    // the note's drawing rule; that composing does not hide them is checked with a real input
+    // method event in tools/snap/tests/block_editing.rs
     let (_dir, _editor, ui) = test_editor_with_ui("x");
     let draw = ui.global::<crate::note_window::CheckDrawing>();
     let ticked = CheckData { block: 2, x: 40.0, y: 100.0, size: 17.0, dx: 0.0, dy: 0.0, checked: true };
     let open = CheckData { checked: false, ..ticked.clone() };
     let edge = 0.0;
-    assert!(draw.invoke_box_shown(open.clone(), 2, edge), "the box of the item being composed in");
-    assert!(draw.invoke_box_shown(ticked.clone(), 2, edge));
-    assert!(draw.invoke_tick_shown(ticked.clone(), 2, edge), "the tick of the item being composed in");
-    assert!(!draw.invoke_tick_shown(open.clone(), 2, edge), "an open box has no tick");
+    assert!(draw.invoke_box_shown(open.clone(), edge));
+    assert!(draw.invoke_box_shown(ticked.clone(), edge));
+    assert!(draw.invoke_tick_shown(ticked.clone(), edge));
+    assert!(!draw.invoke_tick_shown(open.clone(), edge), "an open box has no tick");
     // scrolled wholly above the paper's top edge: left out (a box partly above it is cut, not hidden)
-    assert!(!draw.invoke_box_shown(ticked.clone(), -1, 118.0));
-    assert!(draw.invoke_box_shown(ticked, -1, 110.0));
+    assert!(!draw.invoke_box_shown(ticked.clone(), 118.0));
+    assert!(draw.invoke_box_shown(ticked, 110.0));
 }

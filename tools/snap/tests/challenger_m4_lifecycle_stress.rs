@@ -432,10 +432,10 @@ fn test_editor_undo_redo_typing_timer_weak_capture_lifecycle() {
         assert!(editor.history.borrow().can_undo(), "Checkpoint must have been created");
 
         // Step undo and redo
-        let undo_caret = editor.step(false);
+        let undo_caret = editor.history_step(false).caret();
         assert!(undo_caret.is_some(), "Undo must succeed");
 
-        let redo_caret = editor.step(true);
+        let redo_caret = editor.history_step(true).caret();
         assert!(redo_caret.is_some(), "Redo must succeed");
 
         // Rapid typing again to start the history timer anew
@@ -489,15 +489,15 @@ fn test_extreme_document_inputs_empty_monolithic_and_formatting() {
         assert_eq!(editor.selection().focus, START);
 
         // Formatting toggles on empty document must not panic
-        assert!(!editor.format(FORMAT_BOLD));
-        assert!(!editor.format(FORMAT_ITALIC));
-        assert!(!editor.format(FORMAT_UNDERLINE));
-        assert!(!editor.format(FORMAT_STRIKE));
-        assert!(!editor.format(FORMAT_LIST));
+        assert!(!editor.format(FORMAT_BOLD).changed());
+        assert!(!editor.format(FORMAT_ITALIC).changed());
+        assert!(!editor.format(FORMAT_UNDERLINE).changed());
+        assert!(!editor.format(FORMAT_STRIKE).changed());
+        assert!(!editor.format(FORMAT_LIST).changed());
 
         // Undo/redo on empty document
-        assert!(editor.step(false).is_none());
-        assert!(editor.step(true).is_none());
+        assert!(editor.history_step(false).caret().is_none());
+        assert!(editor.history_step(true).caret().is_none());
 
         editor.relayout(&ui);
     }
@@ -524,7 +524,7 @@ fn test_extreme_document_inputs_empty_monolithic_and_formatting() {
 
         // Verify undo
         editor.checkpoint();
-        let _ = editor.step(false);
+        let _ = editor.history_step(false).caret();
     }
 
     // C) Rapid alternating formats and markers (1,000 tag pairs)

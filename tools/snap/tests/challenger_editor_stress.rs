@@ -87,27 +87,27 @@ fn stress_rapid_burst_typing_and_undo_redo_cycles() {
 
     // 5 checkpoints were recorded; step back through all 5
     for i in (1..5).rev() {
-        let caret = editor.step(false).expect("undo snapshot available");
+        let caret = editor.history_step(false).caret().expect("undo snapshot available");
         assert_eq!(caret.block, 0);
         let expected = format!("# Initial Title {}", i * 10);
         assert_eq!(editor.text(), expected, "Undo step {i} matches checkpoint");
     }
 
     // Step back to initial state
-    let caret = editor.step(false).expect("undo to initial");
+    let caret = editor.history_step(false).caret().expect("undo to initial");
     assert_eq!(caret.block, 0);
     assert_eq!(editor.text(), "# Initial Title");
 
     // Redo all the way back to step 50
     for i in 1..=5 {
-        let caret = editor.step(true).expect("redo snapshot available");
+        let caret = editor.history_step(true).caret().expect("redo snapshot available");
         assert_eq!(caret.block, 0);
         let expected = format!("# Initial Title {}", i * 10);
         assert_eq!(editor.text(), expected, "Redo step {i} matches checkpoint");
     }
 
     // No further redo
-    assert!(editor.step(true).is_none());
+    assert!(editor.history_step(true).caret().is_none());
 }
 
 #[test]
@@ -117,29 +117,29 @@ fn stress_interleaving_text_editing_with_formatting_toggles() {
 
     // 1. Select "First" in block 1 (offsets 0..5) and toggle bold
     editor.set_selection(&ui, Range { anchor: Caret { block: 1, offset: 0 }, focus: Caret { block: 1, offset: 5 } });
-    assert!(editor.format(FORMAT_BOLD));
+    assert!(editor.format(FORMAT_BOLD).changed());
     assert_eq!(editor.text(), "# Title\n**First** line\nSecond line");
 
     // 2. Select "line" in block 1 (offsets 6..10) and toggle italic
     editor.set_selection(&ui, Range { anchor: Caret { block: 1, offset: 6 }, focus: Caret { block: 1, offset: 10 } });
-    assert!(editor.format(FORMAT_ITALIC));
+    assert!(editor.format(FORMAT_ITALIC).changed());
     assert_eq!(editor.text(), "# Title\n**First** *line*\nSecond line");
 
     // 3. Toggle List on second line
     editor.set_selection(&ui, Range { anchor: Caret { block: 2, offset: 0 }, focus: Caret { block: 2, offset: 0 } });
-    assert!(editor.format(FORMAT_LIST));
+    assert!(editor.format(FORMAT_LIST).changed());
     assert_eq!(editor.text(), "# Title\n**First** *line*\n- Second line");
 
     // 4. Undo list, undo italic, undo bold
-    let c = editor.step(false).expect("undo list");
+    let c = editor.history_step(false).caret().expect("undo list");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), "# Title\n**First** *line*\nSecond line");
 
-    let c = editor.step(false).expect("undo italic");
+    let c = editor.history_step(false).caret().expect("undo italic");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), "# Title\n**First** line\nSecond line");
 
-    let c = editor.step(false).expect("undo bold");
+    let c = editor.history_step(false).caret().expect("undo bold");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), "# Title\nFirst line\nSecond line");
 }
@@ -156,8 +156,8 @@ fn stress_redo_clearing_on_new_edit() {
     editor.checkpoint();
 
     // Undo twice back to Base Note
-    editor.step(false);
-    editor.step(false);
+    editor.history_step(false);
+    editor.history_step(false);
     assert_eq!(editor.text(), "# Base Note");
     assert!(editor.can_redo(), "Redo stack must be non-empty");
 
@@ -210,11 +210,11 @@ fn stress_multi_paragraph_range_replacement_and_cross_block_ops() {
     assert_eq!(paste_caret, Caret { block: 1, offset: 21 });
 
     // Undo restores the original multi-block state
-    let c = editor.step(false).expect("undo paste");
+    let c = editor.history_step(false).caret().expect("undo paste");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), "# Document Title\nParagraph Gamma\nParagraph Delta");
 
-    let c = editor.step(false).expect("undo cut");
+    let c = editor.history_step(false).caret().expect("undo cut");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), text);
 }
@@ -246,7 +246,7 @@ fn stress_range_operations_with_empty_paragraphs_and_slivers() {
     assert_eq!(caret, Caret { block: 0, offset: 1 });
 
     // Undo restores all empty paragraphs
-    let c = editor.step(false).expect("undo replace all");
+    let c = editor.history_step(false).caret().expect("undo replace all");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), text);
 }
@@ -283,7 +283,7 @@ fn stress_unicode_emoji_and_multibyte_utf8_boundaries() {
     assert!(editor.text().contains("✨🌟✨"));
 
     // Step undo restores original unicode text
-    let c = editor.step(false).expect("undo replace");
+    let c = editor.history_step(false).caret().expect("undo replace");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), text);
 }
@@ -334,7 +334,7 @@ fn stress_image_resize_grip_dragging_extreme_coordinates() {
 
     // 4. Release grip commits undo snapshot
     assert!(editor.release_grip());
-    assert!(editor.step(false).is_some(), "Undo reverts resize");
+    assert!(editor.history_step(false).caret().is_some(), "Undo reverts resize");
     let (pct_original, _) = editor.image_state(1).unwrap();
     assert_eq!(pct_original, IMAGE_PCT_MAX, "Original size restored");
     drop(dir);
@@ -457,7 +457,7 @@ fn stress_image_deletion_cutting_and_undo_invariants() {
     assert_eq!(caret, Caret { block: 1, offset: 0 });
 
     // 2. Undo restores the image
-    let c = editor.step(false).expect("undo cut");
+    let c = editor.history_step(false).caret().expect("undo cut");
     editor.notify_change(Some(c));
     assert_eq!(editor.model.row_count(), 5);
     assert_eq!(editor.model.row_data(1).unwrap().kind, BlockKind::Image);
@@ -470,7 +470,7 @@ fn stress_image_deletion_cutting_and_undo_invariants() {
     assert_eq!(editor.model.row_count(), 4);
 
     // 4. Undo restores second image
-    let c = editor.step(false).expect("undo delete");
+    let c = editor.history_step(false).caret().expect("undo delete");
     editor.notify_change(Some(c));
     assert_eq!(editor.text(), content);
     assert_eq!(editor.model.row_count(), 5);

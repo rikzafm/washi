@@ -16,6 +16,7 @@ mod sidebar_layout;
 pub mod platform;
 pub mod shot;
 
+pub use caret::ms;
 pub use fakes::WindowCommand;
 pub use harness::{Harness, MenuState, TAPE_COLORS};
 pub use settings_appearance::tab;

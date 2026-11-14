@@ -254,6 +254,9 @@ export component NoteWindow inherits Window {
     property <length> content: max(root.content-height, text-layer.fields-bottom);
     /// Where the edit fields end (the bottom of the last one), in the paper's frame: the lines the
     /// fields wrap to, which the app's layout must match.
+    /// A harness-only observation hook (tools/snap reads it to check the layout against the
+    /// fields): not geometry for the app to read back. Rust's own layout is what places the caret and
+    /// the pointer (ADR 0002).
     out property <length> fields-bottom: text-layer.fields-bottom;
     property <length> max-scroll: max(0px, root.content - root.text-view-height);
     changed max-scroll => { if (root.scroll-y > root.max-scroll) { root.scroll-y = root.max-scroll; } }

@@ -155,21 +155,23 @@ component HandleShape inherits Path {
 
 /// When the box (and tick) of a check item is drawn. Only what hides the box hides it: while an
 /// input method composes in the item, the field shows its own words (so the note's words and
-/// rules are hidden) but not a box, so the box and tick stay. A box is left out once all of it is
-/// above the paper's tilted top edge (`edge`, at the box); one partly above is cut along the edge.
+/// rules are hidden) but not a box, so the box and tick stay (nothing here asks which block is
+/// composing). A box is left out once all of it is above the paper's tilted top edge (`edge`, at
+/// the box); one partly above is cut along the edge (see `CheckClip`).
 export global CheckDrawing {
-    pure public function box-shown(c: CheckData, composing-block: int, edge: length) -> bool {
+    pure public function box-shown(c: CheckData, edge: length) -> bool {
         return c.y + c.size >= edge;
     }
-    pure public function tick-shown(c: CheckData, composing-block: int, edge: length) -> bool {
-        return c.checked && CheckDrawing.box-shown(c, composing-block, edge);
+    pure public function tick-shown(c: CheckData, edge: length) -> bool {
+        return c.checked && CheckDrawing.box-shown(c, edge);
     }
 }
 
 // The box of a check item and its tick. Like the frame of a picture, they follow the paper's tilt
 // (`ts` is how much of it is on: 1 at rest, 0 while editing), as Paths whose corners are moved onto
-// the tilted baseline.
-component CheckShape inherits Path {
+// the tilted baseline. `CheckPath` is what the two share: the tilt, the box's place, and where the
+// shape sits; each shape gives its bounds (`ox`, `oy`, width and height) and its outline.
+component CheckPath inherits Path {
     in property <CheckData> c;
     in property <float> ts;
     in property <length> shift-x;
@@ -179,89 +181,79 @@ component CheckShape inherits Path {
     /// How far down the clip the shape is drawn in starts (the paper's top edge at the box), so
     /// the shape is drawn where it would be without it.
     in property <length> lift: 0px;
-    property <float> sn: Theme.text-tilt.sin();
-    property <float> cs: Theme.text-tilt.cos();
-    property <float> u0: root.c.x / 1px;
-    property <float> v0: root.c.y / 1px;
-    property <float> s: root.c.size / 1px;
+    /// The top left of the shape's bounds, unlifted (px of the paper's frame, as drawn).
+    in property <float> ox;
+    in property <float> oy;
+    out property <float> sn: Theme.text-tilt.sin();
+    out property <float> cs: Theme.text-tilt.cos();
+    out property <float> u0: root.c.x / 1px;
+    out property <float> v0: root.c.y / 1px;
+    out property <float> s: root.c.size / 1px;
+    /// Room around the outline for its stroke.
+    out property <float> pad: 6;
     /// The box's centre across, as drawn (where the paper's top edge is taken for the cut).
     out property <length> mid-x: root.px(root.u0 + root.s / 2, root.v0 + root.s / 2) * 1px;
     /// The bottom of the shape as drawn, without the lift.
     out property <length> foot: root.oy * 1px + root.height;
-    pure function px(u: float, v: float) -> float {
+    /// A point of the paper's level frame, as drawn: across and down.
+    pure public function px(u: float, v: float) -> float {
         return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
     }
-    pure function py(u: float, v: float) -> float {
+    pure public function py(u: float, v: float) -> float {
         return v + ((u - root.paper-w / 2px) * root.sn + (v - root.paper-h / 2px) * (root.cs - 1) + root.shift-y / 1px) * root.ts;
     }
-    property <float> pad: 6;
-    property <float> ox: min(root.px(root.u0, root.v0), root.px(root.u0, root.v0 + root.s)) - root.pad;
-    property <float> oy: min(root.py(root.u0, root.v0), root.py(root.u0 + root.s, root.v0)) - root.pad;
     x: root.ox * 1px;
     y: root.oy * 1px - root.lift;
-    width: (max(root.px(root.u0 + root.s, root.v0), root.px(root.u0 + root.s, root.v0 + root.s)) - root.ox + root.pad) * 1px;
-    height: (max(root.py(root.u0, root.v0 + root.s), root.py(root.u0 + root.s, root.v0 + root.s)) - root.oy + root.pad) * 1px;
     viewbox-width: self.width / 1px;
     viewbox-height: self.height / 1px;
-    fill: root.c.checked ? #E6F4EA : transparent;
-    stroke: root.c.checked ? Theme.check-tick : Theme.check-box;
-    stroke-width: 1.6px;
     stroke-line-join: round;
-    MoveTo { x: px(root.u0, root.v0) - root.ox; y: py(root.u0, root.v0) - root.oy; }
-    LineTo { x: px(root.u0 + root.s, root.v0) - root.ox; y: py(root.u0 + root.s, root.v0) - root.oy; }
-    LineTo { x: px(root.u0 + root.s, root.v0 + root.s) - root.ox; y: py(root.u0 + root.s, root.v0 + root.s) - root.oy; }
-    LineTo { x: px(root.u0, root.v0 + root.s) - root.ox; y: py(root.u0, root.v0 + root.s) - root.oy; }
+}
+
+component CheckShape inherits CheckPath {
+    ox: min(self.px(self.u0, self.v0), self.px(self.u0, self.v0 + self.s)) - self.pad;
+    oy: min(self.py(self.u0, self.v0), self.py(self.u0 + self.s, self.v0)) - self.pad;
+    width: (max(self.px(self.u0 + self.s, self.v0), self.px(self.u0 + self.s, self.v0 + self.s)) - self.ox + self.pad) * 1px;
+    height: (max(self.py(self.u0, self.v0 + self.s), self.py(self.u0 + self.s, self.v0 + self.s)) - self.oy + self.pad) * 1px;
+    fill: self.c.checked ? #E6F4EA : transparent;
+    stroke: self.c.checked ? Theme.check-tick : Theme.check-box;
+    stroke-width: 1.6px;
+    MoveTo { x: root.px(root.u0, root.v0) - root.ox; y: root.py(root.u0, root.v0) - root.oy; }
+    LineTo { x: root.px(root.u0 + root.s, root.v0) - root.ox; y: root.py(root.u0 + root.s, root.v0) - root.oy; }
+    LineTo { x: root.px(root.u0 + root.s, root.v0 + root.s) - root.ox; y: root.py(root.u0 + root.s, root.v0 + root.s) - root.oy; }
+    LineTo { x: root.px(root.u0, root.v0 + root.s) - root.ox; y: root.py(root.u0, root.v0 + root.s) - root.oy; }
     Close { }
 }
 
-component TickShape inherits Path {
-    in property <CheckData> c;
-    in property <float> ts;
-    in property <length> shift-x;
-    in property <length> shift-y;
-    in property <length> paper-w;
-    in property <length> paper-h;
-    /// How far down the clip the shape is drawn in starts (the paper's top edge at the box), so
-    /// the shape is drawn where it would be without it.
-    in property <length> lift: 0px;
-    property <float> sn: Theme.text-tilt.sin();
-    property <float> cs: Theme.text-tilt.cos();
-    property <float> u0: root.c.x / 1px;
-    property <float> v0: root.c.y / 1px;
-    property <float> s: root.c.size / 1px;
-    /// The box's centre across, as drawn (where the paper's top edge is taken for the cut).
-    out property <length> mid-x: root.px(root.u0 + root.s / 2, root.v0 + root.s / 2) * 1px;
-    /// The bottom of the shape as drawn, without the lift.
-    out property <length> foot: root.oy * 1px + root.height;
-    pure function px(u: float, v: float) -> float {
-        return u + ((u - root.paper-w / 2px) * (root.cs - 1) - (v - root.paper-h / 2px) * root.sn + root.shift-x / 1px) * root.ts;
-    }
-    pure function py(u: float, v: float) -> float {
-        return v + ((u - root.paper-w / 2px) * root.sn + (v - root.paper-h / 2px) * (root.cs - 1) + root.shift-y / 1px) * root.ts;
-    }
+component TickShape inherits CheckPath {
     // the three points of the tick, as fractions of the box; it overshoots the box's top right
-    property <float> ax: root.u0 + 0.16 * root.s;
-    property <float> ay: root.v0 + 0.52 * root.s;
-    property <float> bx: root.u0 + 0.42 * root.s;
-    property <float> by: root.v0 + 0.84 * root.s;
-    property <float> cx: root.u0 + 1.12 * root.s;
-    property <float> cy: root.v0 - 0.18 * root.s;
-    property <float> pad: 6;
-    property <float> ox: min(min(root.px(root.ax, root.ay), root.px(root.bx, root.by)), root.px(root.cx, root.cy)) - root.pad;
-    property <float> oy: min(min(root.py(root.ax, root.ay), root.py(root.bx, root.by)), root.py(root.cx, root.cy)) - root.pad;
-    x: root.ox * 1px;
-    y: root.oy * 1px - root.lift;
-    width: (max(max(root.px(root.ax, root.ay), root.px(root.bx, root.by)), root.px(root.cx, root.cy)) - root.ox + root.pad) * 1px;
-    height: (max(max(root.py(root.ax, root.ay), root.py(root.bx, root.by)), root.py(root.cx, root.cy)) - root.oy + root.pad) * 1px;
-    viewbox-width: self.width / 1px;
-    viewbox-height: self.height / 1px;
+    property <float> ax: self.u0 + 0.16 * self.s;
+    property <float> ay: self.v0 + 0.52 * self.s;
+    property <float> bx: self.u0 + 0.42 * self.s;
+    property <float> by: self.v0 + 0.84 * self.s;
+    property <float> cx: self.u0 + 1.12 * self.s;
+    property <float> cy: self.v0 - 0.18 * self.s;
+    ox: min(min(self.px(self.ax, self.ay), self.px(self.bx, self.by)), self.px(self.cx, self.cy)) - self.pad;
+    oy: min(min(self.py(self.ax, self.ay), self.py(self.bx, self.by)), self.py(self.cx, self.cy)) - self.pad;
+    width: (max(max(self.px(self.ax, self.ay), self.px(self.bx, self.by)), self.px(self.cx, self.cy)) - self.ox + self.pad) * 1px;
+    height: (max(max(self.py(self.ax, self.ay), self.py(self.bx, self.by)), self.py(self.cx, self.cy)) - self.oy + self.pad) * 1px;
     stroke: Theme.check-tick;
     stroke-width: 2.2px;
-    stroke-line-join: round;
     stroke-line-cap: round;
-    MoveTo { x: px(root.ax, root.ay) - root.ox; y: py(root.ax, root.ay) - root.oy; }
-    LineTo { x: px(root.bx, root.by) - root.ox; y: py(root.bx, root.by) - root.oy; }
-    LineTo { x: px(root.cx, root.cy) - root.ox; y: py(root.cx, root.cy) - root.oy; }
+    MoveTo { x: root.px(root.ax, root.ay) - root.ox; y: root.py(root.ax, root.ay) - root.oy; }
+    LineTo { x: root.px(root.bx, root.by) - root.ox; y: root.py(root.bx, root.by) - root.oy; }
+    LineTo { x: root.px(root.cx, root.cy) - root.ox; y: root.py(root.cx, root.cy) - root.oy; }
+}
+
+/// The clip a box or tick is drawn in, like the words: its top is the paper's tilted top edge at
+/// the box (`cut`), so a shape scrolled partly under the top is cut there instead of showing above
+/// the paper. It reaches down to the shape's `foot`; the shape inside is lifted by `cut`.
+component CheckClip inherits Rectangle {
+    in property <length> cut;
+    in property <length> foot;
+    y: root.cut;
+    height: max(0px, root.foot - root.cut);
+    clip: true;
+    @children
 }
 
 // The note's text, in the paper's frame (fixed insets, not proportions of the size). `width` and
@@ -551,16 +543,12 @@ export component TextLayer inherits Rectangle {
         background: r.done ? Theme.ink-done : Theme.ink;
     }
 
-    // The boxes (and ticks) of the check items. Like the words, each is drawn in a clip whose top
-    // is the paper's tilted top edge at the box, so a box scrolled partly under the top is cut
-    // there (and the tick, which overshoots its box, too) instead of showing above the paper.
-    for c in root.checks: Rectangle {
-        property <length> cut: root.edge-y(box.mid-x);
-        visible: CheckDrawing.box-shown(c, root.composing-block, root.edge-y(c.x + c.size / 2));
-        y: self.cut;
+    // The boxes (and ticks) of the check items, each in its clip at the paper's top edge.
+    for c in root.checks: CheckClip {
+        visible: CheckDrawing.box-shown(c, root.edge-y(c.x + c.size / 2));
+        cut: root.edge-y(box.mid-x);
+        foot: box.foot;
         width: root.width;
-        height: max(0px, box.foot - self.cut);
-        clip: true;
         box := CheckShape {
             c: c;
             ts: root.tilt-scale;
@@ -572,13 +560,11 @@ export component TextLayer inherits Rectangle {
         }
     }
 
-    for c in root.checks: Rectangle {
-        property <length> cut: root.edge-y(tick.mid-x);
-        visible: CheckDrawing.tick-shown(c, root.composing-block, root.edge-y(c.x + c.size / 2));
-        y: self.cut;
+    for c in root.checks: CheckClip {
+        visible: CheckDrawing.tick-shown(c, root.edge-y(c.x + c.size / 2));
+        cut: root.edge-y(tick.mid-x);
+        foot: tick.foot;
         width: root.width;
-        height: max(0px, tick.foot - self.cut);
-        clip: true;
         tick := TickShape {
             c: c;
             ts: root.tilt-scale;

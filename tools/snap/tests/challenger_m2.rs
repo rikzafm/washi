@@ -89,11 +89,11 @@ fn challenge_headless_editor_operations_without_ui() {
 
     // Headless undo/redo
     assert!(editor.can_undo());
-    let undo_caret = editor.step(false).expect("undo step");
+    let undo_caret = editor.history_step(false).caret().expect("undo step");
     assert_eq!(undo_caret.block, 1);
     assert_eq!(editor.text(), initial_content);
 
-    let redo_caret = editor.step(true).expect("redo step");
+    let redo_caret = editor.history_step(true).caret().expect("redo step");
     assert_eq!(redo_caret.block, 1);
     assert_eq!(editor.text(), "# Title Heading\nUpdated body text without UI.\n- List item 1\n- List item 2");
 
@@ -104,7 +104,7 @@ fn challenge_headless_editor_operations_without_ui() {
         focus: Caret { block: 1, offset: 7 },
     };
     editor.set_range(bold_range);
-    assert!(editor.format(washi::editor::FORMAT_BOLD));
+    assert!(editor.format(washi::editor::FORMAT_BOLD).changed());
     assert!(editor.text().contains("**Updated**"));
 
     // Headless paint application (ink 2, marker 1)
@@ -172,7 +172,7 @@ fn challenge_headless_image_operations() {
     assert_eq!(editor.model.row_count(), 2);
 
     // Headless undo image deletion
-    let caret = editor.step(false);
+    let caret = editor.history_step(false).caret();
     assert!(caret.is_some());
     assert_eq!(editor.doc().len(), 3);
     editor.sync_model();

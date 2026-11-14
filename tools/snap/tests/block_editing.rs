@@ -260,3 +260,40 @@ ab");
     assert!(h.block_key(0, 0, Key::End, true, true, 1));
     assert_eq!(h.selection(0), ((0, 1), (1, 2)));
 }
+
+/// How many pixels of the check box's tick color (`Theme.check-tick`: a ticked box's outline and
+/// its tick) are drawn around the `i`th check box, in the note's window.
+fn tick_pixels_at_box(h: &Harness, i: usize) -> usize {
+    let (cx, cy) = h.check_box_center(0, i);
+    let (w, hh, px) = h.render(0);
+    assert!(px.iter().any(|p| p.r != 0 || p.g != 0 || p.b != 0), "a frame was drawn");
+    let r = 30.0;
+    let (x0, x1) = ((cx - r).max(0.0) as u32, ((cx + r) as u32).min(w));
+    let (y0, y1) = ((cy - r).max(0.0) as u32, ((cy + r) as u32).min(hh));
+    (y0..y1)
+        .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let p = px[(y * w + x) as usize];
+            [p.r as i32 - 0x1F, p.g as i32 - 0x9D, p.b as i32 - 0x55].iter().all(|d| d.abs() <= 24)
+        })
+        .count()
+}
+
+#[test]
+fn a_ticked_items_box_and_tick_stay_drawn_while_an_input_method_composes_in_it() {
+    // bug 5: while an input method composes, the field shows the item's words itself, so the note
+    // hides its own words there, but the field draws no box: the box and its tick must stay
+    let mut h = note("# t\n- [x] a ticked item\nbody");
+    h.place_caret_at(0, 1, 2);
+    h.advance(ms(5));
+    assert_eq!(h.text_focused_block(0), 1, "the item's field has the focus");
+    let before = tick_pixels_at_box(&h, 0);
+    assert!(before > 30, "the ticked box is drawn: {before} tick-colored pixels");
+    h.compose(0, "\u{304B}");
+    h.advance(ms(5));
+    let during = tick_pixels_at_box(&h, 0);
+    assert!(during * 10 >= before * 9, "the box and tick stay while composing: {during} tick-colored pixels, {before} before");
+    h.compose(0, "");
+    h.advance(ms(5));
+    assert_eq!(h.note_text(0), "# t\n- [x] a ticked item\nbody", "nothing was committed");
+}

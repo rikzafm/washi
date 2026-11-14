@@ -8,5 +8,8 @@ description = "Dev-only app harness: runs the whole Washi app on a stand-in plat
 [dependencies]
 washi = { path = "../../washi", features = ["trace"] }
 slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "renderer-software"] }
+# Slint's own event type for an input method's composition (no public API sends one); pinned to
+# the exact Slint in the tree, as its internals are not semver-stable.
+i-slint-core = { version = "=1.18.1", default-features = false }
 tempfile = "3"
 png = "0.17"

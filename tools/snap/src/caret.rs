@@ -9,7 +9,40 @@ use std::time::Duration;
 /// A box in a note's window, in screen px: left, top, right, bottom (the last two exclusive).
 pub type PxBox = (u32, u32, u32, u32);
 
+/// `n` milliseconds of the fake clock, for [`Harness::advance`].
+pub fn ms(n: u64) -> Duration {
+    Duration::from_millis(n)
+}
+
 impl Harness {
+    /// A started app whose note is `w` × `h` logical px (held to the smallest size) and holds
+    /// `text`, drawn once so its edit fields exist.
+    pub fn sized_note(w: u32, h: u32, text: &str) -> Harness {
+        let mut harness = Harness::new();
+        harness.start().unwrap();
+        harness.resize_note(0, w, h);
+        harness.set_note_text(0, text);
+        let _ = harness.render(0);
+        harness.advance(ms(5));
+        harness
+    }
+
+    /// The text's right inset from the paper's right edge, logical px: the one the app lays the
+    /// words out with (the theme's `text-inset-right`).
+    pub fn text_inset_right(&self, note: usize) -> f32 {
+        self.app().with_note(self.id(note), |n| n.editor().layout(n.ui()).tokens().inset_right as f32).unwrap()
+    }
+
+    /// An input method composes `preedit` in the focused field: its pre-edit text, shown in the
+    /// field but not yet committed to the note ("" ends the composition without committing).
+    pub fn compose(&mut self, note: usize, preedit: &str) {
+        use i_slint_core::input::{InternalKeyEvent, KeyEventType};
+        use i_slint_core::platform::InternalEvent;
+        let event = InternalKeyEvent { event_type: KeyEventType::UpdateComposition, preedit_text: preedit.into(), ..Default::default() };
+        self.app().with_note(self.id(note), |n| n.ui().window().dispatch_event(slint::platform::WindowEvent::internal(InternalEvent::Key(event))));
+        self.settle();
+    }
+
     /// Put the caret at byte `offset` of `block` (nothing selected).
     pub fn place_caret_at(&mut self, note: usize, block: usize, offset: usize) {
         let id = self.id(note);
