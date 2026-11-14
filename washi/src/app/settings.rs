@@ -165,6 +165,30 @@ impl App {
                     }
                 }
             }),
+            font_picked: Rc::new({
+                let app = app.clone();
+                move |row| {
+                    if let Some(a) = app() {
+                        a.pick_font(row);
+                    }
+                }
+            }),
+            font_removed: Rc::new({
+                let app = app.clone();
+                move |row| {
+                    if let Some(a) = app() {
+                        a.remove_font(row);
+                    }
+                }
+            }),
+            font_install: Rc::new({
+                let app = app.clone();
+                move || {
+                    if let Some(a) = app() {
+                        a.pick_font_to_install();
+                    }
+                }
+            }),
             letter_spacing_changed: Rc::new({
                 let app = app.clone();
                 move |em| {
@@ -178,6 +202,8 @@ impl App {
             Ok(view) => {
                 self.0.env.window_control.bring_to_front(0, view.hwnd());
                 *self.0.settings.borrow_mut() = Some(view);
+                // the Font row and the Font manager's list show the Font in use and the installed fonts
+                self.refresh_font_list(None);
             }
             Err(e) => eprintln!("washi: could not open Settings: {e}"),
         }

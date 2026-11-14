@@ -71,6 +71,11 @@ fn retire(old: Option<(String, String)>) {
     });
 }
 
+/// The preview family of font `id`, if it was registered.
+pub fn preview(id: &str) -> Option<String> {
+    PREVIEWS.with(|p| p.borrow().get(id).cloned())
+}
+
 /// The family a font's name is drawn in on the Font manager's list: its source file, registered
 /// once under a private name.
 pub fn preview_family(id: &str, source: &[u8]) -> String {

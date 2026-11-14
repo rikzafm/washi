@@ -150,6 +150,11 @@ impl FontStore {
         Ok(pkg)
     }
 
+    /// The bytes of an installed font's source file (for the list's preview face).
+    pub fn regular_bytes(&self, id: &str) -> Result<Vec<u8>, StoreError> {
+        Ok(std::fs::read(self.folder(id)?.join(REGULAR))?)
+    }
+
     /// Delete a font's folder (a missing folder is not an error).
     pub fn remove(&self, id: &str) -> Result<(), StoreError> {
         let folder = self.folder(id)?;
