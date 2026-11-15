@@ -52,9 +52,10 @@ impl Kind {
         matches!(self, Kind::ListItem | Kind::Numbered)
     }
 
-    /// Whether this is a bulleted, numbered or check item: the kinds a list is made of.
+    /// Whether this is a bulleted or numbered item: the kinds Tab can move. Check items are not
+    /// part of it, they never move.
     pub fn is_item(self) -> bool {
-        self.is_list() || self.is_check()
+        self.is_list()
     }
 }
 
@@ -569,7 +570,7 @@ impl Document {
         if offset != 0 || block == 0 || !self.blocks.get(block)?.is_text() {
             return None;
         }
-        if self.blocks[block].kind.is_item() {
+        if self.blocks[block].kind.is_item() || self.blocks[block].kind.is_check() {
             // an item in a list that is moved in first moves the list back, then loses its marker
             if !self.set_indent_range(Range { anchor: Caret { block, offset: 0 }, focus: Caret { block, offset: 0 } }, false) {
                 self.blocks[block].kind = Kind::Body;
@@ -857,14 +858,16 @@ impl Document {
         indents_of(&self.blocks)
     }
 
-    /// The first and last block of the unbroken run of list and check items `block` is in; `None`
-    /// when it is none.
+    /// The first and last block of the unbroken run of items of one kind (all bulleted, or all
+    /// numbered) `block` is in; `None` when it is neither. A neighbouring list of the other kind, or
+    /// a check item, is not part of the run.
     pub fn list_run(&self, block: usize) -> Option<(usize, usize)> {
-        if !self.blocks.get(block)?.kind.is_item() {
+        let kind = self.blocks.get(block)?.kind;
+        if !kind.is_item() {
             return None;
         }
-        let first = (0..block).rev().take_while(|&i| self.blocks[i].kind.is_item()).last().unwrap_or(block);
-        let last = (block + 1..self.blocks.len()).take_while(|&i| self.blocks[i].kind.is_item()).last().unwrap_or(block);
+        let first = (0..block).rev().take_while(|&i| self.blocks[i].kind == kind).last().unwrap_or(block);
+        let last = (block + 1..self.blocks.len()).take_while(|&i| self.blocks[i].kind == kind).last().unwrap_or(block);
         Some((first, last))
     }
 
@@ -904,8 +907,9 @@ impl Document {
                 self.blocks[i].indented = false;
                 continue;
             }
-            let up = (0..i).rev().take_while(|&j| self.blocks[j].kind.is_item()).find(|&j| was.get(j) == Some(&true));
-            let down = (i + 1..self.blocks.len()).take_while(|&j| self.blocks[j].kind.is_item()).find(|&j| was.get(j) == Some(&true));
+            let kind = self.blocks[i].kind;
+            let up = (0..i).rev().take_while(|&j| self.blocks[j].kind == kind).find(|&j| was.get(j) == Some(&true));
+            let down = (i + 1..self.blocks.len()).take_while(|&j| self.blocks[j].kind == kind).find(|&j| was.get(j) == Some(&true));
             let src = if was[i] { Some(i) } else { up.or(down) };
             self.blocks[i].indented = src.is_some_and(|j| before[j]);
         }
@@ -1216,8 +1220,9 @@ fn following(prev: &Block, text: String, marks: Vec<Style>, paints: Vec<Paint>) 
     Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left, indented: kind.is_item() && prev.indented }
 }
 
-/// Whether each block is in a list that is moved in: every list and check item of an unbroken run
-/// of them takes the flag of the run's first item; any other block is `false`.
+/// Whether each block is in a list that is moved in: every item of an unbroken run of one kind
+/// (bulleted, or numbered) takes the flag of the run's first item; any other block, a check item
+/// included, is `false`.
 pub(crate) fn indents_of(blocks: &[Block]) -> Vec<bool> {
     let mut run = false;
     blocks
@@ -1227,7 +1232,7 @@ pub(crate) fn indents_of(blocks: &[Block]) -> Vec<bool> {
             if !b.kind.is_item() {
                 return false;
             }
-            if i == 0 || !blocks[i - 1].kind.is_item() {
+            if i == 0 || blocks[i - 1].kind != b.kind {
                 run = b.indented;
             }
             run

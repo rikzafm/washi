@@ -94,11 +94,18 @@ fn indents(blocks: &[Block], t: &Tokens, font: &Rc<ActiveFont>) -> Vec<f64> {
     let mut out = vec![0.0; blocks.len()];
     let mut i = 0;
     while i < blocks.len() {
-        if !blocks[i].kind.is_item() {
+        let kind = blocks[i].kind;
+        if kind.is_check() {
+            // a check item keeps its box at the text edge and its text a box further in
+            out[i] = t.check_indent;
             i += 1;
             continue;
         }
-        let end = (i..blocks.len()).find(|&j| !blocks[j].kind.is_item()).unwrap_or(blocks.len());
+        if !kind.is_item() {
+            i += 1;
+            continue;
+        }
+        let end = (i..blocks.len()).find(|&j| blocks[j].kind != kind).unwrap_or(blocks.len());
         let widest = numbers[i..end].iter().copied().max().unwrap_or(0);
         let need = if widest > 0 { t.measure(font, t.style(Kind::Numbered).size).width(&format!("{widest}.")) + NUMBER_GAP + NUMBER_EDGE - t.inset_left } else { 0.0 };
         let at = if moved[i] { t.check_indent } else { 0.0 }.max(need);
@@ -940,10 +947,10 @@ mod tests {
         let l = lay(&[t, plain, open], PAPER, &TOKENS);
         let first = |bi: usize| l.runs().iter().find(|r| r.block == bi).unwrap().x;
         assert!((first(1) - TOKENS.inset_left).abs() < 1e-9);
-        assert!((first(2) - TOKENS.inset_left).abs() < 1e-9, "the text is in line with body text, the box is in the margin");
+        assert!((first(2) - (TOKENS.inset_left + LIST_INDENT)).abs() < 1e-9, "the text is a box further in than body text");
         let c = &l.checks()[0];
         assert_eq!((c.block, c.checked), (2, false));
-        assert!((c.x - (TOKENS.inset_left - LIST_INDENT)).abs() < 1e-9 && c.x + c.size <= first(2));
+        assert!((c.x - TOKENS.inset_left).abs() < 1e-9 && c.x + c.size <= first(2));
         // a press on the box is a hit, one on the text or on a plain paragraph is not
         let (cx, cy) = (c.x + c.size / 2.0, c.y + c.size / 2.0);
         assert_eq!(l.check_at((cx, cy)), Some(2));
@@ -1546,9 +1553,10 @@ mod numbered {
         let t = &super::tests::TOKENS;
         let blocks = [Block::new(Kind::Title, "t"), Block::new(Kind::Body, "x"), Block::new(Kind::ListItem, "a"), Block::new(Kind::Numbered, "b"), Block::new(Kind::Check, "c")];
         let l = Layout::build(&blocks, (363.0, 433.0), t, &|_| None);
-        for bi in 1..5 {
+        for bi in 1..4 {
             assert!((first_x(&l, bi) - t.inset_left).abs() < 1e-9, "block {bi}");
         }
+        assert!((first_x(&l, 4) - (t.inset_left + LIST_INDENT)).abs() < 1e-9, "a check item keeps its box at the edge and its text further in");
         let number = l.runs().iter().find(|r| r.text == "1.").unwrap();
         assert!(number.x >= 0.0 && number.x + number.width <= t.inset_left - NUMBER_GAP + 1e-9);
         assert!(l.checks()[0].x >= 0.0);
@@ -1560,9 +1568,9 @@ mod numbered {
         let mut blocks = [Block::new(Kind::Title, "t"), Block::new(Kind::ListItem, "a"), Block::new(Kind::Numbered, "b"), Block::new(Kind::Check, "c"), Block::new(Kind::Body, "x"), Block::new(Kind::ListItem, "d")];
         blocks[1].indented = true;
         let l = Layout::build(&blocks, (363.0, 433.0), t, &|_| None);
-        for bi in 1..4 {
-            assert!((first_x(&l, bi) - (t.inset_left + LIST_INDENT)).abs() < 1e-9, "block {bi}");
-        }
+        assert!((first_x(&l, 1) - (t.inset_left + LIST_INDENT)).abs() < 1e-9);
+        assert!((first_x(&l, 2) - t.inset_left).abs() < 1e-9, "a numbered list next to it stays where it was");
+        assert!((first_x(&l, 3) - (t.inset_left + LIST_INDENT)).abs() < 1e-9, "a check item is not moved by Tab");
         assert!((first_x(&l, 4) - t.inset_left).abs() < 1e-9);
         assert!((first_x(&l, 5) - t.inset_left).abs() < 1e-9, "the next list is its own");
     }

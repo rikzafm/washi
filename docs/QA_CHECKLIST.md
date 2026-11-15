@@ -51,7 +51,7 @@ Tip: use a throwaway profile so your own notes stay untouched:
 
 ## Lists (list-indent spec)
 
-- [ ] Bulleted, numbered and check items all have their text in line with body text, their bullet, number or box hanging in the left margin. Tab in any item moves the whole list (every item touching it, of any kind) one step right, Shift+Tab moves it back, Backspace at the very front of an item in a moved-in list moves it back before it drops the marker. Look at the paper edge: the check box and the numbers should not feel cramped on the tilted paper.
+- [ ] Bulleted and numbered items have their text in line with body text, their bullet or number hanging in the left margin. Tab in an item moves the whole list of that kind (the unbroken run of bullets, or of numbers) one step right, Shift+Tab moves it back, Backspace at the very front of an item in a moved-in list moves it back before it drops the marker. A bulleted list touching a numbered list or a check item never moves them. Check items keep their box at the edge with the text a box further in, and Tab / Shift+Tab does nothing on them. Look at the paper edge: the numbers should not feel cramped on the tilted paper.
 - [ ] A numbered list with 100 items: its text shifts right just enough that "99." stays clear of the paper edge, and every item stays lined up. Lists up to 9 items do not shift.
 - [ ] Tab in a plain paragraph, a heading or the title types nothing and moves nothing. A list that is already there does not react to a second Tab.
 

@@ -105,7 +105,7 @@ impl Editor {
 
     /// Tab or Shift+Tab pressed in block `block`: every list the selection (or the caret's paragraph)
     /// touches moves in or back out, whole (one undo step). `None` when the key is no Tab or none of
-    /// those paragraphs is a list or check item, so the key is not ours; `Unchanged` when the lists
+    /// those paragraphs is a bulleted or numbered item, so the key is not ours; `Unchanged` when the lists
     /// are already there (the key is still taken, it types no tab).
     pub fn indent_key(&self, key: &str, shift: bool, block: usize) -> Option<Formatted> {
         use slint::platform::Key;

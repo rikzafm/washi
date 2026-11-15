@@ -1,5 +1,5 @@
 //! Lists that are moved in (.scratch/list-indent): Tab moves the whole list the caret is in one step
-//! in, Shift+Tab (or Backspace at the very front of an item) moves it back, whatever its kinds. Real
+//! in, Shift+Tab (or Backspace at the very front of an item) moves it back, of its own kind only (never a neighbouring list of the other kind, never a Check item). Real
 //! keys through the app harness, checked against the stored note text.
 
 use slint::platform::Key;
@@ -21,13 +21,13 @@ fn note(text: &str) -> Harness {
 }
 
 #[test]
-fn tab_moves_the_whole_list_in_and_shift_tab_moves_it_back() {
+fn tab_moves_the_whole_list_of_its_kind_in_and_shift_tab_moves_it_back() {
     let mut h = note("t\n- a\n1. b\n- [ ] c\nplain\n- d");
     h.place_caret(0, 2);
     h.press(0, Key::Tab);
-    assert_eq!(h.note_text(0), "# t\n    - a\n    1. b\n    - [ ] c\nplain\n- d");
+    assert_eq!(h.note_text(0), "# t\n- a\n    1. b\n- [ ] c\nplain\n- d");
     h.press(0, Key::Tab);
-    assert_eq!(h.note_text(0), "# t\n    - a\n    1. b\n    - [ ] c\nplain\n- d", "a second Tab does nothing");
+    assert_eq!(h.note_text(0), "# t\n- a\n    1. b\n- [ ] c\nplain\n- d", "a second Tab does nothing");
     h.press_shift(0, Key::Tab, 1);
     assert_eq!(h.note_text(0), "# t\n- a\n1. b\n- [ ] c\nplain\n- d");
     h.press_shift(0, Key::Tab, 1);
@@ -70,4 +70,16 @@ fn a_tab_is_one_undo_step_and_survives_a_restart() {
     assert_eq!(h.note_text(0), "# t\n    - a\n    - b");
     h.restart().unwrap();
     assert_eq!(h.note_text(0), "# t\n    - a\n    - b");
+}
+
+#[test]
+fn tab_in_a_check_item_changes_nothing() {
+    let mut h = note("t
+- [ ] a
+- b");
+    h.place_caret(0, 1);
+    h.press(0, Key::Tab);
+    assert_eq!(h.note_text(0), "# t
+- [ ] a
+- b");
 }

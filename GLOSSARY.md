@@ -29,7 +29,7 @@ A paragraph of a Note with its number in front (`1.`, `2.` ...). The number is n
 _Avoid_: Ordered list item, step
 
 **List**:
-An unbroken run of list items, numbered items and check items, in any mix. A list has one of two positions and always moves as a whole: Left, where its markers hang in the margin and its text is in line with body text, or Indented, one step further right. Tab moves it Indented, Shift+Tab (or Backspace at the very front of one of its items) moves it back. A numbered list whose widest number does not fit the margin keeps its text right of it. Stored with four spaces before each item's marker when Indented.
+An unbroken run of bulleted items, or of numbered items (the two kinds are separate lists even when they touch; a check item is never part of one). A list has one of two positions and always moves as a whole: Left, where its markers hang in the margin and its text is in line with body text, or Indented, one step further right. Tab moves it Indented, Shift+Tab (or Backspace at the very front of one of its items) moves it back. A numbered list whose widest number does not fit the margin keeps its text right of it. Stored with four spaces before each item's marker when Indented. Check items sit outside this: box at the text edge, text a box further in, no Tab.
 _Avoid_: Nested list, sub-list (a list has no levels)
 
 **Flyout**:

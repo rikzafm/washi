@@ -1148,10 +1148,11 @@ fn tab_moves_the_whole_list_the_caret_is_in_and_no_other() {
         (Kind::ListItem, "d"),
     ]);
     assert!(d.set_indent_range(caret_range(2), true));
-    assert_eq!(moved(&d), [false, true, true, true, false, false]);
+    assert_eq!(moved(&d), [false, false, true, false, false, false], "neither the bullet list above nor the check item below move");
     assert!(!d.set_indent_range(caret_range(2), true), "already there");
+    assert!(!d.set_indent_range(caret_range(3), true), "a check item never moves");
     assert!(!d.set_indent_range(caret_range(4), true), "a body paragraph is no list");
-    assert!(d.set_indent_range(caret_range(3), false));
+    assert!(d.set_indent_range(caret_range(2), false));
     assert_eq!(moved(&d), [false; 6]);
 }
 
@@ -1185,7 +1186,7 @@ fn enter_in_a_moved_in_list_continues_it_there_and_a_new_item_joins_the_list_nex
     assert!(d.set_list_range(caret_range(2), Kind::ListItem));
     assert_eq!(moved(&d), [false, true, true, false, false], "joined the list above, which stays where it was");
     assert!(d.set_list_range(caret_range(3), Kind::Numbered));
-    assert_eq!(moved(&d), [false, true, true, true, true], "the list below it joins the list above, and follows its position");
+    assert_eq!(moved(&d), [false, true, true, false, false], "a numbered item is no part of the bulleted list above or below it");
 }
 
 #[test]
@@ -1219,7 +1220,7 @@ fn a_moved_in_list_round_trips_through_the_stored_text_in_every_kind() {
     d.set_indent_range(caret_range(1), true);
     d.set_indent_range(caret_range(5), true);
     let text = d.to_text();
-    assert_eq!(text, "# t\n    - a\n    1. b\n    - [ ] c\nx\n    1. d");
+    assert_eq!(text, "# t\n    - a\n1. b\n- [ ] c\nx\n    1. d");
     assert_eq!(Document::parse(&text), d);
 }
 
