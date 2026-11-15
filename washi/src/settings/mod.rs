@@ -18,6 +18,7 @@
 
 pub mod anim;
 pub mod appearance;
+pub mod font_drop;
 pub mod fonts;
 pub mod shortcuts;
 pub mod general;
@@ -548,6 +549,7 @@ impl SettingsView {
         let (from_right, to_right) = (self.right.get(), if open { MANAGER_STRIP } else { 0.0 });
         self.manager_open.set(open);
         self.ui.set_manager_open(open);
+        self.ui.set_manager_install_hover(false);
         self.tab_from.set(from);
         self.tab_to.set(target);
         self.reserve(window_bounds(from, SIDEBAR_STRIP, from_right), window_bounds(target, SIDEBAR_STRIP, from_right.max(to_right)));
@@ -565,6 +567,7 @@ impl SettingsView {
         let paper = if resting { self.actual_paper() } else { self.paper.get() };
         self.manager_open.set(false);
         self.ui.set_manager_open(false);
+        self.ui.set_manager_install_hover(false);
         self.apply(Pose { paper, strip: SIDEBAR_STRIP, right: 0.0, content: 1.0 });
         if matches!(*self.phase.borrow(), Phase::Manager { .. }) {
             *self.phase.borrow_mut() = Phase::Open;

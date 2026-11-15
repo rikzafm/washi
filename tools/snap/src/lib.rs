@@ -5,6 +5,7 @@
 
 pub mod caret;
 pub mod fakes;
+mod font_drop;
 mod font_install;
 mod font_manager;
 mod harness;
