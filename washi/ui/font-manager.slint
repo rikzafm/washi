@@ -97,7 +97,7 @@ component AxisLine inherits Rectangle {
         width: 70px;
         height: 28px;
         text: root.data.label;
-        font-size: 17px;
+        font-size: 17px * Theme.ui-fit;
         vertical-alignment: center;
     }
 
@@ -108,7 +108,7 @@ component AxisLine inherits Rectangle {
         width: 200px;
         height: 28px;
         text: "Not in this font";
-        font-size: 16px;
+        font-size: 16px * Theme.ui-fit;
         color: #8B919A;
         vertical-alignment: center;
     }
@@ -147,7 +147,7 @@ component AxisLine inherits Rectangle {
         width: 22px;
         height: 28px;
         text: root.data.unit;
-        font-size: 15px;
+        font-size: 15px * Theme.ui-fit;
         color: #5B616B;
         vertical-alignment: center;
     }

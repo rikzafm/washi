@@ -180,6 +180,36 @@ fn no_ui_file_hard_codes_the_default_font_family() {
 }
 
 #[test]
+fn every_ui_font_size_is_multiplied_by_the_ui_fit() {
+    // Not UI text: note text, the toolbar glyph buttons, a Font's own-face row name, the Style preview of a note.
+    // The color picker draws in its own fixed face (Gelasio), not the Font in use, so the fit has nothing to correct.
+    let exempt_files = ["text.slint", "block.slint", "toolbar.slint", "color-picker.slint"];
+    let exempt_lines = [
+        ("font-manager.slint", "font-size: 22px;"),
+        ("style-tab.slint", "font-size: 24px;"),
+        ("style-tab.slint", "font-size: root.preview-font-size;"),
+    ];
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../washi/ui");
+    let mut missing = Vec::new();
+    for e in std::fs::read_dir(&dir).unwrap() {
+        let p = e.unwrap().path();
+        let name = p.file_name().unwrap().to_string_lossy().to_string();
+        if p.extension().and_then(|x| x.to_str()) != Some("slint") || exempt_files.contains(&name.as_str()) {
+            continue;
+        }
+        for (i, line) in std::fs::read_to_string(&p).unwrap().lines().enumerate() {
+            let t = line.trim();
+            // a declaration, not a property or callback named *-font-size
+            let decl = !t.starts_with("//") && (t.starts_with("font-size:") || t.contains(" font-size:"));
+            if decl && !t.contains("ui-fit") && !exempt_lines.iter().any(|(f, l)| *f == name && t == *l) {
+                missing.push(format!("{name}:{}: {t}", i + 1));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "UI font sizes without the ui-fit factor: {missing:#?}");
+}
+
+#[test]
 fn the_toolbar_glyph_buttons_keep_their_own_fonts() {
     let src = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../washi/ui/toolbar.slint")).unwrap();
     assert!(src.contains("font-family: \"Gelasio\"") && src.contains("font-family: \"Noto Serif\""));
