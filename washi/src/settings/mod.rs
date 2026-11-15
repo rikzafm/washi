@@ -547,7 +547,11 @@ impl SettingsView {
         let resting = match *self.phase.borrow() {
             Phase::Open => true,
             Phase::Manager { .. } => false,
-            _ => return,
+            _ => {
+                // Esc must never be swallowed by a phase that cannot run the slip's tween
+                self.shut_manager_now();
+                return;
+            }
         };
         let open = !self.manager_open.get();
         let now = self.anim_now();

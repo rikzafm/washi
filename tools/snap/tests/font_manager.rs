@@ -123,6 +123,58 @@ fn esc_closes_the_slip_before_it_closes_settings() {
 }
 
 #[test]
+fn esc_during_a_tab_switch_still_closes_settings() {
+    let mut h = started();
+    open_style_tab(&mut h);
+    h.settings_click_tab(tab::GENERAL);
+    h.advance_frames(ms(40));
+    h.settings_press_escape();
+    h.advance_frames(ms(600));
+    assert!(!h.is_settings_open(), "Esc mid tab switch closes Settings");
+}
+
+#[test]
+fn esc_while_the_slip_is_still_opening_closes_the_slip_first() {
+    let mut h = started();
+    open_style_tab(&mut h);
+    h.settings_style_click(MANAGE_BUTTON);
+    h.advance_frames(ms(40));
+    h.settings_press_escape();
+    h.advance_frames(ms(600));
+    assert!(h.is_settings_open());
+    assert!(!h.settings_manager_open());
+    h.settings_press_escape();
+    h.advance_frames(ms(600));
+    assert!(!h.is_settings_open());
+}
+
+#[test]
+fn esc_mid_tab_switch_after_the_slip_was_open_closes_settings() {
+    let mut h = started();
+    open_style_tab(&mut h);
+    open_manager(&mut h);
+    h.settings_click_tab(tab::GENERAL);
+    h.advance_frames(ms(40));
+    h.settings_press_escape();
+    h.advance_frames(ms(600));
+    assert!(!h.is_settings_open());
+}
+
+#[test]
+fn esc_after_a_manage_click_that_landed_mid_tab_switch_closes_settings() {
+    let mut h = started();
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_settings();
+    h.advance_frames(ms(600));
+    h.settings_click_tab(tab::STYLE);
+    h.advance_frames(ms(40));
+    h.settings_style_click(MANAGE_BUTTON);
+    h.settings_press_escape();
+    h.advance_frames(ms(600));
+    assert!(!h.is_settings_open(), "the slip never opened, so Esc closes Settings");
+}
+
+#[test]
 fn switching_tab_closes_the_slip() {
     let mut h = started();
     open_style_tab(&mut h);
