@@ -128,5 +128,6 @@ Known gaps from the implementers (the headless harness could not cover these; do
 
 - [ ] Product owner signs off the side-by-side review (`target/fidelity/index.html`, `flicker.gif`) at 100% and 400% for idle, hover and a large note (ticket 20, step 69).
 - [ ] Live capture at 150% display scale passes every region (`pwsh tools/capture.ps1`). It was only run at the scale of the build machine so far: see `docs/PERF.md`.
-- [ ] A clean Windows 11 VM runs the single `washi.exe` with nothing installed. (No installer or code-signing certificate exists yet: step 71 is open.)
+- [ ] A clean Windows 11 VM runs the single `washi.exe` with nothing installed. (No code-signing certificate exists yet: step 71 is open.)
+- [ ] On that VM, `WashiNote-<version>-setup.exe` (`pwsh tools/build-installer.ps1`) installs with no administrator prompt, the Start menu shortcut starts Washi, installing again over a running Washi asks to close it, and uninstalling from Windows Settings > Apps removes the app but keeps the notes in `%APPDATA%\Washi`. (Only a silent install and uninstall were run by a script.)
 - [ ] Compare memory with Windows Sticky Notes on the same machine, 3 notes (`pwsh tools/memprobe.ps1 -StickyNotes`).

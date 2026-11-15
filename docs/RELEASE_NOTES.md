@@ -1,6 +1,12 @@
 # Washi 0.1.0 release notes
 
-Lightweight encrypted sticky notes for Windows. One exe, no installer needed.
+Lightweight encrypted sticky notes for Windows. One exe: run it as it is, or install it with `WashiNote-0.1.0-setup.exe`.
+
+## Installing
+
+- The installer (built by `pwsh tools/build-installer.ps1`, script in `installer/washi.iss`) installs for the current user without an administrator prompt, to `%LOCALAPPDATA%\Programs\Washi`, and adds a Start menu shortcut (a desktop shortcut is optional).
+- Uninstall from Windows Settings > Apps or from Washi's Settings > General. It removes the app, its shortcuts and its "Start with Windows" entry. Notes, settings and installed fonts in `%APPDATA%\Washi` are kept.
+- The installer is not code-signed, so Windows SmartScreen warns on first run.
 
 ## Performance (release build, 100% display scale; details in docs/PERF.md)
 
@@ -61,4 +67,4 @@ Limits:
 
 ## Not verified here
 
-Manual QA, product-owner sign-off, clean-VM run and installer: see `docs/QA_CHECKLIST.md` (all unchecked).
+Manual QA, product-owner sign-off, clean-VM run and the installer's wizard pages (only silent install and uninstall were run): see `docs/QA_CHECKLIST.md` (all unchecked).
