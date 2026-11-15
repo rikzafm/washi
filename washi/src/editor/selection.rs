@@ -29,6 +29,13 @@ impl Editor {
         self.relayout(ui);
     }
 
+    /// The active font changed (`fonts::set_current`, already done): put its families and numbers on
+    /// the window's `Theme` and lay the note out again, in the words and in the edit fields alike.
+    pub fn set_font(&self, ui: &NoteWindow) {
+        crate::fonts::current().apply(&ui.global::<Theme>());
+        self.relayout(ui);
+    }
+
     /// The selection the note washes itself: one across blocks always, and with tilted editing one
     /// inside a block too (the field's level wash is off then).
     fn washed(&self) -> Option<Range> {

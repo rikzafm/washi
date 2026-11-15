@@ -157,6 +157,54 @@ impl App {
                     }
                 }
             }),
+            font_size_changed: Rc::new({
+                let app = app.clone();
+                move |size| {
+                    if let Some(a) = app() {
+                        a.set_font_size(size);
+                    }
+                }
+            }),
+            font_picked: Rc::new({
+                let app = app.clone();
+                move |row| {
+                    if let Some(a) = app() {
+                        a.pick_font(row);
+                    }
+                }
+            }),
+            font_removed: Rc::new({
+                let app = app.clone();
+                move |row| {
+                    if let Some(a) = app() {
+                        a.remove_font(row);
+                    }
+                }
+            }),
+            font_install: Rc::new({
+                let app = app.clone();
+                move || {
+                    if let Some(a) = app() {
+                        a.pick_font_to_install();
+                    }
+                }
+            }),
+            font_axis_moved: Rc::new({
+                let app = app.clone();
+                move |axis, v| {
+                    if let Some(a) = app() {
+                        a.axis_moved(axis, v);
+                    }
+                }
+            }),
+            font_axis_committed: Rc::new({
+                let app = app.clone();
+                move |axis, v| {
+                    if let Some(a) = app() {
+                        a.axis_committed(axis, v);
+                    }
+                }
+            }),
             letter_spacing_changed: Rc::new({
                 let app = app.clone();
                 move |em| {
@@ -169,7 +217,10 @@ impl App {
         match SettingsView::open(host, geometry, pinned, hooks) {
             Ok(view) => {
                 self.0.env.window_control.bring_to_front(0, view.hwnd());
+                self.watch_settings_drops(view.ui().window());
                 *self.0.settings.borrow_mut() = Some(view);
+                // the Font row and the Font manager's list show the Font in use and the installed fonts
+                self.refresh_font_list(None);
             }
             Err(e) => eprintln!("washi: could not open Settings: {e}"),
         }
@@ -226,6 +277,54 @@ impl App {
         }
         if let Some(v) = self.all_notes() {
             v.set_letter_spacing(em);
+        }
+    }
+
+    /// Make `font` the active font (`fonts::set_current`) and rebuild every window with it: each
+    /// note's and All Notes' `Layout` is built again and its words are shaped again (like a change of
+    /// Letter spacing), and the other windows' `Theme` families are set. Dropdown and delete dialog
+    /// read the active font when they are created.
+    pub fn set_active_font(&self, font: crate::fonts::ActiveFont) {
+        crate::fonts::set_current(font);
+        self.refresh_text();
+    }
+
+    /// Make `size` (12..=40, already saved) the Font size and lay every window's note text out at it:
+    /// titles, headings, line pitches, gaps, check boxes and list indents scale by `size / 22`. A
+    /// note whose text got shorter keeps its scroll within the new height (`max-scroll` in note.slint).
+    pub fn set_font_size(&self, size: u32) {
+        if size == crate::fonts::size() {
+            return;
+        }
+        crate::fonts::set_size(size);
+        self.refresh_text();
+    }
+
+    /// Put the active font and Font size on every open window and lay the notes out again.
+    fn refresh_text(&self) {
+        let font = crate::fonts::current();
+        let notes: Vec<Rc<Note>> = self.0.notes.borrow().clone();
+        for n in &notes {
+            n.set_font();
+        }
+        if let Some(v) = self.all_notes() {
+            v.set_font();
+        }
+        if let Some(s) = self.settings() {
+            font.apply(&s.ui().global::<crate::note_window::Theme>());
+        }
+        for v in self.0.viewers.borrow().iter() {
+            font.apply(&v.ui().global::<crate::note_window::Theme>());
+        }
+        // popups that are open while the font changes (the Settings page is the usual way to get here)
+        if let Some(d) = self.dropdown() {
+            font.apply(&d.ui().global::<crate::note_window::Theme>());
+        }
+        if let Some(m) = self.context_menu() {
+            font.apply(&m.ui().global::<crate::note_window::Theme>());
+        }
+        if let Some(d) = self.delete_dialog() {
+            font.apply(&d.ui().global::<crate::note_window::Theme>());
         }
     }
 

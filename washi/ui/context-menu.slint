@@ -6,6 +6,7 @@
 // are the board's, in logical px: card padding 24 / 14, 44px buttons and rows, 42px list options,
 // dotted 2px rules.
 
+import { Theme } from "theme.slint";
 import "../../fonts/ShadowsIntoLight.ttf";
 import { TapePalette, TapeShape, StripedShape } from "settings-widgets.slint";
 
@@ -58,8 +59,8 @@ component ToolButton inherits Rectangle {
 
         if root.label != "" : Text {
             text: root.label;
-            font-family: "Shadows Into Light";
-            font-size: 19px;
+            font-family: Theme.handwriting;
+            font-size: 19px * Theme.ui-fit;
             color: root.active ? #FFFFFD : #2B2F36;
             vertical-alignment: center;
         }
@@ -117,8 +118,8 @@ component MenuRow inherits Rectangle {
         Text {
             horizontal-stretch: 1;
             text: root.text;
-            font-family: "Shadows Into Light";
-            font-size: 20px;
+            font-family: Theme.handwriting;
+            font-size: 20px * Theme.ui-fit;
             color: #2B2F36;
             vertical-alignment: center;
             overflow: elide;
@@ -200,16 +201,16 @@ component Option inherits Rectangle {
         Text {
             horizontal-stretch: 1;
             text: root.text;
-            font-family: "Shadows Into Light";
-            font-size: 20px;
+            font-family: Theme.handwriting;
+            font-size: 20px * Theme.ui-fit;
             color: #2B2F36;
             vertical-alignment: center;
             overflow: elide;
         }
         if root.hint != "" : Text {
             text: root.hint;
-            font-family: "Shadows Into Light";
-            font-size: 16px;
+            font-family: Theme.handwriting;
+            font-size: 16px * Theme.ui-fit;
             color: #5B616B;
             vertical-alignment: center;
         }
@@ -447,8 +448,8 @@ export component ContextMenuWindow inherits Window {
                     width: parent.width - 24px - 24px;
                     height: root.closed-list-h;
                     text: "No recently closed notes";
-                    font-family: "Shadows Into Light";
-                    font-size: 19px;
+                    font-family: Theme.handwriting;
+                    font-size: 19px * Theme.ui-fit;
                     color: #5B616B;
                     vertical-alignment: center;
                 }

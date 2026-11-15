@@ -1,0 +1,31 @@
+export component Probe inherits Window {
+    in property <string> fam: "";
+    in property <int> wt: 400;
+    in property <bool> ital: false;
+    in property <string> sample: "Hamburgefonstiv 123";
+    width: 760px;
+    height: 200px;
+    background: white;
+    Text {
+        x: 10px;
+        y: 10px;
+        text: root.sample;
+        font-family: root.fam;
+        font-size: 40px;
+        font-weight: root.wt;
+        font-italic: root.ital;
+        color: black;
+        wrap: no-wrap;
+    }
+    TextInput {
+        x: 10px;
+        y: 100px;
+        width: 740px;
+        text: root.sample;
+        font-family: root.fam;
+        font-size: 40px;
+        font-weight: root.wt;
+        font-italic: root.ital;
+        color: black;
+    }
+}

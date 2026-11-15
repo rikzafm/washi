@@ -2,6 +2,7 @@
 // Like All notes, the content is laid out in the Paper's tilted frame (`PaperFrame`) so glyphs stay
 // upright on the tilted baseline. The numbers follow the mockup ("Setting Page" artboard) 1:1.
 
+import { Theme } from "theme.slint";
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PaperTheme } from "paper-theme.slint";
@@ -12,6 +13,7 @@ import { GeneralTab } from "settings-general.slint";
 import { StyleTab } from "style-tab.slint";
 import { AppearanceTab } from "appearance-tab.slint";
 import { ScrollBar } from "scroll.slint";
+import { FontManager, FontListRow, ManagerMetrics } from "font-manager.slint";
 import { PX, PaperFrame, TapeShape, TapePalette, PText, PRect, PShadow, VTape } from "settings-widgets.slint";
 export { TapeShape }
 
@@ -85,7 +87,7 @@ component SidebarTab inherits Rectangle {
         width: SidebarPanel.label-w * 1px;
         height: 48px;
         text: root.text;
-        font-size: 24px;
+        font-size: 24px * Theme.ui-fit;
         font-weight: root.selected ? 700 : 400;
         vertical-alignment: center;
         halo: root.halo;
@@ -168,7 +170,7 @@ component SettingsSidebar inherits Rectangle {
         width: 240px;
         height: 71px;
         text: "Settings";
-        font-size: 44px;
+        font-size: 44px * Theme.ui-fit;
         vertical-alignment: center;
         halo: SidebarThemes.halo-for(root.theme);
     }
@@ -330,10 +332,55 @@ export component SettingsWindow inherits Window {
     callback set-settings-height(int);
     out property <string> settings-height-label: appearance.page-height-label;
     out property <string> settings-height-hint: appearance.page-height-hint;
-    // Font & Style choices: UI only. They live here, so they reset whenever Settings opens, and
-    // nothing reads them (see style-tab.slint).
-    in-out property <int> style-font <=> style.font;
+    // Font & Style: the Tape color is UI only. It lives here, so it resets whenever Settings opens,
+    // and nothing reads it (see style-tab.slint).
+    /// The Font in use as the Font row shows it: its name (drawn in its own face) and a summary.
+    in property <string> font-name: "Shadows Into Light";
+    in property <string> font-summary: "One style";
+    /// The manage button of the Font row (what it is called, and whether it is filled), for tests.
+    out property <string> manage-button-label: style.manage-label;
+    out property <bool> manage-button-filled: style.manage-filled;
+    /// The manage button or Esc was pressed: Rust opens the Font manager if it is closed, else closes it.
+    callback manage-clicked();
+    /// The Font manager is open (Rust owns it), and how far (0 to 1: its tween on the Settings clock).
+    in property <bool> manager-open: false;
+    in property <float> manager-progress: 0;
+    /// How much of the Font manager's strip is out on the Paper's right (0 to `ManagerMetrics.strip`):
+    /// the window grows right by this much.
+    in property <length> manager-strip: 0px;
+    /// The list of Fonts the slip shows, and what its rows and install area do (Rust owns them).
+    in property <[FontListRow]> manager-fonts;
+    callback manager-row-clicked(int);
+    callback manager-remove-clicked(int);
+    callback manager-install-clicked();
+    /// A file is held over the window while the Font manager is open (the install area lights up), and\r
+    /// the area's text.
+    in property <bool> manager-install-hover: false;
+    out property <string> manager-install-hint: manager.install-hint;
+    /// An Axis slider of the Font in use moved (axis 0 Weight, 1 Width, 2 Slant; dragging), or was let
+    /// go at a value / had a number typed in its box.
+    callback manager-axis-moved(int, int);
+    callback manager-axis-committed(int, int);
+    /// The slip's list: how far it is scrolled, whether it is being scrolled (shows its bar), and
+    /// the bar's hide timer (Rust hides the bar again a moment after the last scroll).
+    in-out property <length> manager-scroll <=> manager.scroll;
+    in-out property <bool> manager-scrolling <=> manager.scrolling;
+    callback manager-scroll-activity();
+    out property <length> manager-max-scroll: manager.max-scroll;
+    out property <length> manager-height: manager.slip-h;
+    out property <string> manager-heading: manager.heading;
+    out property <string> manager-install-heading: manager.install-heading;
+    out property <float> manager-bar-opacity: manager.bar-opacity;
+    /// The thumb's centre and the list's middle (beside the bar), in window px.
+    out property <length> manager-thumb-x: slip-box.x + manager.x + manager.thumb-x;
+    out property <length> manager-thumb-y: slip-box.y + manager.y + manager.thumb-y;
+    out property <length> manager-list-x: slip-box.x + manager.x + manager.list-mid-x;
+    out property <length> manager-list-y: slip-box.y + manager.y + manager.list-mid-y;
+    /// The Font size, 12 to 40: set from the saved choice; the slider and number box save a new one.
     in-out property <int> style-size <=> style.size;
+    callback set-font-size(int);
+    out property <string> style-size-text: style.size-text;
+    out property <bool> style-size-editing: style.size-editing;
     in-out property <int> style-tape <=> style.tape;
     /// Letter spacing (0 Tight, 1 Normal, 2 Loose): set from the saved choice, saved by Rust.
     in-out property <int> style-spacing <=> style.spacing;
@@ -416,7 +463,7 @@ export component SettingsWindow inherits Window {
     changed wanted-height => { root.paper-height-changed(); }
 
     property <length> margin: PaperTheme.margin;
-    property <length> note-w: root.body-w - root.strip;
+    property <length> note-w: root.body-w - root.strip - root.manager-strip;
     property <length> paper-w: root.note-w - 2 * root.margin;
     property <length> paper-h: root.body-h - 2 * root.margin;
     // The Paper's tilted frame in the note area's coordinates.
@@ -459,6 +506,11 @@ export component SettingsWindow inherits Window {
                 if (style.open-list >= 0 || appearance.open-list >= 0) {
                     style.open-list = -1;
                     appearance.open-list = -1;
+                    return accept;
+                }
+                // The Font manager closes before Settings does.
+                if (root.manager-open) {
+                    root.manage-clicked();
                     return accept;
                 }
                 root.close-clicked();
@@ -532,7 +584,7 @@ export component SettingsWindow inherits Window {
             height: 52.8px;
             text: SettingsMetrics.tabs[root.shown-tab];
             opacity: root.content-opacity;
-            font-size: 48px;
+            font-size: 48px * Theme.ui-fit;
             vertical-alignment: center;
             line-height-factor: 1.1 / 1.6064;
         }
@@ -619,6 +671,12 @@ export component SettingsWindow inherits Window {
                     top: SettingsMetrics.content-top + root.content-dy;
                     tapes: root.preview-tapes;
                     set-spacing(i) => { root.set-letter-spacing(i); }
+                    set-size(n) => { root.set-font-size(n); }
+                    font-name: root.font-name;
+                    font-summary: root.font-summary;
+                    manager-open: root.manager-open;
+                    manage-clicked => { fs.focus(); root.manage-clicked(); }
+                    blank-pressed => { fs.focus(); }
                 }
 
                 shortcuts := ShortcutsPage {
@@ -690,6 +748,39 @@ export component SettingsWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    // The Font manager's slip, right of the Paper. It slides out from behind the Paper's right edge
+    // as it fades in: the box clips it from the Paper's rightmost point (the edge is tilted) on, and
+    // sits above the Paper so its own clicks (and not the Paper's wheel area) reach it.
+    slip-box := Rectangle {
+        x: root.page-x + root.strip + max(PX.x(root.pf, root.pf.pw, 0.0), PX.x(root.pf, root.pf.pw, root.pf.ph));
+        y: root.page-y;
+        width: max(0px, root.page-x + root.body-w - self.x);
+        height: root.body-h;
+        clip: true;
+
+        manager := FontManager {
+            // its place at rest: the gap right of the Paper's right edge, its top below the Paper's;
+            // out of it by the slide while it is not all the way out
+            x: root.page-x + root.strip + PX.x(root.pf, root.pf.pw, root.pf.ph / 2.0) + ManagerMetrics.gap - ManagerMetrics.pad
+                - slip-box.x - (1 - root.manager-progress) * ManagerMetrics.slide;
+            y: root.margin + ManagerMetrics.top-offset - ManagerMetrics.pad;
+            progress: root.manager-progress;
+            fonts: root.manager-fonts;
+            install-hover: root.manager-install-hover;
+            max-h: root.paper-h;
+            tape: root.preview-tapes[0];
+            tape-base: TapePalette.a-light[style.tape];
+            tape-stripe: TapePalette.a-deep[style.tape];
+            row-clicked(i) => { fs.focus(); root.manager-row-clicked(i); }
+            remove-clicked(i) => { fs.focus(); root.manager-remove-clicked(i); }
+            install-clicked => { fs.focus(); root.manager-install-clicked(); }
+            axis-moved(axis, v) => { root.manager-axis-moved(axis, v); }
+            axis-committed(axis, v) => { root.manager-axis-committed(axis, v); }
+            start-move => { root.start-move(); }
+            scroll-activity => { root.manager-scroll-activity(); }
         }
     }
 }

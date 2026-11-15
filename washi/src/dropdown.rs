@@ -154,6 +154,7 @@ impl DropdownMenu {
     ) -> Result<Self, slint::PlatformError> {
         let popup = Popup::new(DropdownMenuWindow::new()?);
         let ui = popup.ui();
+        crate::fonts::current().apply(&ui.global::<crate::note_window::Theme>());
         let metrics = if compact {
             ui.set_compact(true);
             ui.set_card_height(COMPACT_CARD_HEIGHT);

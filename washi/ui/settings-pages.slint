@@ -2,6 +2,7 @@
 // out in the Paper's tilted frame `pf`; `top` is the first block's top in paper coordinates and
 // `bottom` the end of the last block, which the window adds the bottom padding to.
 
+import { Theme } from "theme.slint";
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PX, PaperFrame, TapeShape, PText, PBox, PRect, PRule, SettingRow, KeyCap } from "settings-widgets.slint";
@@ -36,7 +37,7 @@ export component ShortcutsPage inherits Rectangle {
             width: 220px;
             height: 35px;
             text: row.label;
-            font-size: 22px;
+            font-size: 22px * Theme.ui-fit;
             vertical-alignment: center;
         }
 
@@ -65,7 +66,7 @@ export component ShortcutsPage inherits Rectangle {
         b: root.rows-bottom + 18.0;
         width: 448px;
         text: "Shortcuts use the letter your keyboard layout types, so they may not work with a non-Latin layout. The toolbar and the ⋯ menu always do.";
-        font-size: 19px;
+        font-size: 19px * Theme.ui-fit;
         color: #5B616B;
         wrap: word-wrap;
         line-height-factor: 30.0 / (19.0 * 1.6064);
@@ -137,7 +138,7 @@ export component PrivacyPage inherits Rectangle {
         width: 340px;
         height: 27.5px;
         text: "Locked on disk";
-        font-size: 22px;
+        font-size: 22px * Theme.ui-fit;
         font-weight: 700;
         vertical-alignment: center;
     }
@@ -149,7 +150,7 @@ export component PrivacyPage inherits Rectangle {
         width: 340px;
         height: 27.5px;
         text: "Your notes are stored in an encrypted database.";
-        font-size: 18px;
+        font-size: 18px * Theme.ui-fit;
         color: #5B616B;
         vertical-alignment: center;
     }
@@ -202,7 +203,7 @@ export component PrivacyPage inherits Rectangle {
         b: root.note-y + 14.0;
         height: 26px;
         text: "No backup of the key.";
-        font-size: 20px;
+        font-size: 20px * Theme.ui-fit;
         font-weight: 700;
         vertical-alignment: center;
     }
@@ -213,7 +214,7 @@ export component PrivacyPage inherits Rectangle {
         b: root.note-y + 14.0;
         height: 26px;
         text: "It belongs to this Windows";
-        font-size: 19px;
+        font-size: 19px * Theme.ui-fit;
         color: #5B616B;
         vertical-alignment: center;
     }
@@ -224,7 +225,7 @@ export component PrivacyPage inherits Rectangle {
         b: root.note-y + 14.0 + 26.0;
         width: 412px;
         text: "account. If the profile is reset, the notes cannot be opened. Export as Markdown to keep a copy.";
-        font-size: 19px;
+        font-size: 19px * Theme.ui-fit;
         color: #5B616B;
         wrap: word-wrap;
         nudge: 3.0;

@@ -67,3 +67,31 @@ _Avoid_: Page, section
 **Layout**:
 The Note's geometry at one Paper size: where every block starts, where each line wraps, and so where the caret, a click, a selection and a picture are. Rebuilt when the text, the Paper, the tokens or a picture's size changes; every question about where text is is answered from it.
 _Avoid_: Text flow, wrap (wrapping is one step of building it)
+
+**Font**:
+A family Washi can draw text in. The chosen Font, at its Axis values, is the regular look of all text in Washi: every Note and every screen. Bold and italic in a Note are made by Washi on top of that look.
+_Avoid_: Typeface, font family (in the UI and code, "family" is the name inside a Font)
+
+**Default font**:
+Shadows Into Light, bundled with Washi. Always installed, in use until another Font is chosen, and cannot be removed. Its only Axis is Slant (Washi leans it); with no slant its bundled faces are used unchanged.
+_Avoid_: Built-in font, system font (that is the fallback for letters a Font lacks)
+
+**Installed font**:
+A Font the user added from a `.zip` (as Google Fonts gives it) or a `.ttf`, kept in the fonts folder of Washi's data folder and listed in the Font manager. Installing does not make it the Font in use; installing the same family again updates it and keeps its Axis values.
+_Avoid_: Imported font, custom font, downloaded font
+
+**Font in use**:
+The one Font all text in Washi is drawn in: the Default font or an Installed font. Shown on the Font & Style Tab's Font row and marked in the Font manager. Removing it switches back to the Default font.
+_Avoid_: Current font, active font (that is the name of the code that holds it), selected font
+
+**Font manager**:
+The taped slip beside the right of the Settings page's Paper, opened from the Font row's manage button on the Font & Style Tab. It lists the Fonts, picks the Font in use, removes Installed fonts, installs new ones (by browsing or dropping a file onto it) and holds the Font in use's Axis controls. It closes with Esc, the manage button, a change of Tab or closing Settings.
+_Avoid_: Font picker, font list, fonts slip (design name only)
+
+**Axis**:
+One adjustable setting of the Font in use: Weight, Width or Slant, each with a slider and a number box. Each Font remembers its own values. A Font only offers the Weight and Width its file has ("Not in this font" otherwise); Slant is always offered, using the font's own slant axis or, without one, a lean Washi makes.
+_Avoid_: Variation, style, property (Font size is not an Axis: it is one number for all Fonts)
+
+**Face set**:
+The five static faces Washi makes in memory from the Font in use at its Axis values: Regular, Bold, Italic, Bold Italic and a blank Caret face. They share one set of letter widths so a Note's Layout and caret stay exact in any Font. Made again whenever the Font or an Axis value changes; never written to disk.
+_Avoid_: Baked font, font bundle, font family (a Face set is registered under a private family name of its own)

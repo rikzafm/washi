@@ -25,13 +25,19 @@ export global Theme {
     out property <color> ink-done: #6B6F76;
     out property <color> check-tick: #1F9D55;
     out property <color> check-box: #8B919A;
+    // How far a check item's text is indented for its box (the same as CHECK_INDENT in src/textflow.rs).
+    in-out property <length> check-indent: 26px;
     // Select all: the wash over every word of the note.
     out property <color> selection: #BAD3FC;
     // A selection in a field: the same blue, see-through, over the words (drawn under the field).
     out property <color> selection-over: #6FA2F566;
     // The "Note Something...." hint of an empty note: light, subtle gray.
     out property <color> ink-hint: #B4B9C0;
-    out property <string> handwriting: "Shadows Into Light";
+    // The note text's family and the other font-dependent numbers below are set from Rust, on every
+    // window, from the active font (src/fonts); the values here are the Default font's.
+    in-out property <string> handwriting: "Shadows Into Light";
+    // UI text is drawn at its size times this: clamp(Default font's average advance / the Font in use's, 0.70, 1.0) over a sample of UI labels, so a wide font takes the room the Default font took. 1 for the Default font. Note text never uses it. Set from Rust with the font.
+    in-out property <float> ui-fit: 1;
     // Extra space after every character of a note's text, in em of its size (Settings › Font &
     // Style › Letter spacing; 0 is the font's own). The app sets it from the saved choice, and
     // src/textflow.rs lays the lines out with the same spacing.
@@ -43,7 +49,7 @@ export global Theme {
     in-out property <int> text-epoch: 0;
     // The edit fields' face: the handwriting's advances, no outlines, a lower ascent and descent
     // (made with `tools/fonts.py blank`; see `caret-line-em`). The fields only place the caret and the selection.
-    out property <string> caret-font: "Washi Caret";
+    in-out property <string> caret-font: "Washi Caret";
 
     // The caret the note draws (the fields' own is hidden, see TextLayer).
     out property <length> caret-width: 1px;
@@ -56,7 +62,16 @@ export global Theme {
     out property <length> text-bottom-gap: 4px;
 
     // Natural line height of the handwriting font in em: (ascent + descent) / units per em.
-    out property <float> handwriting-line-em: 1.6064;
+    in-out property <float> handwriting-line-em: 1.6064;
+    // The advance of a space in the handwriting (461 / 1024 em, every face).
+    in-out property <float> lead-em: 0.450195;
+    // How far a glyph reaches back past its origin at most (176 / 1024 em, the j), and a little.
+    in-out property <float> lean-room: 0.2;
+    // Room below a word's line box for its descenders, in em (the face descends 0.43 em below its
+    // baseline, which sits less than that above the bottom of a line at the note's pitches).
+    in-out property <float> descender-room: 0.5;
+    // How far an italic glyph leans out past its advance, in em (Washi's italic is a 0.25 shear).
+    in-out property <float> italic-overhang: 0.3;
     // The same for the edit fields' face: its ascent and descent are cut down to 961 / 1024 em
     // (`tools/fonts.py blank`). A field's caret and selection are as tall as the larger of the line
     // pitch and the face's ascent + descent; the handwriting's own (1.6064 em) is taller than the
@@ -66,15 +81,15 @@ export global Theme {
     out property <float> caret-line-em: 0.938477;
 
     // Title
-    out property <length> title-size: 37.3px;
-    out property <length> title-pitch: 60px;
+    in-out property <length> title-size: 37.3px;
+    in-out property <length> title-pitch: 60px;
     // Space above the first heading / first body block
-    out property <length> heading-gap: 10px;
-    out property <length> body-gap: 8.1px;
+    in-out property <length> heading-gap: 10px;
+    in-out property <length> body-gap: 8.1px;
     // Heading (bold face)
-    out property <length> heading-size: 24px;
-    out property <length> heading-pitch: 34px;
+    in-out property <length> heading-size: 24px;
+    in-out property <length> heading-pitch: 34px;
     // Body
-    out property <length> body-size: 22.65px;
-    out property <length> body-pitch: 33px;
+    in-out property <length> body-size: 22.65px;
+    in-out property <length> body-pitch: 33px;
 }

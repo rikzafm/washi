@@ -1,0 +1,559 @@
+// The Font manager: a taped slip beside the Settings Paper that lists the installed Fonts.
+//
+// Like the Paper it is laid out in its own tilted frame (`PaperFrame`, -1.2 degrees), so glyphs stay
+// upright on the tilted baseline. From the top: a fixed title, the list (it scrolls, with the note's
+// scroll bar in this frame), and a fixed "Install a font" area. `FontManager` is drawn in the
+// Settings window's coordinates; the window supplies the room (its right-hand strip) and the slide
+// and fade-in (`progress`).
+//
+// Rust (`settings/fonts.rs`) owns the list: one `FontListRow` per Font, each with its `top` and
+// `height` in the list, so a row may be taller than the rest (an expanded one) without the Slint
+// side knowing why.
+
+import { Theme } from "theme.slint";
+import "../../fonts/ShadowsIntoLight.ttf";
+import "../../fonts/ShadowsIntoLight-Bold.ttf";
+import { PX, PaperFrame, TapeShape, PText, PBox, PRect, PShadow, VTape } from "settings-widgets.slint";
+import { PSlider, NumberBox } from "controls.slint";
+import { PaperTheme } from "paper-theme.slint";
+import { ScrollBar } from "scroll.slint";
+
+/// One line of the Axis panel: a slider and a number box over whole numbers, or "Not in this font".
+export struct AxisRow {
+    label: string,
+    present: bool,
+    min: int,
+    max: int,
+    value: int,
+    step: int,
+    pull: int,
+    snaps: [int],
+    unit: string,
+}
+
+/// One Font in the list.
+export struct FontListRow {
+    /// The family name, drawn in the face named by `family` (the Font's own).
+    name: string,
+    family: string,
+    /// "One style", "Variable: weight, width, slant".
+    subtitle: string,
+    /// The Font in use: its radio dot is filled.
+    active: bool,
+    /// Cannot be removed (the Default font): a lock before `tag`.
+    locked: bool,
+    /// What the row offers at its right: "Default" (locked) or "Remove".
+    tag: string,
+    /// Where the row starts in the list, and how tall it is.
+    top: length,
+    height: length,
+    /// The Axis panel under the row: Weight, Width and Slant lines (the Font in use only).
+    axes: [AxisRow],
+}
+
+export global ManagerMetrics {
+    out property <length> slip-w: 370px;
+    /// Between the Paper's right edge and the slip.
+    out property <length> gap: 20px;
+    /// How much the Settings window grows on the right while the slip is open, beyond the Paper's
+    /// own margin: the gap, the slip and 30px for its shadow, less the 42px margin (`MANAGER_STRIP`).
+    out property <length> strip: 378px;
+    /// Room around the slip in its own box, for the tilt and the shadow.
+    out property <length> pad: 40px;
+    /// The slip's top, below the Paper's top edge.
+    out property <length> top-offset: 34px;
+    /// The title block above the list, and the install area under it.
+    out property <length> head-h: 76px;
+    out property <length> foot-h: 116px;
+    out property <angle> tilt: -1.2deg;
+    /// How far the slip slides in from (it fades in as it does).
+    out property <length> slide: 150px;
+}
+
+/// One line of the Axis panel: its label, a slider and a small number box with the unit, or "Not in
+/// this font". The controls are level (the tilt only moves where they are), laid out at paper
+/// coordinates (`a`, `b`) like everything else in the frame `pf`; `b` is the line's top.
+component AxisLine inherits Rectangle {
+    in property <PaperFrame> pf;
+    in property <AxisRow> data;
+    in property <float> b;
+    /// Dragging the slider: the value so far. `committed`: let go, or a number was typed.
+    callback moved(int);
+    callback committed(int);
+
+    /// The value both controls show; the slider and the box move it, and each other with it.
+    property <int> value: root.data.value;
+    property <float> mid: root.b + 25.0;
+
+    x: 0px;
+    y: 0px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
+
+    PText {
+        pf: root.pf;
+        a: 60.0;
+        b: root.mid - 14.0;
+        width: 70px;
+        height: 28px;
+        text: root.data.label;
+        font-size: 17px * Theme.ui-fit;
+        vertical-alignment: center;
+    }
+
+    if !root.data.present : PText {
+        pf: root.pf;
+        a: 134.0;
+        b: root.mid - 14.0;
+        width: 200px;
+        height: 28px;
+        text: "Not in this font";
+        font-size: 16px * Theme.ui-fit;
+        color: #8B919A;
+        vertical-alignment: center;
+    }
+
+    if root.data.present : PSlider {
+        x: PX.x(root.pf, 199.0, root.mid) - self.width / 2;
+        y: PX.y(root.pf, 199.0, root.mid) - self.height / 2;
+        width: 130px;
+        minimum: root.data.min;
+        maximum: root.data.max;
+        step: root.data.step;
+        pull: root.data.pull;
+        snaps: root.data.snaps;
+        accessible-name: root.data.label;
+        value <=> root.value;
+        moved(v) => { root.moved(v); }
+        committed(v) => { root.committed(v); }
+    }
+
+    if root.data.present : NumberBox {
+        x: PX.x(root.pf, 299.0, root.mid) - self.width / 2;
+        y: PX.y(root.pf, 299.0, root.mid) - self.height / 2;
+        compact: true;
+        minimum: root.data.min;
+        maximum: root.data.max;
+        step: root.data.step;
+        accessible-name: root.data.label;
+        value <=> root.value;
+        committed(v) => { root.committed(v); }
+    }
+
+    if root.data.present && root.data.unit != "" : PText {
+        pf: root.pf;
+        a: 326.0;
+        b: root.mid - 14.0;
+        width: 22px;
+        height: 28px;
+        text: root.data.unit;
+        font-size: 15px * Theme.ui-fit;
+        color: #5B616B;
+        vertical-alignment: center;
+    }
+}
+
+/// A row of the list: radio dot, the Font's name in its own face, a subtitle, and at the right the
+/// lock and "Default" or "Remove". `pf` is the list's frame; the row sits `row.top` down the list.
+component FontRowItem inherits Rectangle {
+    in property <PaperFrame> pf;
+    in property <FontListRow> data;
+    callback clicked();
+    callback remove();
+    /// An Axis slider of the panel moved to a value (dragging), or let go at it / a number was typed.
+    callback axis-moved(int, int);
+    callback axis-committed(int, int);
+
+    x: 0px;
+    y: 0px;
+    width: root.pf.f.w * 1px;
+    height: root.pf.f.h * 1px;
+
+    property <float> pw: root.pf.pw;
+    property <float> b: (ManagerMetrics.head-h + root.data.top) / 1px;
+    property <float> h: root.data.height / 1px;
+    /// The row's own part (`ROW_H`): the dot, the lock, the tag and the press area sit in it, and the
+    /// Axis panel of the Font in use under it.
+    property <float> oh: 64.0;
+    property <float> tag-a: root.pw - 24.0 - tag-t.preferred-width / 1px;
+
+    if pick.has-hover || root.data.active : PRect {
+        pf: root.pf;
+        a: 14.0;
+        b: root.b + 3.0;
+        w: root.pw - 28.0;
+        h: root.h - 6.0;
+        r: 10.8;
+        fill: #F0F0EE;
+    }
+
+    // the radio dot
+    PRect {
+        pf: root.pf;
+        a: 26.0;
+        b: root.b + root.oh / 2.0 - 10.0;
+        w: 20.0;
+        h: 20.0;
+        r: 10.0;
+        fill: #2B2F36;
+    }
+
+    PRect {
+        pf: root.pf;
+        a: 28.0;
+        b: root.b + root.oh / 2.0 - 8.0;
+        w: 16.0;
+        h: 16.0;
+        r: 8.0;
+        fill: #FFFFFD;
+    }
+
+    if root.data.active : PRect {
+        pf: root.pf;
+        a: 31.0;
+        b: root.b + root.oh / 2.0 - 5.0;
+        w: 10.0;
+        h: 10.0;
+        r: 5.0;
+        fill: #2B2F36;
+    }
+
+    PText {
+        pf: root.pf;
+        a: 60.0;
+        b: root.b + 8.0;
+        width: root.tag-a * 1px - 60px - 28px;
+        height: 28px;
+        text: root.data.name;
+        font-family: root.data.family;
+        font-size: 22px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    PText {
+        pf: root.pf;
+        a: 60.0;
+        b: root.b + 36.0;
+        width: root.tag-a * 1px - 60px - 28px;
+        height: 20px;
+        text: root.data.subtitle;
+        font-size: 16px * Theme.ui-fit;
+        color: #5B616B;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.data.locked : Path {
+        x: PX.x(root.pf, root.tag-a - 14.0, root.b + root.oh / 2.0) - 8px;
+        y: PX.y(root.pf, root.tag-a - 14.0, root.b + root.oh / 2.0) - 8px;
+        width: 16px;
+        height: 16px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: "M 6 11 H 18 V 21 H 6 Z M 8.5 11 V 7.5 A 3.5 3.5 0 0 1 15.5 7.5 V 11";
+        stroke: #5B616B;
+        stroke-width: 2px;
+        stroke-line-join: round;
+        fill: transparent;
+    }
+
+    tag-t := PText {
+        pf: root.pf;
+        a: root.tag-a;
+        b: root.b + root.oh / 2.0 - 14.0;
+        width: self.preferred-width;
+        height: 28px;
+        text: root.data.tag;
+        font-size: 17px * Theme.ui-fit;
+        color: #5B616B;
+        vertical-alignment: center;
+    }
+
+    // The row (the Font in use is picked by pressing it) and, over it, the tag of a removable one.
+    pick := TouchArea {
+        x: PX.x(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.oh / 2.0) - (root.pw - 28.0) * 0.5px;
+        y: PX.y(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.oh / 2.0) - root.oh * 0.5px;
+        width: (root.pw - 28.0) * 1px;
+        height: root.oh * 1px;
+        mouse-cursor: pointer;
+        accessible-role: list-item;
+        accessible-label: root.data.name;
+        accessible-description: root.data.subtitle;
+        accessible-checked: root.data.active;
+        clicked => { root.clicked(); }
+    }
+
+    if !root.data.locked : TouchArea {
+        x: PX.x(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.oh / 2.0) - tag-t.preferred-width / 2 - 6px;
+        y: PX.y(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.oh / 2.0) - 16px;
+        width: tag-t.preferred-width + 12px;
+        height: 32px;
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: root.data.tag + " " + root.data.name;
+        clicked => { root.remove(); }
+    }
+
+    // The Axis panel of the Font in use: a line each for Weight, Width and Slant, under the row.
+    for ax[k] in root.data.axes : AxisLine {
+        pf: root.pf;
+        data: ax;
+        b: root.b + root.oh + k * 50.0;
+        moved(v) => { root.axis-moved(k, v); }
+        committed(v) => { root.axis-committed(k, v); }
+    }
+}
+
+/// The slip, in a box of its own (`ManagerMetrics.slip-w` plus the padding wide) that the Settings
+/// window places and fades. Not a Window: its events come through the Settings window's.
+export component FontManager inherits Rectangle {
+    /// How far the slip is out, 0 (behind the Paper, invisible) to 1: fades it in.
+    in property <float> progress: 0;
+    in property <[FontListRow]> fonts;
+    /// The slip is as tall as its content, but never taller than this (the Settings Paper's height).
+    in property <length> max-h: 100000px;
+    /// The Paper's tape, in the Tape color's colours.
+    in property <TapeShape> tape;
+    in property <color> tape-base;
+    in property <color> tape-stripe;
+    in property <string> heading: "Installed fonts";
+    in property <string> install-heading: "Install a font";
+    in property <string> install-hint: "Drop a Google Fonts .zip here, or click to browse";
+    /// A file is being held over the window: the install area darkens to say it will take it.
+    in property <bool> install-hover: false;
+    /// How far the list is scrolled up, and whether the wheel or the bar moved it a moment ago.
+    in-out property <length> scroll: 0px;
+    in-out property <bool> scrolling: false;
+    callback row-clicked(int);
+    callback remove-clicked(int);
+    callback install-clicked();
+    callback axis-moved(int, int);
+    callback axis-committed(int, int);
+    /// Pressing the tape drags the whole window.
+    callback start-move();
+    /// The wheel or the bar moved the list: the window hides the bar again a moment after the last one.
+    callback scroll-activity();
+
+    property <length> list-h: root.fonts.length > 0
+        ? root.fonts[root.fonts.length - 1].top + root.fonts[root.fonts.length - 1].height
+        : 0px;
+    property <length> natural-h: ManagerMetrics.head-h + root.list-h + ManagerMetrics.foot-h;
+    /// The slip's height: its content's, stopped at the cap (and never under one row's room).
+    out property <length> slip-h: min(root.natural-h, max(root.max-h, ManagerMetrics.head-h + ManagerMetrics.foot-h + 64px));
+    /// The list's room between the title and the install area.
+    out property <length> view-h: root.slip-h - ManagerMetrics.head-h - ManagerMetrics.foot-h;
+    out property <length> max-scroll: max(0px, root.list-h - root.view-h);
+    changed max-scroll => {
+        if (root.scroll > root.max-scroll) { root.scroll = root.max-scroll; }
+    }
+    changed scroll => {
+        if (root.max-scroll > 0px && !bar.dragging) {
+            root.scrolling = true;
+            root.scroll-activity();
+        }
+    }
+    out property <float> bar-opacity: bar.bar-opacity;
+    /// The thumb's centre and the list's middle (beside the bar), in this box's px.
+    out property <length> thumb-x: bar.thumb-x;
+    out property <length> thumb-y: bar.thumb-y;
+    out property <length> list-mid-x: PX.x(root.pf, root.pf.pw / 2.0 - 30.0, (ManagerMetrics.head-h + root.view-h / 2) / 1px);
+    out property <length> list-mid-y: PX.y(root.pf, root.pf.pw / 2.0 - 30.0, (ManagerMetrics.head-h + root.view-h / 2) / 1px);
+
+    width: ManagerMetrics.slip-w + 2 * ManagerMetrics.pad;
+    height: root.slip-h + 2 * ManagerMetrics.pad;
+    opacity: root.progress;
+    visible: root.progress > 0;
+
+    // The slip's frame: centred in this box, tilted the other way from the Paper.
+    property <PaperFrame> pf: {
+        f: {
+            w: root.width / 1px,
+            h: root.height / 1px,
+            cx: root.width / 2px,
+            cy: root.height / 2px,
+            cs: Math.cos(ManagerMetrics.tilt),
+            sn: Math.sin(ManagerMetrics.tilt),
+        },
+        pw: ManagerMetrics.slip-w / 1px,
+        ph: root.slip-h / 1px,
+    };
+
+    // The level band the list shows through, from under the title to above the install area, taking
+    // the tilted edges' inner ends so nothing shows past either.
+    property <length> clip-top: max(PX.y(root.pf, 0.0, ManagerMetrics.head-h / 1px), PX.y(root.pf, root.pf.pw, ManagerMetrics.head-h / 1px));
+    property <length> clip-bottom: min(PX.y(root.pf, 0.0, (root.slip-h - ManagerMetrics.foot-h) / 1px), PX.y(root.pf, root.pf.pw, (root.slip-h - ManagerMetrics.foot-h) / 1px));
+    // The slip's frame in the band's coordinates, moved up its own vertical by the scroll.
+    property <float> scroll-v: root.scroll / 1px;
+    property <PaperFrame> list-pf: {
+        f: {
+            w: root.pf.f.w,
+            h: view.height / 1px,
+            cx: root.pf.f.cx + root.scroll-v * root.pf.f.sn,
+            cy: root.pf.f.cy - view.y / 1px - root.scroll-v * root.pf.f.cs,
+            cs: root.pf.f.cs,
+            sn: root.pf.f.sn,
+        },
+        pw: root.pf.pw,
+        ph: root.pf.ph,
+    };
+
+    PShadow {
+        pf: root.pf;
+        a: 0.0;
+        b: 0.0;
+        w: root.pf.pw;
+        h: root.pf.ph;
+        dy: 14;
+        spread: -8;
+        blur: 22;
+        alpha: 0.32;
+    }
+
+    PShadow {
+        pf: root.pf;
+        a: 0.0;
+        b: 0.0;
+        w: root.pf.pw;
+        h: root.pf.ph;
+        dy: 2;
+        blur: 5;
+        alpha: 0.12;
+    }
+
+    PRect {
+        pf: root.pf;
+        a: 0.0;
+        b: 0.0;
+        w: root.pf.pw;
+        h: root.pf.ph;
+        fill: PaperTheme.paper-color;
+    }
+
+    PText {
+        pf: root.pf;
+        a: 28.0;
+        b: 24.0;
+        width: 314px;
+        height: 44px;
+        text: root.heading;
+        font-size: 32px * Theme.ui-fit;
+        vertical-alignment: center;
+    }
+
+    // The list: clipped between the title and the install area, scrolled by the wheel here or by the bar.
+    view := Rectangle {
+        x: 0px;
+        y: root.clip-top;
+        width: root.width;
+        height: max(0px, root.clip-bottom - root.clip-top);
+        clip: true;
+
+        wheel := TouchArea {
+            scroll-event(e) => {
+                if (root.max-scroll <= 0px) { return reject; }
+                root.scroll = max(0px, min(root.max-scroll, root.scroll - e.delta-y));
+                root.scrolling = true;
+                root.scroll-activity();
+                accept
+            }
+
+            for row[i] in root.fonts : FontRowItem {
+                pf: root.list-pf;
+                data: row;
+                clicked => { root.row-clicked(i); }
+                remove => { root.remove-clicked(i); }
+                axis-moved(axis, v) => { root.axis-moved(axis, v); }
+                axis-committed(axis, v) => { root.axis-committed(axis, v); }
+            }
+        }
+    }
+
+    // The install area: a heading and a box to drop a file on (it darkens while one is held over the window).
+    PText {
+        pf: root.pf;
+        a: 28.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 12.0;
+        width: 314px;
+        height: 32px;
+        text: root.install-heading;
+        font-size: 22px * Theme.ui-fit;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+
+    PRect {
+        pf: root.pf;
+        a: 24.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 52.0;
+        w: 322.0;
+        h: 46.0;
+        r: 10.8;
+        fill: root.install-hover ? #DADAD6 : #F0F0EE;
+    }
+
+    PText {
+        pf: root.pf;
+        a: 36.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 52.0;
+        width: 298px;
+        height: 46px;
+        text: root.install-hint;
+        font-size: 16px * Theme.ui-fit;
+        color: #5B616B;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        wrap: word-wrap;
+    }
+
+    PBox {
+        pf: root.pf;
+        a: 24.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 52.0;
+        width: 322px;
+        height: 46px;
+
+        TouchArea {
+            mouse-cursor: pointer;
+            accessible-role: button;
+            accessible-label: root.install-heading;
+            clicked => { root.install-clicked(); }
+        }
+    }
+
+    // The bar runs down the slip's right edge, between the title and the install area.
+    bar := ScrollBar {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        use-frame: true;
+        frame: root.pf;
+        paper-w: ManagerMetrics.slip-w;
+        paper-h: root.slip-h;
+        top-gap: ManagerMetrics.head-h;
+        bottom-gap: ManagerMetrics.foot-h;
+        view: root.view-h;
+        content: root.list-h;
+        offset <=> root.scroll;
+        scrolling: root.scrolling;
+    }
+
+    // The slip's tape, with the Paper's tape colours; pressing it drags the window.
+    VTape {
+        pf: root.pf;
+        a: root.pf.pw / 2.0;
+        b: 6.0;
+        shape: root.tape;
+        base: root.tape-base;
+        stripe: root.tape-stripe;
+
+        TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                    root.start-move();
+                }
+            }
+        }
+    }
+}

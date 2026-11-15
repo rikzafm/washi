@@ -519,6 +519,11 @@ impl Note {
         self.editor.set_letter_spacing(&self.ui, em);
     }
 
+    /// The active font changed: use it for this note's text from now on (see `App::set_active_font`).
+    pub fn set_font(&self) {
+        self.editor.set_font(&self.ui);
+    }
+
     pub fn geometry(&self) -> Geometry {
         self.geometry.current().unwrap_or(Geometry { x: 0, y: 0, w: 0, h: 0 })
     }

@@ -32,6 +32,7 @@ impl DeleteDialog {
     ) -> Result<Self, slint::PlatformError> {
         let popup = Popup::new(DeleteNoteDialog::new()?);
         let ui = popup.ui();
+        crate::fonts::current().apply(&ui.global::<crate::note_window::Theme>());
         let scale_factor = popup.scale().factor();
         let dw = (DIALOG_WIDTH * scale_factor).round() as i32;
         let dh = (DIALOG_HEIGHT * scale_factor).round() as i32;

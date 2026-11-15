@@ -41,9 +41,14 @@ const STYLE_REMOVED_H: f32 = 82.0 + 56.0 + 2.0;
 /// General's rows above the new one end about here in the window: only this much of General's Paper
 /// can be held against its mockup (everything below moved down by the new row).
 const GENERAL_COMPARED_H: u32 = 248;
-/// Font & Style's rows above the removed ones end about here in the window (the Tape color row's
-/// bottom, less its old rule): only this much of its Paper can be held against the mockup.
-const STYLE_COMPARED_H: u32 = 430;
+/// Font & Style's rows above the Font size row end about here in the window (the Font row's bottom): only
+/// this much of its Paper can be held against the mockup, whose Text size row was three pills and is now
+/// a slider and a number box (Font size). The Letter spacing row and the removed rows differ too.
+const STYLE_COMPARED_H: u32 = 314;
+/// How much of that Paper may be far from the mockup on Font & Style: a little more than the 2% of the
+/// other Tabs, since its Font row (a list picker in the mockup) is now the Font in use's name box and
+/// the manage button, about a dozen blocks of the compared part.
+const STYLE_FAR_BLOCKS: f32 = 0.025;
 /// The Sidebar's header and first tab end about here in a window as tall as the mockup's: the tabs
 /// under it are not the mockup's since Appearance came in second. (On General and Font & Style the
 /// window is not the mockup's height, and the Sidebar, centred on it, is not where the mockup has it.)
@@ -249,7 +254,8 @@ fn every_tab_looks_like_the_mockup() {
         for (shot, want) in parts {
             let (mean, far) = block_difference(&shot, &want);
             assert!(mean < 2.6, "{tab}: blocks differ by {mean:.2} levels on average");
-            assert!(far < 0.02, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+            let allowed = if t == tab::STYLE { STYLE_FAR_BLOCKS } else { 0.02 };
+            assert!(far < allowed, "{tab}: {:.1}% of the blocks are far from the mockup", far * 100.0);
         }
     }
 }
@@ -470,11 +476,12 @@ fn switching_tabs_mid_tween_still_ends_at_the_right_height() {
 fn a_bigger_preview_text_stays_on_the_paper_and_the_lists_stay_in_the_window() {
     let mut h = open_on(tab::STYLE);
     let before = h.settings_content_bottoms()[tab::STYLE as usize];
-    // Text size Large (control 9): the preview wraps to more lines.
-    h.settings_style_click(9);
+    // Font size 40 (the slider's right end): the preview text is cut at its card, so the content does
+    // not grow and the rows do not move under the pointer.
+    h.settings_style_click(140);
     h.advance_frames(ms(100));
     let after = h.settings_content_bottoms()[tab::STYLE as usize];
-    assert!(after > before + 30.0, "the content went from {before} to {after}");
+    assert_eq!(after, before, "the content went from {before} to {after}");
     let (_, _, _, wh) = h.settings_window_geometry().unwrap();
     let ph = wh as f32 - 2.0 * MARGIN;
     assert!(ph >= after + 44.0 - 0.5, "the Paper {ph} holds the content {after} and its padding");
@@ -482,10 +489,10 @@ fn a_bigger_preview_text_stays_on_the_paper_and_the_lists_stay_in_the_window() {
     assert_eq!(ink_in_bottom_padding(&shot), 0, "the larger preview overflowed");
     // The lists hang inside the window (the Paper plus its margin) whatever the size.
     assert!(h.settings_style_lists_bottom() <= ph + MARGIN - 14.0, "a list reaches {} of {ph}", h.settings_style_lists_bottom());
-    // And back to Small: the content is shorter again.
-    h.settings_style_click(7);
+    // And back to 12: the card is the same.
+    h.settings_style_click(112);
     h.advance_frames(ms(100));
-    assert!(h.settings_content_bottoms()[tab::STYLE as usize] < after);
+    assert_eq!(h.settings_content_bottoms()[tab::STYLE as usize], before);
     assert_eq!(ink_in_bottom_padding(&rendered(&h)), 0);
 }
 
@@ -497,7 +504,8 @@ fn the_open_lists_fit_in_the_window_at_the_default_size() {
     let reach = h.settings_style_lists_bottom();
     assert!(reach <= ph + MARGIN - 14.0, "a list reaches {reach} of a {ph} Paper");
     // Open each list and compare it with the mockup's open dropdown.
-    for (button, name) in [(10, "style-tape-list"), (0, "style-font-list")] {
+    // (The mockup's Font list is gone: the Font row opens the Font manager, see font_manager.rs.)
+    for (button, name) in [(10, "style-tape-list")] {
         h.settings_style_click(button);
         h.settings_pointer_away();
         let shot = rendered(&h);
@@ -507,6 +515,6 @@ fn the_open_lists_fit_in_the_window_at_the_default_size() {
         // The Paper above the rows taken out since the mockup (see `STYLE_COMPARED_H`).
         let (mean, far) = block_difference(&paper_top_rows(&shot, STYLE_COMPARED_H), &paper_top_rows(&want, STYLE_COMPARED_H));
         assert!(mean < 2.6, "{name}: blocks differ by {mean:.2} levels on average");
-        assert!(far < 0.02, "{name}: {:.1}% of the blocks are far from the mockup", far * 100.0);
+        assert!(far < STYLE_FAR_BLOCKS, "{name}: {:.1}% of the blocks are far from the mockup", far * 100.0);
     }
 }

@@ -11,6 +11,7 @@ pub mod document;
 pub mod dropdown;
 pub mod editor;
 pub mod export;
+pub mod fonts;
 pub mod history;
 pub mod icon;
 pub mod image_viewer;

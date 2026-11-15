@@ -16,18 +16,22 @@
 //! only places the caret and the selection, and the words stay where they are (tilted editing,
 //! Settings › General) or settle flat. Everything here is in the level layout either way: the note
 //! maps what it draws and what the pointer touches through the tilt. Both must break lines in the same
-//! places, so this module wraps with the advances of the same embedded fonts (they have no kerning
-//! table, so the advances are exact).
+//! places, so this module wraps with the advances of the active font (`crate::fonts::current`), read
+//! from its four parsed faces.
 //!
-//! The four faces (regular, bold, italic, bold italic) have the same advances, so a line breaks in
-//! the same places whatever its characters' styles. The edit fields lay their text out in a blank
-//! face with those advances too (`fonts/WashiCaret.ttf`), and the words are drawn from this layout
-//! while editing as well, each piece in its own face.
+//! Three guarantees come from that font, not from this module: the four faces (regular, bold,
+//! italic, bold italic) have the same advances, so a line breaks in the same places whatever its
+//! characters' styles; they carry no kerning or ligature shaping, so the `hmtx` advances read here
+//! are the advances Slint draws with; and the edit fields lay their text out in the font's Caret
+//! face, blank with those same advances (`ActiveFont::caret_family`; for the Default font
+//! `fonts/WashiCaret.ttf`). The words are drawn from this layout while editing as well, each piece
+//! in its own face. The Default font's bundled files have all three properties, and a font given
+//! to `fonts::set_current` must have them too.
 
 use crate::document::{Block, Caret, Kind, Paint, Range, Style as Flags};
 use crate::trace::{count, counts::Count};
 use std::rc::Rc;
-use ttf_parser::Face;
+use crate::fonts::{self, ActiveFont};
 
 /// Calls to `wrap` on this thread since the last [`reset_wrap_calls`] (counted only in tests and
 /// with the `trace` feature, see `trace::counts`).
@@ -44,11 +48,6 @@ pub fn reset_wrap_calls() {
 
 /// A marker is a line pitch tall less this much at its top and bottom, so marked lines do not touch.
 const MARKER_INSET: f64 = 1.0;
-
-const REGULAR: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight.ttf");
-const BOLD: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Bold.ttf");
-const ITALIC: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-Italic.ttf");
-const BOLD_ITALIC: &[u8] = include_bytes!("../../fonts/ShadowsIntoLight-BoldItalic.ttf");
 
 /// The look of one kind of block: font size and line pitch, in logical px.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -78,12 +77,19 @@ pub const NUMBER_GAP: f64 = 6.0;
 /// The least room kept between the paper's edge and the widest number of a list that is not moved in.
 const NUMBER_EDGE: f64 = 4.0;
 
+/// The title's size and pitch, and the space above the first heading and the first body block, at
+/// Font size 22 (`Theme.title-*`, `Theme.heading-gap`, `Theme.body-gap`).
+pub const TITLE_SIZE: f64 = 37.3;
+pub const TITLE_PITCH: f64 = 60.0;
+pub const HEADING_GAP: f64 = 10.0;
+pub const BODY_GAP: f64 = 8.1;
+
 /// How far each block's text is moved in from the text area's left edge. A list's markers (bullet,
 /// number, check box) hang in the margin left of the text, so a list that is not indented has its
 /// text in line with body text, and an indented one [`LIST_INDENT`] further. A numbered list whose
 /// widest number does not fit in the margin moves all its text right just enough, items of the
 /// same list always together. Every other block is not moved.
-fn indents(blocks: &[Block], t: &Tokens) -> Vec<f64> {
+fn indents(blocks: &[Block], t: &Tokens, font: &Rc<ActiveFont>) -> Vec<f64> {
     let (numbers, moved) = (crate::document::numbers_of(blocks), crate::document::indents_of(blocks));
     let mut out = vec![0.0; blocks.len()];
     let mut i = 0;
@@ -94,8 +100,8 @@ fn indents(blocks: &[Block], t: &Tokens) -> Vec<f64> {
         }
         let end = (i..blocks.len()).find(|&j| !blocks[j].kind.is_item()).unwrap_or(blocks.len());
         let widest = numbers[i..end].iter().copied().max().unwrap_or(0);
-        let need = if widest > 0 { t.measure(t.style(Kind::Numbered).size).width(&format!("{widest}.")) + NUMBER_GAP + NUMBER_EDGE - t.inset_left } else { 0.0 };
-        let at = if moved[i] { LIST_INDENT } else { 0.0 }.max(need);
+        let need = if widest > 0 { t.measure(font, t.style(Kind::Numbered).size).width(&format!("{widest}.")) + NUMBER_GAP + NUMBER_EDGE - t.inset_left } else { 0.0 };
+        let at = if moved[i] { t.check_indent } else { 0.0 }.max(need);
         out[i..end].fill(at);
         i = end;
     }
@@ -122,11 +128,19 @@ pub struct Tokens {
     /// Letter spacing; 0 is the font's own spacing). The note's `Text`s and edit fields add the
     /// same `letter-spacing` after every character, so the lines break in the same places.
     pub letter_spacing: f64,
+    /// Which active font the layout is for ([`ActiveFont::epoch`]): a change of font makes tokens
+    /// that differ, so the editor builds its `Layout` again through the path a change of the other
+    /// tokens (letter spacing) takes.
+    pub font_epoch: u32,
+    /// How far a check item's text is indented for its box, and the box's side (they scale with
+    /// the Font size, like the sizes and pitches above).
+    pub check_indent: f64,
+    pub check_box: f64,
 }
 
 impl Tokens {
-    fn measure(&self, size: f64) -> Measure {
-        Measure { spacing: self.letter_spacing * size, ..Measure::new(false, false, size) }
+    fn measure(&self, font: &Rc<ActiveFont>, size: f64) -> Measure {
+        Measure { spacing: self.letter_spacing * size, ..Measure::of(font, false, false, size) }
     }
 
     fn style(&self, kind: Kind) -> Style {
@@ -164,34 +178,31 @@ pub struct Run {
     pub dy: f64,
 }
 
-/// The four faces, parsed on first use and kept: regular, bold, italic, bold italic.
-fn faces() -> &'static [Face<'static>; 4] {
-    static FACES: std::sync::OnceLock<[Face<'static>; 4]> = std::sync::OnceLock::new();
-    FACES.get_or_init(|| [REGULAR, BOLD, ITALIC, BOLD_ITALIC].map(|data| Face::parse(data, 0).expect("embedded font parses")))
-}
-
+/// A face of the font the text is laid out in, at one size.
 struct Measure {
-    face: &'static Face<'static>,
+    font: Rc<ActiveFont>,
+    bold: bool,
+    italic: bool,
     scale: f64,
     /// Added to every character's advance (letter spacing), logical px.
     spacing: f64,
 }
 
 impl Measure {
+    /// In the active font of this thread.
     fn new(bold: bool, italic: bool, size: f64) -> Measure {
-        let face = match (bold, italic) {
-            (false, false) => &faces()[0],
-            (true, false) => &faces()[1],
-            (false, true) => &faces()[2],
-            (true, true) => &faces()[3],
-        };
-        let scale = size / face.units_per_em() as f64;
-        Measure { face, scale, spacing: 0.0 }
+        Measure::of(&fonts::current(), bold, italic, size)
+    }
+
+    fn of(font: &Rc<ActiveFont>, bold: bool, italic: bool, size: f64) -> Measure {
+        let scale = size / font.faces.face(bold, italic).units_per_em() as f64;
+        Measure { font: font.clone(), bold, italic, scale, spacing: 0.0 }
     }
 
     fn advance(&self, c: char) -> f64 {
-        let g = self.face.glyph_index(c).unwrap_or(ttf_parser::GlyphId(0));
-        self.face.glyph_hor_advance(g).unwrap_or(0) as f64 * self.scale + self.spacing
+        let face = self.font.faces.face(self.bold, self.italic);
+        let g = face.glyph_index(c).unwrap_or(ttf_parser::GlyphId(0));
+        face.glyph_hor_advance(g).unwrap_or(0) as f64 * self.scale + self.spacing
     }
 
     fn width(&self, s: &str) -> f64 {
@@ -484,7 +495,8 @@ pub fn marker_wash(markers: &[Marker], wash: &[Rect]) -> Vec<Rect> {
 /// Where the baseline of a line is below the top of its line box: the font's ascent plus half of
 /// the leading the line pitch adds to the font's natural line height.
 fn baseline(m: &Measure, pitch: f64) -> f64 {
-    let (asc, desc) = (m.face.ascender() as f64 * m.scale, m.face.descender() as f64 * m.scale);
+    let face = m.font.faces.face(m.bold, m.italic);
+    let (asc, desc) = (face.ascender() as f64 * m.scale, face.descender() as f64 * m.scale);
     asc + (pitch - (asc - desc)) / 2.0
 }
 
@@ -529,9 +541,9 @@ fn draw_block(b: &Block, bi: usize, number: usize, indent: f64, top: f64, lines:
         runs.push(Run { block: bi, kind: b.kind, bold: false, italic: false, ink, marker: 0, done, line: 0, text, x, y: top, width, size: st.size, pitch: st.pitch, dx, dy });
     }
     if b.kind.is_check() {
-        let (x, y) = (left - LIST_INDENT, top + base - 0.3 * st.size - CHECK_BOX / 2.0);
-        let (dx, dy) = tilt_offset(x + CHECK_BOX / 2.0, y + CHECK_BOX / 2.0, paper, t.tilt_deg);
-        checks.push(CheckBox { block: bi, x, y, size: CHECK_BOX, dx, dy, checked: done });
+        let (x, y) = (left - t.check_indent, top + base - 0.3 * st.size - t.check_box / 2.0);
+        let (dx, dy) = tilt_offset(x + t.check_box / 2.0, y + t.check_box / 2.0, paper, t.tilt_deg);
+        checks.push(CheckBox { block: bi, x, y, size: t.check_box, dx, dy, checked: done });
     }
     for (li, line) in lines.iter().enumerate() {
         let y = top + li as f64 * st.pitch;
@@ -646,6 +658,8 @@ struct BlockLayout {
 pub struct Layout {
     paper: (f64, f64),
     tokens: Tokens,
+    /// The font the lines were wrapped in (the active one when built).
+    font: Rc<ActiveFont>,
     blocks: Vec<BlockLayout>,
     /// The bottom of the last line (what the note scrolls through).
     bottom: f64,
@@ -661,12 +675,13 @@ impl Layout {
     /// size: one body line).
     pub fn build(blocks: &[Block], paper: (f64, f64), t: &Tokens, image_size: &dyn Fn(&Block) -> Option<(u32, u32)>) -> Layout {
         count(Count::LayoutBuild);
+        let font = fonts::current();
         let avail = paper.0 - t.inset_left - t.inset_right;
         let (mut runs, mut rules, mut markers, mut checks) = (vec![], vec![], vec![], vec![]);
         let mut laid = Vec::with_capacity(blocks.len());
         let mut top = t.inset_top;
         let numbers = crate::document::numbers_of(blocks);
-        let indents = indents(blocks, t);
+        let indents = indents(blocks, t, &font);
         for (bi, b) in blocks.iter().enumerate() {
             let st = t.style(b.kind);
             if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
@@ -680,7 +695,7 @@ impl Layout {
                 top += image.2;
                 continue;
             }
-            let m = t.measure(st.size);
+            let m = t.measure(&font, st.size);
             let lines = wrap(&b.text, avail - indents[bi], &m);
             draw_block(b, bi, numbers[bi], indents[bi], top, &lines.lines, &m, paper, t, &mut runs, &mut rules, &mut markers, &mut checks);
             let count = lines.lines.len();
@@ -688,7 +703,7 @@ impl Layout {
             // every block takes at least one line, even when empty
             top += count as f64 * st.pitch;
         }
-        Layout { paper, tokens: *t, blocks: laid, bottom: top, runs, rules, markers, checks }
+        Layout { paper, tokens: *t, font, blocks: laid, bottom: top, runs, rules, markers, checks }
     }
 
     /// The paper size this was laid out in.
@@ -751,7 +766,7 @@ impl Layout {
     }
 
     fn measure(&self, b: &BlockLayout) -> Measure {
-        self.tokens.measure(self.tokens.style(b.kind).size)
+        self.tokens.measure(&self.font, self.tokens.style(b.kind).size)
     }
 
     /// The visual line and x of the caret at byte `offset` of block `block`. Where a line wraps without a
@@ -862,6 +877,9 @@ mod tests {
         tilt_deg: 1.45,
         max_run: f64::MAX,
         letter_spacing: 0.0,
+        font_epoch: 0,
+        check_indent: LIST_INDENT,
+        check_box: CHECK_BOX,
     };
 
     const PAPER: (f64, f64) = (363.0, 433.0);
@@ -882,6 +900,26 @@ mod tests {
     /// A layout of one block alone, as the first of a note.
     fn one(b: &Block) -> Layout {
         lay(std::slice::from_ref(b), PAPER, &TOKENS)
+    }
+
+    #[test]
+    fn the_lines_break_where_the_active_font_says() {
+        use crate::fonts::{set_current, ActiveFont};
+        let text = "the quick brown fox jumps over the lazy dog and keeps running far away";
+        let b = Block::new(Kind::Body, text);
+        let words = |l: &Layout| l.runs().iter().map(|r| (r.line, r.text.clone(), r.width)).collect::<Vec<_>>();
+        let before = words(&one(&b));
+        let wide = [include_bytes!("../../fonts/Gelasio-Regular.ttf").as_slice(), include_bytes!("../../fonts/Gelasio-Bold.ttf")];
+        let font = ActiveFont::new("Gelasio", "Washi Caret", [wide[0], wide[1], wide[0], wide[1]].map(std::borrow::Cow::Borrowed)).unwrap();
+        set_current(font);
+        let after = words(&one(&b));
+        assert_ne!(before, after, "another font: other advances, other breaks");
+        // a word's width is its advances in the font now active
+        let w = after.iter().find(|w| w.1 == "quick").unwrap().2;
+        let expected = line_width("quick", TOKENS.body.size);
+        assert!((w - expected).abs() < 1e-9);
+        set_current(ActiveFont::default_font());
+        assert_eq!(words(&one(&b)), before, "and back");
     }
 
     /// The caret of byte `offset` of `b` (the start of the next line where a line wraps without a space).

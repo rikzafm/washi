@@ -1,0 +1,255 @@
+// Controls shared by the Settings tabs: the slider and the number box (the Font size row uses both;
+// the Font manager's Weight, Width and Slant rows reuse them).
+//
+// Both are level, like every control of the Settings page (the Paper's tilt only moves where a
+// control is, see `SettingRow`). The slider draws the design's tilted-frame look: a rounded track
+// with the dark filled part, a thumb, and a dot under every snap point.
+
+import { Theme } from "theme.slint";
+
+/// A slider over whole numbers `minimum..=maximum`.
+///
+/// - Dragging (and clicking anywhere on the track, which jumps there) moves `value` and fires
+///   `moved(value)` all the way; pressing, dragging and releasing the pointer lands within `pull`
+///   of a snap point on it, so the snap points are easy to hit. `committed(value)` fires when the
+///   pointer is released, and after every key.
+/// - Left / Right move one `step` (without snapping, so every whole value can be reached), Home and
+///   End go to the ends.
+/// - At most 12 `snaps` are drawn and pulled to.
+/// - Accessibility: a slider with its value, range and step.
+///
+/// Bind `value` two ways (`value <=> ...`).
+export component PSlider inherits Rectangle {
+    in-out property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <[int]> snaps;
+    /// Dragging within this many units of a snap point lands on it.
+    in property <int> pull: 1;
+    in property <string> accessible-name;
+    /// The pointer is down on the slider.
+    out property <bool> dragging: area.pressed;
+    callback moved(int);
+    callback committed(int);
+
+    property <length> thumb: 20px;
+    property <length> span: root.width - root.thumb;
+    property <float> range: max(1.0, root.maximum - root.minimum);
+    property <float> frac: (root.value - root.minimum) / root.range;
+
+    width: 150px;
+    height: 44px;
+    accessible-role: slider;
+    accessible-label: root.accessible-name;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-action-increment => { root.nudge(root.step); }
+    accessible-action-decrement => { root.nudge(-root.step); }
+
+    /// How far snap `i` pulls `v`: onto it when it is within `pull`, else nothing. (Slint has no
+    /// loops in expressions, so `snapped` adds up the pulls of all the points; they are further
+    /// apart than `pull`, so at most one is not zero.)
+    pure function pulled(i: int, v: int) -> int {
+        return (i < root.snaps.length && abs(root.snaps[i] - v) <= root.pull) ? root.snaps[i] - v : 0;
+    }
+    pure function snapped(v: int) -> int {
+        return v + root.pulled(0, v) + root.pulled(1, v) + root.pulled(2, v) + root.pulled(3, v)
+            + root.pulled(4, v) + root.pulled(5, v) + root.pulled(6, v) + root.pulled(7, v)
+            + root.pulled(8, v) + root.pulled(9, v) + root.pulled(10, v) + root.pulled(11, v);
+    }
+    /// The value under the pointer at `x`, snapped.
+    pure function at(x: length) -> int {
+        return Math.clamp(root.snapped(root.minimum + Math.round((x - root.thumb / 2) / root.span * root.range)), root.minimum, root.maximum);
+    }
+    /// Where a value is along the slider (the thumb's centre), for tests and the dots.
+    public pure function x-of(v: int) -> length {
+        return root.thumb / 2 + root.span * ((v - root.minimum) / root.range);
+    }
+    function nudge(by: int) {
+        root.value = Math.clamp(root.value + by, root.minimum, root.maximum);
+        root.moved(root.value);
+        root.committed(root.value);
+    }
+
+    // The track, its filled part and the dots under the snap points.
+    Rectangle {
+        x: root.thumb / 2;
+        y: 14px;
+        width: root.span;
+        height: 8px;
+        border-radius: 4px;
+        background: #E1E1DE;
+    }
+
+    Rectangle {
+        x: root.thumb / 2;
+        y: 14px;
+        width: root.span * root.frac;
+        height: 8px;
+        border-radius: 4px;
+        background: #2B2F36;
+    }
+
+    for s[i] in root.snaps : Rectangle {
+        x: root.x-of(s) - 2px;
+        y: 33px;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        background: root.value == s ? #2B2F36 : #8B919A;
+    }
+
+    Rectangle {
+        x: root.span * root.frac;
+        y: 8px;
+        width: root.thumb;
+        height: 20px;
+        border-radius: 7px;
+        background: #FFFFFD;
+        border-width: 2px;
+        border-color: #2B2F36;
+        drop-shadow-color: fs.has-focus ? #6FA2F5 : transparent;
+        drop-shadow-blur: 5px;
+    }
+
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.text == Key.LeftArrow) {
+                root.nudge(-root.step);
+                return accept;
+            }
+            if (e.text == Key.RightArrow) {
+                root.nudge(root.step);
+                return accept;
+            }
+            if (e.text == Key.Home) {
+                root.nudge(root.minimum - root.value);
+                return accept;
+            }
+            if (e.text == Key.End) {
+                root.nudge(root.maximum - root.value);
+                return accept;
+            }
+            reject
+        }
+    }
+
+    area := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.button != PointerEventButton.left) {
+                return;
+            }
+            if (e.kind == PointerEventKind.down) {
+                fs.focus();
+                root.value = root.at(self.mouse-x);
+                root.moved(root.value);
+            } else if (e.kind == PointerEventKind.up) {
+                root.committed(root.value);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.value = root.at(self.mouse-x);
+                root.moved(root.value);
+            }
+        }
+    }
+}
+
+/// A number box: a dark box of digits over whole numbers `minimum..=maximum`.
+///
+/// Only digits can be typed. Enter or leaving the box commits (the number is clamped into the range
+/// and `committed` fires when it changed), Up and Down step it by `step` and commit, Esc puts back
+/// the number that was there. Two sizes: 60 by 44 with 19px digits, or `compact`, 46 by 32 with
+/// 14px digits.
+export component NumberBox inherits Rectangle {
+    in-out property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <bool> compact: false;
+    in property <string> accessible-name;
+    /// The box has the keyboard focus (for tests).
+    out property <bool> editing: input.has-focus;
+    /// What the box shows (for tests).
+    out property <string> shown: input.text;
+    callback committed(int);
+
+    width: root.compact ? 46px : 60px;
+    height: root.compact ? 32px : 44px;
+    border-radius: root.compact ? 8px : 10.8px;
+    background: #2B2F36;
+    accessible-role: spinbox;
+    accessible-label: root.accessible-name;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-action-increment => { root.go(root.value + root.step); }
+    accessible-action-decrement => { root.go(root.value - root.step); }
+
+    changed value => { input.text = root.value; }
+
+    /// The number typed so far, or the one that was there when nothing (or nothing usable) is.
+    pure function typed() -> int {
+        return input.text == "" ? root.value : Math.round(input.text.to-float());
+    }
+    /// Show `n` (clamped) and commit it when it differs.
+    function go(n: int) {
+        root.settle(Math.clamp(n, root.minimum, root.maximum));
+    }
+    function settle(n: int) {
+        input.text = n;
+        if (n != root.value) {
+            root.value = n;
+            root.committed(n);
+        }
+    }
+
+    input := TextInput {
+        x: 0px;
+        y: (root.height - self.height) / 2;
+        width: root.width;
+        height: root.compact ? 24px : 34px;
+        text: root.value;
+        input-type: InputType.number;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-family: Theme.handwriting;
+        font-size: (root.compact ? 14px : 19px) * Theme.ui-fit;
+        color: #FFFFFD;
+        selection-background-color: #6FA2F5;
+        selection-foreground-color: #FFFFFD;
+        single-line: true;
+        accepted => {
+            root.go(root.typed());
+            self.select-all();
+        }
+        changed has-focus => {
+            if (self.has-focus) {
+                self.select-all();
+            } else {
+                root.go(root.typed());
+            }
+        }
+        key-pressed(e) => {
+            if (e.text == Key.UpArrow) {
+                root.go(root.typed() + root.step);
+                return accept;
+            }
+            if (e.text == Key.DownArrow) {
+                root.go(root.typed() - root.step);
+                return accept;
+            }
+            if (e.text == Key.Escape) {
+                self.text = root.value;
+                return accept;
+            }
+            reject
+        }
+    }
+}

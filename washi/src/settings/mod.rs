@@ -18,6 +18,8 @@
 
 pub mod anim;
 pub mod appearance;
+pub mod font_drop;
+pub mod fonts;
 pub mod shortcuts;
 pub mod general;
 pub mod stats;
@@ -27,7 +29,7 @@ pub mod tape;
 use crate::note_window::{app_icon, SettingsWindow};
 use crate::platform::{NoteId, ScreenRect};
 use crate::storage::Geometry;
-use anim::{contains, fit_on_screen, screen_limit, grow_pose, logical_areas, paper_of_note, tab_settle, union, window_bounds, lerp_rect, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, TICK, frame_step};
+use anim::{contains, fit_on_screen, screen_limit, grow_pose, logical_areas, paper_of_note, tab_settle, union, window_bounds, lerp_rect, Ease, Pose, RectF, Tween, GROW, TAB_SWITCH, MARGIN, NOTE_FADE, PAPER_MIN_H, PAPER_W, SIDEBAR_STRIP, MANAGER_STRIP, TICK, frame_step};
 use slint::ComponentHandle;
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -62,6 +64,20 @@ pub struct Hooks {
     pub ui_scale_changed: Rc<dyn Fn(f32)>,
     /// The Letter spacing changed (already saved), to this many em: every note lays its text out again.
     pub letter_spacing_changed: Rc<dyn Fn(f32)>,
+    /// The Font size changed (already saved): every note lays its text out at the new size.
+    pub font_size_changed: Rc<dyn Fn(u32)>,
+    /// A row of the Font manager's list was pressed (its index; 0 is the Default font): pick it.
+    pub font_picked: Rc<dyn Fn(usize)>,
+    /// A row's "Remove" was pressed.
+    pub font_removed: Rc<dyn Fn(usize)>,
+    /// The "Install a font" area was pressed: ask for a file and install it.
+    pub font_install: Rc<dyn Fn()>,
+    /// An Axis slider of the Font in use moved while being dragged: (axis, value). Only the preview
+    /// follows.
+    pub font_axis_moved: Rc<dyn Fn(i32, i32)>,
+    /// An Axis slider was let go at (axis, value), or a number was typed: save it, make the full
+    /// Face set and update every window.
+    pub font_axis_committed: Rc<dyn Fn(i32, i32)>,
 }
 
 #[derive(Clone, Debug)]
@@ -72,6 +88,10 @@ enum Phase {
     Morph { tween: Tween, closing: bool },
     /// The Paper's height tweens to the tab's, and the new tab's content (shown at once) settles in.
     Tab { h: Tween },
+    /// The Font manager slides out (or in): its strip on the page's right goes from `from_right` to
+    /// `to_right` px while the Paper moves from `tab_from` to `tab_to` (it shifts left when the
+    /// screen has no room for the slip).
+    Manager { h: Tween, from_right: f32, to_right: f32 },
     /// At rest (the tick timer is stopped).
     Open,
     /// Settings hidden again; the host fades its text back in.
@@ -105,6 +125,12 @@ pub struct SettingsView {
     tick: slint::Timer,
     /// Hides the scrollbar a moment after the last scroll.
     scroll_hold: slint::Timer,
+    /// The same for the Font manager's list.
+    manager_hold: slint::Timer,
+    /// The Font manager is open, or opening (false: closed, or closing).
+    manager_open: Cell<bool>,
+    /// The Font manager's strip last applied (logical px, 0 to `MANAGER_STRIP`).
+    right: Cell<f32>,
     /// Whether the fine (1 ms) system timer resolution is held for the frame timer.
     fine_timer: Cell<bool>,
     me: Weak<SettingsView>,
@@ -136,6 +162,7 @@ impl SettingsView {
     /// Open Settings over the note `host` (its window at `host_window`, logical px).
     pub fn open(host: NoteId, host_window: Geometry, pinned: bool, hooks: Hooks) -> Result<Rc<Self>, slint::PlatformError> {
         let ui = SettingsWindow::new()?;
+        crate::fonts::current().apply(&ui.global::<crate::note_window::Theme>());
         ui.set_app_icon(app_icon());
         ui.set_pinned(pinned);
         ui.set_shortcuts(shortcuts::model());
@@ -149,7 +176,8 @@ impl SettingsView {
             hooks.sidebar_themes_changed.clone(),
             hooks.ui_scale_changed.clone(),
         );
-        style::wire(&ui, hooks.general.env.clone(), hooks.general.db.clone(), hooks.letter_spacing_changed.clone());
+        style::wire(&ui, hooks.general.env.clone(), hooks.general.db.clone(), hooks.letter_spacing_changed.clone(), hooks.font_size_changed.clone());
+        fonts::wire(&ui);
         let scale = crate::ui_scale::WindowScale::attach(ui.window());
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,
@@ -165,6 +193,9 @@ impl SettingsView {
             }),
             tick: slint::Timer::default(),
             scroll_hold: slint::Timer::default(),
+            manager_hold: slint::Timer::default(),
+            manager_open: Cell::new(false),
+            right: Cell::new(0.0),
             fine_timer: Cell::new(false),
             me: me.clone(),
             morph_from: Cell::new(paper_of_note(host_window)),
@@ -187,7 +218,7 @@ impl SettingsView {
         // Settings shows at once, exactly on the note's Paper (blank, as the note's text is gone beneath
         // it); the grow starts on the next frame, when the host's window is hidden. The window already
         // covers the whole grow, so it is not resized while it plays.
-        view.reserve(window_bounds(view.morph_from.get(), 0.0), window_bounds(view.morph_to.get(), SIDEBAR_STRIP));
+        view.reserve(window_bounds(view.morph_from.get(), 0.0, 0.0), window_bounds(view.morph_to.get(), SIDEBAR_STRIP, 0.0));
         view.apply(grow_pose(view.morph_from.get(), view.morph_to.get(), 0.0));
         let _ = view.ui.show();
         crate::win::set_window_icon_when_ready(&view.ui);
@@ -203,17 +234,20 @@ impl SettingsView {
         let areas = self.areas();
         self.limit_to_screen(note, &areas);
         let want = RectF { x: note.x, y: note.y, w: PAPER_W, h: self.ui.invoke_fitted_height_for(self.tab.get()).max(PAPER_MIN_H) };
-        fit_on_screen(want, SIDEBAR_STRIP, &areas)
+        fit_on_screen(want, SIDEBAR_STRIP, 0.0, &areas)
     }
 
     /// Draw `pose` inside the window. The window only changes if the pose falls outside it (a
     /// transition that did not reserve room for it).
     fn apply(&self, pose: Pose) {
         self.strip.set(pose.strip);
+        self.right.set(pose.right);
         self.ui.set_strip(pose.strip);
+        self.ui.set_manager_strip(pose.right);
+        self.ui.set_manager_progress(pose.right / MANAGER_STRIP);
         self.paper.set(pose.paper);
         self.ui.set_content_opacity(pose.content);
-        let page = window_bounds(pose.paper, pose.strip);
+        let page = window_bounds(pose.paper, pose.strip, pose.right);
         if !contains(self.canvas.get(), page) {
             self.place(union(self.canvas.get(), page));
         }
@@ -222,7 +256,7 @@ impl SettingsView {
         let c = self.canvas.get();
         self.ui.set_page_x(pose.paper.x - MARGIN - pose.strip - c.x as f32);
         self.ui.set_page_y(pose.paper.y - MARGIN - c.y as f32);
-        self.ui.set_page_w(pose.paper.w + 2.0 * MARGIN + pose.strip);
+        self.ui.set_page_w(pose.paper.w + 2.0 * MARGIN + pose.strip + pose.right);
         self.ui.set_page_h(pose.paper.h + 2.0 * MARGIN);
     }
 
@@ -267,15 +301,16 @@ impl SettingsView {
         let areas = self.areas();
         self.limit_to_screen(paper, &areas);
         let h = self.ui.invoke_fitted_height_for(self.tab.get()).max(PAPER_MIN_H);
-        let fit = fit_on_screen(RectF { x: paper.x, y: paper.y, w: PAPER_W, h }, SIDEBAR_STRIP, &areas);
+        let right = self.right_target();
+        let fit = fit_on_screen(RectF { x: paper.x, y: paper.y, w: PAPER_W, h }, SIDEBAR_STRIP, right, &areas);
         let phase = self.phase.borrow().clone();
         match phase {
-            Phase::Open | Phase::Tab { .. } => {
+            Phase::Open | Phase::Tab { .. } | Phase::Manager { .. } => {
                 *self.phase.borrow_mut() = Phase::Open;
                 self.stop_ticking();
                 self.ui.set_content_dy(0.0);
                 self.morph_to.set(fit);
-                self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, content: 1.0 });
+                self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, right, content: 1.0 });
                 self.fit();
             }
             Phase::Morph { closing: false, .. } => self.morph_to.set(fit),
@@ -399,6 +434,35 @@ impl SettingsView {
                 });
             });
         }
+        {
+            let me = me.clone();
+            self.ui.on_manage_clicked(move || {
+                if let Some(v) = me.upgrade() {
+                    v.toggle_manager();
+                }
+            });
+        }
+        {
+            let (picked, removed, install) = (self.hooks.font_picked.clone(), self.hooks.font_removed.clone(), self.hooks.font_install.clone());
+            self.ui.on_manager_row_clicked(move |i| picked(i.max(0) as usize));
+            self.ui.on_manager_remove_clicked(move |i| removed(i.max(0) as usize));
+            self.ui.on_manager_install_clicked(move || install());
+            let (moved, committed) = (self.hooks.font_axis_moved.clone(), self.hooks.font_axis_committed.clone());
+            self.ui.on_manager_axis_moved(move |axis, v| moved(axis, v));
+            self.ui.on_manager_axis_committed(move |axis, v| committed(axis, v));
+        }
+        {
+            let me = me.clone();
+            self.ui.on_manager_scroll_activity(move || {
+                let Some(v) = me.upgrade() else { return };
+                let ui = v.ui.as_weak();
+                v.manager_hold.start(slint::TimerMode::SingleShot, crate::note_window::SCROLLBAR_HOLD, move || {
+                    if let Some(ui) = ui.upgrade() {
+                        ui.set_manager_scrolling(false);
+                    }
+                });
+            });
+        }
         self.ui.on_tab_clicked(move |to| {
             if let Some(v) = me.upgrade() {
                 v.select_tab(to);
@@ -420,8 +484,8 @@ impl SettingsView {
         if (h - now.h).abs() < 0.5 {
             return;
         }
-        let fit = fit_on_screen(RectF { h, ..now }, SIDEBAR_STRIP, &areas);
-        self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, content: 1.0 });
+        let fit = fit_on_screen(RectF { h, ..now }, SIDEBAR_STRIP, self.right.get(), &areas);
+        self.apply(Pose { paper: fit, strip: SIDEBAR_STRIP, right: self.right.get(), content: 1.0 });
         self.fit();
     }
 
@@ -438,9 +502,11 @@ impl SettingsView {
     /// height to the tab's while the content settles in. Starting from wherever the last tween is, so
     /// a retarget is smooth.
     pub fn select_tab(&self, to: i32) {
-        if !matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. }) || to == self.tab.get() {
+        if !matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. } | Phase::Manager { .. }) || to == self.tab.get() {
             return;
         }
+        // leaving the Font & Style Tab (or any switch) closes the Font manager
+        self.shut_manager_now();
         let now = self.anim_now();
         self.ui.set_selected_tab(to);
         self.ui.set_shown_tab(to);
@@ -452,17 +518,78 @@ impl SettingsView {
         let areas = self.areas();
         self.limit_to_screen(from, &areas);
         let want = RectF { h: self.ui.invoke_fitted_height_for(to).max(PAPER_MIN_H), ..from };
-        let target = fit_on_screen(want, SIDEBAR_STRIP, &areas);
+        let target = fit_on_screen(want, SIDEBAR_STRIP, 0.0, &areas);
         self.tab_from.set(from);
         self.tab_to.set(target);
         self.tab.set(to);
-        self.reserve(window_bounds(from, SIDEBAR_STRIP), window_bounds(target, SIDEBAR_STRIP));
+        self.reserve(window_bounds(from, SIDEBAR_STRIP, 0.0), window_bounds(target, SIDEBAR_STRIP, 0.0));
         let (content, dy) = tab_settle(0.0);
-        self.apply(Pose { paper: from, strip: SIDEBAR_STRIP, content });
+        self.apply(Pose { paper: from, strip: SIDEBAR_STRIP, right: 0.0, content });
         self.ui.set_content_dy(dy);
         *self.phase.borrow_mut() = Phase::Tab { h: Tween::new(0.0, 1.0, now, TAB_SWITCH, Ease::OutCubic) };
         self.start_ticking();
         self.sync_general();
+    }
+
+    /// The Font manager's strip when its tween has finished: all of it while it is open.
+    fn right_target(&self) -> f32 {
+        if self.manager_open.get() {
+            MANAGER_STRIP
+        } else {
+            0.0
+        }
+    }
+
+    /// The manage button or Esc: open the Font manager if it is closed, close it if it is open. The
+    /// slip slides out beside the Paper (190 ms on the Settings clock) while the window's strip on
+    /// the right grows to hold it; the Paper moves left only as far as the screen's right edge needs.
+    pub fn toggle_manager(&self) {
+        let resting = match *self.phase.borrow() {
+            Phase::Open => true,
+            Phase::Manager { .. } => false,
+            _ => {
+                // Esc must never be swallowed by a phase that cannot run the slip's tween
+                self.shut_manager_now();
+                return;
+            }
+        };
+        let open = !self.manager_open.get();
+        let now = self.anim_now();
+        let from = if resting { self.actual_paper() } else { self.paper.get() };
+        let areas = self.areas();
+        self.limit_to_screen(from, &areas);
+        let target = if open { fit_on_screen(from, SIDEBAR_STRIP, MANAGER_STRIP, &areas) } else { from };
+        let (from_right, to_right) = (self.right.get(), if open { MANAGER_STRIP } else { 0.0 });
+        self.manager_open.set(open);
+        self.ui.set_manager_open(open);
+        self.ui.set_manager_install_hover(false);
+        self.tab_from.set(from);
+        self.tab_to.set(target);
+        self.reserve(window_bounds(from, SIDEBAR_STRIP, from_right), window_bounds(target, SIDEBAR_STRIP, from_right.max(to_right)));
+        *self.phase.borrow_mut() = Phase::Manager { h: Tween::new(0.0, 1.0, now, GROW, Ease::OutCubic), from_right, to_right };
+        self.start_ticking();
+    }
+
+    /// Close the Font manager at once, wherever its tween is (a Tab switch or closing Settings):
+    /// the Paper stays where it is.
+    fn shut_manager_now(&self) {
+        if !self.manager_open.get() && self.right.get() == 0.0 {
+            return;
+        }
+        let resting = matches!(*self.phase.borrow(), Phase::Open);
+        let paper = if resting { self.actual_paper() } else { self.paper.get() };
+        self.manager_open.set(false);
+        self.ui.set_manager_open(false);
+        self.ui.set_manager_install_hover(false);
+        self.apply(Pose { paper, strip: SIDEBAR_STRIP, right: 0.0, content: 1.0 });
+        if matches!(*self.phase.borrow(), Phase::Manager { .. }) {
+            *self.phase.borrow_mut() = Phase::Open;
+        }
+    }
+
+    /// Whether the Font manager is open (or opening).
+    pub fn is_manager_open(&self) -> bool {
+        self.manager_open.get()
     }
 
     /// Whether the stats refresh is running (only while General is showing).
@@ -473,7 +600,7 @@ impl SettingsView {
     /// Resource use refreshes only while the page is at rest or switching tabs and General is the
     /// tab the Sidebar lights: not mid-open, not once closing has begun, not on another tab.
     fn sync_general(&self) {
-        let page_up = matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. });
+        let page_up = matches!(*self.phase.borrow(), Phase::Open | Phase::Tab { .. } | Phase::Manager { .. });
         self.general.set_showing(page_up && self.tab.get() == 0);
     }
 
@@ -582,8 +709,14 @@ impl SettingsView {
             Phase::Tab { h } => {
                 let (e, done) = h.sample(now);
                 let (content, dy) = tab_settle(h.progress(now));
-                self.apply(Pose { paper: lerp_rect(self.tab_from.get(), self.tab_to.get(), e), strip: SIDEBAR_STRIP, content });
+                self.apply(Pose { paper: lerp_rect(self.tab_from.get(), self.tab_to.get(), e), strip: SIDEBAR_STRIP, right: 0.0, content });
                 self.ui.set_content_dy(dy);
+                done.then_some(Phase::Open)
+            }
+            Phase::Manager { h, from_right, to_right } => {
+                let (e, done) = h.sample(now);
+                let right = from_right + (to_right - from_right) * e;
+                self.apply(Pose { paper: lerp_rect(self.tab_from.get(), self.tab_to.get(), e), strip: SIDEBAR_STRIP, right, content: 1.0 });
                 done.then_some(Phase::Open)
             }
             Phase::Open | Phase::Done => {
@@ -607,6 +740,8 @@ impl SettingsView {
 
     /// X or Esc: play the transition backwards, from wherever it is, and put the host back.
     pub fn close(&self) {
+        // the Font manager closes with Settings
+        self.shut_manager_now();
         let now = self.anim_now();
         let phase = self.phase.borrow().clone();
         let next = match phase {
@@ -621,7 +756,7 @@ impl SettingsView {
                 self.freeze_close(false);
                 Phase::Morph { tween: Tween::new(0.0, 0.0, now, TICK, Ease::Linear), closing: true }
             }
-            Phase::Open | Phase::Tab { .. } => {
+            Phase::Open | Phase::Tab { .. } | Phase::Manager { .. } => {
                 // Mid tab switch the page is where the last frame put it; the close morph takes over.
                 self.freeze_close(true);
                 Phase::Morph { tween: Tween::new(1.0, 0.0, now, GROW, Ease::OutCubic), closing: true }
@@ -629,7 +764,7 @@ impl SettingsView {
         };
         // the close morph plays inside one window too
         self.ui.set_content_dy(0.0);
-        self.reserve(self.page_geometry(), window_bounds(self.morph_from.get(), 0.0));
+        self.reserve(self.page_geometry(), window_bounds(self.morph_from.get(), 0.0, 0.0));
         *self.phase.borrow_mut() = next;
         self.start_ticking();
         self.sync_general();
@@ -651,11 +786,11 @@ impl SettingsView {
     fn actual_paper(&self) -> RectF {
         self.sync_canvas();
         let page = self.page_geometry();
-        let strip = self.strip.get();
+        let (strip, right) = (self.strip.get(), self.right.get());
         RectF {
             x: page.x as f32 + strip + MARGIN,
             y: page.y as f32 + MARGIN,
-            w: page.w as f32 - strip - 2.0 * MARGIN,
+            w: page.w as f32 - strip - right - 2.0 * MARGIN,
             h: page.h as f32 - 2.0 * MARGIN,
         }
     }
