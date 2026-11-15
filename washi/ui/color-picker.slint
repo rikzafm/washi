@@ -286,7 +286,7 @@ export component ColorPicker inherits Rectangle {
     // the caption, in the handwriting and the current ink, and Clear
     TextAt { f: root.f; du: root.pl + 14 + 110; dv: root.caption-v;
         width: 220px; height: 28px; text: root.caption; horizontal-alignment: left;
-        font-family: Theme.handwriting; font-size: 20px; color: root.ink-now; }
+        font-family: Theme.handwriting; font-size: 20px * Theme.ui-fit; color: root.ink-now; }
     TextAt { f: root.f; du: root.pl + root.pw - 14 - 20; dv: root.caption-v;
         width: 40px; height: 20px; text: "Clear"; horizontal-alignment: right;
         font-family: "Gelasio"; font-size: 13px; color: PickerMetrics.label; }

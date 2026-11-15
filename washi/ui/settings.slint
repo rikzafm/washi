@@ -2,6 +2,7 @@
 // Like All notes, the content is laid out in the Paper's tilted frame (`PaperFrame`) so glyphs stay
 // upright on the tilted baseline. The numbers follow the mockup ("Setting Page" artboard) 1:1.
 
+import { Theme } from "theme.slint";
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { PaperTheme } from "paper-theme.slint";
@@ -86,7 +87,7 @@ component SidebarTab inherits Rectangle {
         width: SidebarPanel.label-w * 1px;
         height: 48px;
         text: root.text;
-        font-size: 24px;
+        font-size: 24px * Theme.ui-fit;
         font-weight: root.selected ? 700 : 400;
         vertical-alignment: center;
         halo: root.halo;
@@ -169,7 +170,7 @@ component SettingsSidebar inherits Rectangle {
         width: 240px;
         height: 71px;
         text: "Settings";
-        font-size: 44px;
+        font-size: 44px * Theme.ui-fit;
         vertical-alignment: center;
         halo: SidebarThemes.halo-for(root.theme);
     }
@@ -583,7 +584,7 @@ export component SettingsWindow inherits Window {
             height: 52.8px;
             text: SettingsMetrics.tabs[root.shown-tab];
             opacity: root.content-opacity;
-            font-size: 48px;
+            font-size: 48px * Theme.ui-fit;
             vertical-alignment: center;
             line-height-factor: 1.1 / 1.6064;
         }

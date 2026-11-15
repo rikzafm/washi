@@ -316,6 +316,16 @@ impl App {
         for v in self.0.viewers.borrow().iter() {
             font.apply(&v.ui().global::<crate::note_window::Theme>());
         }
+        // popups that are open while the font changes (the Settings page is the usual way to get here)
+        if let Some(d) = self.dropdown() {
+            font.apply(&d.ui().global::<crate::note_window::Theme>());
+        }
+        if let Some(m) = self.context_menu() {
+            font.apply(&m.ui().global::<crate::note_window::Theme>());
+        }
+        if let Some(d) = self.delete_dialog() {
+            font.apply(&d.ui().global::<crate::note_window::Theme>());
+        }
     }
 
     /// The Settings page has closed: drop it on the next turn of the loop, never inside its own callback.

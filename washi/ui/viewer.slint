@@ -206,7 +206,7 @@ export component ImageViewerWindow inherits Window {
         text: p.text;
         wrap: no-wrap;
         font-family: Theme.handwriting;
-        font-size: 33px;
+        font-size: 33px * Theme.ui-fit;
         color: Theme.ink;
     }
     for p in root.info-pieces: Text {
@@ -215,7 +215,7 @@ export component ImageViewerWindow inherits Window {
         text: p.text;
         wrap: no-wrap;
         font-family: Theme.handwriting;
-        font-size: 20px;
+        font-size: 20px * Theme.ui-fit;
         color: #7F8797;
     }
     Text {
@@ -224,7 +224,7 @@ export component ImageViewerWindow inherits Window {
         text: "\{Math.round(root.scale * 100)}%";
         wrap: no-wrap;
         font-family: Theme.handwriting;
-        font-size: 20px;
+        font-size: 20px * Theme.ui-fit;
         color: #7F8797;
     }
 

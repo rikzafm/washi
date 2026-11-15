@@ -6,6 +6,7 @@
 // Rust owns every value here (they are app-wide preferences in the database): the tab shows what it
 // is given and reports a choice through a callback. Only which dropdown is open lives in the tab.
 
+import { Theme } from "theme.slint";
 import { PX, PaperFrame, TapeShape, PBox, PText, SettingRow, Switch, PickerButton, ListItem, ListPanel, SectionHeading } from "settings-widgets.slint";
 import { SidebarThemes } from "sidebar-panel.slint";
 
@@ -36,7 +37,7 @@ component AppearanceList inherits PBox {
 component SubHeading inherits PText {
     width: 448px;
     height: 32px;
-    font-size: 20px;
+    font-size: 20px * Theme.ui-fit;
     font-weight: 700;
     vertical-alignment: center;
 }
