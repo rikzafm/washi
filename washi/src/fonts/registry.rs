@@ -9,7 +9,7 @@
 //!
 //! Slint's collection is shared by every window of the process; calls come from the UI thread.
 
-use super::FaceSet;
+use super::{FaceSet, RegularFace};
 use slint::fontique_011::{fontique, shared_collection};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -39,6 +39,8 @@ thread_local! {
     static IN_USE: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     /// Preview faces by font id, to draw each font's name in its own face.
     static PREVIEWS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    /// The family of the Regular-only face a slider drag is showing, if one is.
+    static DRAG: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Register the five faces of `set`. Windows must be given its families only after this returns.
@@ -46,6 +48,7 @@ thread_local! {
 /// has switched. (A fresh process starts with the bundled Default font, which is not registered
 /// here: it is embedded.)
 pub fn activate(set: &FaceSet) {
+    end_drag();
     let faces = [&set.regular, &set.bold, &set.italic, &set.bold_italic];
     for (bytes, (weight, italic)) in faces.into_iter().zip(TEXT_FACES) {
         register(bytes, &set.text_family, weight, italic);
@@ -57,6 +60,7 @@ pub fn activate(set: &FaceSet) {
 
 /// The Default font is back (embedded, nothing to register): take the Face set in use out.
 pub fn deactivate() {
+    end_drag();
     let old = IN_USE.with(|u| u.borrow_mut().take());
     retire(old);
 }
@@ -96,4 +100,25 @@ pub fn forget_preview(id: &str) {
     if let Some(family) = PREVIEWS.with(|p| p.borrow_mut().remove(id)) {
         unregister(&family, 400.0, false);
     }
+}
+
+/// Register the Regular-only face of a slider drag (a fresh family each time). The one before it
+/// goes on the next turn of the event loop, when the window has switched to this one. Returns the
+/// family to draw in.
+pub fn drag_face(face: &RegularFace) -> String {
+    register(&face.face, &face.family, 400.0, false);
+    let old = DRAG.with(|d| d.borrow_mut().replace(face.family.clone()));
+    retire_drag(old);
+    face.family.clone()
+}
+
+/// The drag is over (its full Face set is active, or the drag was given up): take its face out.
+pub fn end_drag() {
+    let old = DRAG.with(|d| d.borrow_mut().take());
+    retire_drag(old);
+}
+
+fn retire_drag(old: Option<String>) {
+    let Some(family) = old else { return };
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || unregister(&family, 400.0, false));
 }

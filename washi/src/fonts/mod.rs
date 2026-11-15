@@ -97,6 +97,15 @@ const BOLD_ITALIC: &[u8] = include_bytes!("../../../fonts/ShadowsIntoLight-BoldI
 pub const DEFAULT_TEXT_FAMILY: &str = "Shadows Into Light";
 pub const DEFAULT_CARET_FAMILY: &str = "Washi Caret";
 
+/// The Default font as a package: its bundled Regular, with its Bold as the bold outline source.
+/// Baking it at a slant gives the leaning Default font (Settings › Font manager › Slant); at no
+/// slant the bundled faces themselves are used instead (`ActiveFont::default_font`).
+pub fn default_package() -> FontPackage {
+    let mut pkg = package_from_font(REGULAR.to_vec()).expect("the bundled font parses");
+    pkg.bold = Some(BOLD.to_vec());
+    pkg
+}
+
 /// Index of a face in [`FaceData`]: regular, bold, italic, bold italic.
 pub const fn face_index(bold: bool, italic: bool) -> usize {
     (bold as usize) | ((italic as usize) << 1)
@@ -170,6 +179,15 @@ impl ThemeMetrics {
             descender_room_em: room(m.descent_em) + 0.05,
             italic_overhang_em: room(m.italic_overhang_em),
         }
+    }
+
+    /// Set these numbers on a window's `Theme` (the families are set apart).
+    pub fn apply(&self, theme: &crate::note_window::Theme<'_>) {
+        theme.set_handwriting_line_em(self.line_em);
+        theme.set_lead_em(self.space_em);
+        theme.set_lean_room(self.lean_room_em);
+        theme.set_descender_room(self.descender_room_em);
+        theme.set_italic_overhang(self.italic_overhang_em);
     }
 
     /// Measure a regular face (the bundled Default font has no bake to ask).
@@ -316,14 +334,18 @@ impl ActiveFont {
     pub fn apply(&self, theme: &crate::note_window::Theme<'_>) {
         theme.set_handwriting(self.text_family.as_str().into());
         theme.set_caret_font(self.caret_family.as_str().into());
-        theme.set_handwriting_line_em(self.metrics.line_em);
-        theme.set_lead_em(self.metrics.space_em);
-        theme.set_lean_room(self.metrics.lean_room_em);
-        theme.set_descender_room(self.metrics.descender_room_em);
-        theme.set_italic_overhang(self.metrics.italic_overhang_em);
+        self.metrics.apply(theme);
         SizeTokens::at(size()).apply(theme);
         theme.set_text_epoch(theme.get_text_epoch().wrapping_add(1));
     }
+}
+
+/// Show only a Regular face (a slider drag's preview, `family`, made with `metrics`) in a window:
+/// the words of its `Theme` are drawn and measured with it, the caret family and sizes stay.
+pub fn apply_regular_preview(theme: &crate::note_window::Theme<'_>, family: &str, metrics: &ThemeMetrics) {
+    theme.set_handwriting(family.into());
+    metrics.apply(theme);
+    theme.set_text_epoch(theme.get_text_epoch().wrapping_add(1));
 }
 
 thread_local! {

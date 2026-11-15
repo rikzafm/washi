@@ -8,12 +8,107 @@
 //! window's `on_manager_row_clicked`, `on_manager_remove_clicked` and `on_manager_install_clicked`.
 //! The slip itself (open, close, its strip in the window) is `SettingsView::toggle_manager`.
 
-use crate::fonts::{AxisRanges, AxisValues, DEFAULT_TEXT_FAMILY};
-use crate::note_window::{FontListRow, SettingsWindow};
+use crate::fonts::{AxisRanges, AxisValues, DEFAULT_TEXT_FAMILY, SHEAR_MAX_DEG};
+use crate::note_window::{AxisRow, FontListRow, SettingsWindow};
 use slint::{ModelRc, VecModel};
 
 /// A row of the list with nothing extra under it, in logical px.
 pub const ROW_H: f32 = 64.0;
+
+/// One line of the Axis panel and the room around the three of them, logical px.
+pub const AXIS_H: f32 = 50.0;
+pub const PANEL_PAD: f32 = 10.0;
+/// The room the Axis panel takes under the Font in use's row (`RowSpec::extra`).
+pub const PANEL_H: f32 = 3.0 * AXIS_H + PANEL_PAD;
+
+/// Axis numbers of the panel's lines (what `manager-axis-moved` / `-committed` carry).
+pub const AXIS_WEIGHT: i32 = 0;
+pub const AXIS_WIDTH: i32 = 1;
+pub const AXIS_SLANT: i32 = 2;
+
+/// One line of the Axis panel: a slider over whole numbers, or "Not in this font".
+#[derive(Clone, Debug, PartialEq)]
+pub struct AxisSpec {
+    pub label: &'static str,
+    /// The font has this axis (Slant: always).
+    pub present: bool,
+    pub min: i32,
+    pub max: i32,
+    pub value: i32,
+    /// What an arrow key moves the slider by, and how near a snap point a drag lands on it.
+    pub step: i32,
+    pub pull: i32,
+    pub snaps: Vec<i32>,
+    pub unit: &'static str,
+}
+
+/// The snap points of the Width slider: every one of these inside the font's range.
+const WIDTH_SNAPS: [i32; 5] = [50, 75, 100, 125, 150];
+const SLANT_SNAPS: [i32; 3] = [0, 5, 10];
+/// The slider draws at most this many snap points (`PSlider`).
+const MAX_SNAPS: usize = 12;
+
+/// The Axis panel of a font with `axes` at `values`: Weight, Width and Slant lines. Weight and Width
+/// are only there when the font has the axis. Slant is always: 0 to the font's own slant axis
+/// maximum, or 0 to 12 degrees when Washi shears it.
+pub fn axis_panel(axes: &AxisRanges, values: AxisValues) -> Vec<AxisSpec> {
+    let whole = |v: f32| v.round() as i32;
+    let weight = match axes.weight {
+        Some(r) => {
+            let (min, max) = (whole(r.min), whole(r.max));
+            let value = whole(values.weight.unwrap_or(r.default)).clamp(min, max);
+            let snaps = (min..=max).filter(|v| v % 100 == 0).take(MAX_SNAPS).collect();
+            AxisSpec { label: "Weight", present: true, min, max, value, step: 10, pull: 20, snaps, unit: "" }
+        }
+        None => absent("Weight"),
+    };
+    let width = match axes.width {
+        Some(r) => {
+            let (min, max) = (whole(r.min), whole(r.max));
+            let value = whole(values.width.unwrap_or(r.default)).clamp(min, max);
+            let snaps = WIDTH_SNAPS.into_iter().filter(|v| (min..=max).contains(v)).collect();
+            AxisSpec { label: "Width", present: true, min, max, value, step: 1, pull: 2, snaps, unit: "%" }
+        }
+        None => absent("Width"),
+    };
+    let (max, default) = match axes.slant {
+        Some(r) => (whole(r.max).max(1), r.default),
+        None => (SHEAR_MAX_DEG as i32, 0.0),
+    };
+    let slant = AxisSpec {
+        label: "Slant",
+        present: true,
+        min: 0,
+        max,
+        value: whole(values.slant.unwrap_or(default)).clamp(0, max),
+        step: 1,
+        pull: 1,
+        snaps: SLANT_SNAPS.into_iter().filter(|v| *v <= max).collect(),
+        unit: "°",
+    };
+    vec![weight, width, slant]
+}
+
+fn absent(label: &'static str) -> AxisSpec {
+    AxisSpec { label, present: false, min: 0, max: 0, value: 0, step: 1, pull: 1, snaps: Vec::new(), unit: "" }
+}
+
+/// The Axis values a slider released (or a number typed) at `value` makes, the other axes as they
+/// were. A value outside the axis's range is clamped into it; `None` if the font has no such axis.
+pub fn with_axis(axes: &AxisRanges, values: AxisValues, axis: i32, value: i32) -> Option<AxisValues> {
+    let line = axis_panel(axes, values).into_iter().nth(usize::try_from(axis).ok()?)?;
+    if !line.present {
+        return None;
+    }
+    let v = Some(value.clamp(line.min, line.max) as f32);
+    let mut out = values;
+    match axis {
+        AXIS_WEIGHT => out.weight = v,
+        AXIS_WIDTH => out.width = v,
+        _ => out.slant = v,
+    }
+    Some(out)
+}
 
 /// What one row of the Font manager's list shows.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +126,8 @@ pub struct RowSpec {
     pub tag: String,
     /// Room under the row's own `ROW_H` (an expanded row's Axis panel), logical px.
     pub extra: f32,
+    /// The Axis panel under the row (the Font in use only; empty otherwise).
+    pub axes: Vec<AxisSpec>,
 }
 
 /// The Default font's row (Shadows Into Light, bundled).
@@ -43,6 +140,7 @@ pub fn default_row(active: bool) -> RowSpec {
         locked: true,
         tag: "Default".into(),
         extra: 0.0,
+        axes: Vec::new(),
     }
 }
 
@@ -62,12 +160,27 @@ pub fn model(rows: &[RowSpec]) -> ModelRc<FontListRow> {
                 tag: r.tag.as_str().into(),
                 top,
                 height,
+                axes: ModelRc::new(VecModel::from(r.axes.iter().map(axis_row).collect::<Vec<_>>())),
             };
             top += height;
             row
         })
         .collect();
     ModelRc::new(VecModel::from(list))
+}
+
+fn axis_row(a: &AxisSpec) -> AxisRow {
+    AxisRow {
+        label: a.label.into(),
+        present: a.present,
+        min: a.min,
+        max: a.max,
+        value: a.value,
+        step: a.step,
+        pull: a.pull,
+        snaps: ModelRc::new(VecModel::from(a.snaps.clone())),
+        unit: a.unit.into(),
+    }
 }
 
 /// The slip's title block above the list and its install area under it (`ManagerMetrics`).

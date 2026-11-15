@@ -79,6 +79,7 @@ impl Harness {
                 locked: false,
                 tag: "Remove".into(),
                 extra: 0.0,
+                axes: Vec::new(),
             });
         }
         self.manager_ui().set_manager_fonts(model(&rows));

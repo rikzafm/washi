@@ -101,6 +101,8 @@ struct Inner {
     font_timer: slint::Timer,
     /// The axes of the installed fonts read so far.
     font_axes: RefCell<fonts::AxesCache>,
+    /// A slider of the Font manager's Axis panel being dragged.
+    axis_drag: RefCell<fonts::AxisDrag>,
 }
 
 #[derive(Clone)]
@@ -175,6 +177,7 @@ impl App {
             font_installs: RefCell::new(Vec::new()),
             font_timer: slint::Timer::default(),
             font_axes: RefCell::new(Default::default()),
+            axis_drag: RefCell::new(Default::default()),
         });
         let host: Rc<dyn SuspendHost> = inner.clone();
         inner.suspend.attach(Rc::downgrade(&host));
