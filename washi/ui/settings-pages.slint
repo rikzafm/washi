@@ -20,7 +20,7 @@ export component ShortcutsPage inherits Rectangle {
 
     // 11 rows of 44px and a 2px dotted rule, then the footnote 18px below (the mockup's gap).
     property <float> rows-bottom: root.top + root.rows.length * 46.0;
-    out property <float> bottom: root.rows-bottom + 18.0 + note.preferred-height / 1px;
+    out property <float> bottom: root.rows-bottom + 18.0 + note.text-h / 1px;
     x: 0px;
     y: 0px;
     width: root.pf.f.w * 1px;
@@ -67,7 +67,7 @@ export component ShortcutsPage inherits Rectangle {
         width: 448px;
         text: "Shortcuts use the letter your keyboard layout types, so they may not work with a non-Latin layout. The toolbar and the ⋯ menu always do.";
         font-size: 19px * Theme.ui-fit;
-        color: #5B616B;
+        ink: #5B616B;
         wrap: word-wrap;
         line-height-factor: 30.0 / (19.0 * 1.6064);
         nudge: 3.0;
@@ -94,7 +94,7 @@ export component PrivacyPage inherits Rectangle {
     property <float> card-h: 32.0 + max(32.0, 2.0 * 27.5);
     property <float> rows-y: root.top + root.card-h + 18.0;
     property <float> note-y: root.rows-y + r1.total + r2.total + r3.total + 18.0;
-    out property <float> bottom: root.note-y + 28.0 + 26.0 + note-t.preferred-height / 1px;
+    out property <float> bottom: root.note-y + 28.0 + 26.0 + note-t.text-h / 1px;
     x: 0px;
     y: 0px;
     width: root.pf.f.w * 1px;
@@ -151,7 +151,7 @@ export component PrivacyPage inherits Rectangle {
         height: 27.5px;
         text: "Your notes are stored in an encrypted database.";
         font-size: 18px * Theme.ui-fit;
-        color: #5B616B;
+        ink: #5B616B;
         vertical-alignment: center;
     }
 
@@ -192,7 +192,7 @@ export component PrivacyPage inherits Rectangle {
         a: 36.0;
         b: root.note-y;
         w: 448.0;
-        h: 28.0 + 26.0 + note-t.preferred-height / 1px;
+        h: 28.0 + 26.0 + note-t.text-h / 1px;
         r: 10.8;
         fill: #F0F0EE;
     }
@@ -210,12 +210,12 @@ export component PrivacyPage inherits Rectangle {
 
     PText {
         pf: root.pf;
-        a: 54.0 + lead-t.preferred-width / 1px + 5.0;
+        a: 54.0 + lead-t.text-w / 1px + 5.0;
         b: root.note-y + 14.0;
         height: 26px;
         text: "It belongs to this Windows";
         font-size: 19px * Theme.ui-fit;
-        color: #5B616B;
+        ink: #5B616B;
         vertical-alignment: center;
     }
 
@@ -226,7 +226,7 @@ export component PrivacyPage inherits Rectangle {
         width: 412px;
         text: "account. If the profile is reset, the notes cannot be opened. Export as Markdown to keep a copy.";
         font-size: 19px * Theme.ui-fit;
-        color: #5B616B;
+        ink: #5B616B;
         wrap: word-wrap;
         nudge: 3.0;
         line-height-factor: 26.0 / (19.0 * 1.6064);

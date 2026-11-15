@@ -36,14 +36,17 @@ export global Theme {
     // The note text's family and the other font-dependent numbers below are set from Rust, on every
     // window, from the active font (src/fonts); the values here are the Default font's.
     in-out property <string> handwriting: "Shadows Into Light";
-    // UI text is drawn at its size times this: clamp(Default font's average advance / the Font in use's, 0.70, 1.0) over a sample of UI labels, so a wide font takes the room the Default font took. 1 for the Default font. Note text never uses it. Set from Rust with the font.
-    in-out property <float> ui-fit: 1;
+    // UI text is drawn at its size times this: clamp(Default font's average advance / the Font in use's, 0.70, 1.0) over a sample of UI labels, so a wide font takes the room the Default font took. 1 for the Default font. Note text never uses it. Set from Rust with the font (as `ui-fit-value`).
+    in-out property <float> ui-fit-value: 1;
+    // What the UI text multiplies its sizes by: `ui-fit-value`, read together with `text-epoch`
+    // (times zero), so a bump of the epoch makes Slint shape every UI text again too.
+    out property <float> ui-fit: self.ui-fit-value + 0 * self.text-epoch;
     // Extra space after every character of a note's text, in em of its size (Settings › Font &
     // Style › Letter spacing; 0 is the font's own). The app sets it from the saved choice, and
     // src/textflow.rs lays the lines out with the same spacing.
     in-out property <float> letter-spacing-em: 0;
-    // Bumped by the app after every scale change of a window showing a note (`reshape_text_soon`, src/note_window.rs). The
-    // note's words and edit fields read it in their font size (times zero), so a change makes Slint
+    // Bumped by the app after every scale change of a window showing a note, and of Settings (`reshape_text_soon`, src/note_window.rs). The
+    // note's words and edit fields read it in their font size (times zero), and the UI text through `ui-fit`, so a change makes Slint
     // shape them again. Slint keeps text shaped while the window briefly had the monitor's own scale
     // at startup (before the UI size goes back on top) and drew it that big.
     in-out property <int> text-epoch: 0;

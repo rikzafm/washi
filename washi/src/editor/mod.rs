@@ -272,6 +272,10 @@ pub struct Editor {
     markers: RefCell<Vec<textflow::Marker>>,
     pub marker_data: Rc<VecModel<MarkerData>>,
     pub marker_wash: Rc<VecModel<SelRect>>,
+    /// The words drawn turned onto the tilted baseline (`tilt_text`), kept between layouts.
+    words: RefCell<crate::tilt_text::Words>,
+    /// The stretch of the layout (top, bottom) whose words are drawn turned (see `layout`).
+    words_window: Cell<(f64, f64)>,
 
     // Editor state
     selection: Cell<Range>,
@@ -366,6 +370,8 @@ impl Editor {
             markers: RefCell::new(vec![]),
             marker_data,
             marker_wash,
+            words: RefCell::new(Default::default()),
+            words_window: Cell::new((0.0, 0.0)),
             selection: Cell::new(Range { anchor: START, focus: START }),
             range: Cell::new(None),
             line_end: Cell::new(None),

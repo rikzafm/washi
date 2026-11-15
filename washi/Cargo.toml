@@ -38,6 +38,9 @@ base64 = "0.23"
 unicode-linebreak = "0.1"
 # Advances of the embedded fonts, for the stepped text layout (already in the tree through Slint).
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
+# Fills the glyph outlines of the words turned onto the tilted baseline (src/tilt_text.rs): the
+# rasteriser Slint's own text is filled by (already in the tree through Slint).
+zeno = "0.3"
 raw-window-handle = "0.6"
 # Font engine (ADR 0003): outlines at a variation location, a TrueType writer, a zip reader.
 skrifa = "0.44"

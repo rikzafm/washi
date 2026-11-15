@@ -48,6 +48,15 @@ export struct RunData {
     ink: color,
     /// The text of a ticked check item: drawn in `Theme.ink-done`.
     done: bool,
+    /// The word turned onto the tilted baseline (Rust draws it, src/tilt_text.rs: the software
+    /// renderer cannot turn text): white, the glyphs' coverage in alpha, one pixel of it per screen
+    /// pixel. Empty for a word far out of sight, which is then drawn level like the others were.
+    img: image,
+    /// Where its top-left is at rest in the text layer (less the scroll's shift), and its size.
+    img-x: length,
+    img-y: length,
+    img-w: length,
+    img-h: length,
 }
 
 /// The box of a check item: a level box in the paper's frame (Rust lays it out, src/textflow.rs).
@@ -99,6 +108,16 @@ export struct RuleData {
     height: length,
     /// Part of a ticked check item: drawn in `Theme.ink-done`.
     done: bool,
+    /// The whole bar turned by the tilt (Rust draws it, src/tilt_text.rs), like a word's `img`:
+    /// its picture, where its top-left is at rest in the text layer, and its size. A bar cut into
+    /// pieces is one picture, on its first piece; the other pieces are `joined` to it and draw
+    /// nothing while it shows.
+    img: image,
+    img-x: length,
+    img-y: length,
+    img-w: length,
+    img-h: length,
+    joined: bool,
 }
 
 // One paragraph: an editable text field styled by its kind.
@@ -150,6 +169,8 @@ export component BlockView inherits Rectangle {
     in property <int> focus-anchor: -1;
     /// The field draws its own selection (off while the note draws a selection across blocks).
     in property <bool> wash: true;
+    /// The color picker is open: no selection is drawn, so the colors can be seen as they are.
+    in property <bool> wash-hidden: false;
     callback focus-changed(bool);
     /// The caret of this block's field moved, or its selection changed: the caret's byte offset
     /// and the selection's other end (the same offset when nothing is selected).
@@ -387,7 +408,7 @@ export component BlockView inherits Rectangle {
         // input method is composing
         text-cursor-width: root.composing ? max(Theme.caret-width, 1phx) : 0px;
         // see-through: the words under it stay readable
-        selection-background-color: root.wash && !root.tilted ? Theme.selection-over : transparent;
+        selection-background-color: root.wash && !root.tilted && !root.wash-hidden ? Theme.selection-over : transparent;
         selection-foreground-color: Theme.ink;
         // hidden, not removed: a click still lands in the field and starts editing
         opacity: root.show-input ? 1 : 0;

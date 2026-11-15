@@ -10,6 +10,7 @@ import { Theme } from "theme.slint";
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
 import { Frame, Tilt, TRect } from "toolbar.slint";
+import { PaperTheme } from "paper-theme.slint";
 
 /// A tilted frame and the size of the (untilted) rectangle it is centred on.
 export struct PaperFrame {
@@ -28,6 +29,21 @@ export struct TapeShape {
 }
 
 export global PX {
+    /// Path commands of the segment between two points given in paper coordinates.
+    public pure function seg(p: PaperFrame, a1: float, b1: float, a2: float, b2: float) -> string {
+        return "M " + (x(p, a1, b1) / 1px) + " " + (y(p, a1, b1) / 1px) + " L " + (x(p, a2, b2) / 1px) + " " + (y(p, a2, b2) / 1px) + " ";
+    }
+    /// Path commands of a circle of radius `r` about (`a`, `b`) in paper coordinates.
+    public pure function ring(p: PaperFrame, a: float, b: float, r: float) -> string {
+        return "M " + (x(p, a, b) / 1px - r) + " " + (y(p, a, b) / 1px) + " a " + r + " " + r + " 0 1 0 " + 2 * r + " 0 a " + r + " " + r + " 0 1 0 " + -2 * r + " 0 ";
+    }
+    /// Path commands of the line through three points given in paper coordinates.
+    public pure function line3(p: PaperFrame, a1: float, b1: float, a2: float, b2: float, a3: float, b3: float) -> string {
+        return "M " + (x(p, a1, b1) / 1px) + " " + (y(p, a1, b1) / 1px)
+            + " L " + (x(p, a2, b2) / 1px) + " " + (y(p, a2, b2) / 1px)
+            + " L " + (x(p, a3, b3) / 1px) + " " + (y(p, a3, b3) / 1px);
+    }
+
     public pure function x(p: PaperFrame, a: float, b: float) -> length {
         return Tilt.x(p.f, -p.pw / 2.0 + a, -p.ph / 2.0 + b) * 1px;
     }
@@ -52,17 +68,124 @@ export global TapePalette {
     out property <[color]> b-light: [#D7EDF3, #DDF0DD, #FBE5D5, #F5D3DA];
 }
 
-/// A text with its top-left at paper coordinates (`a`, `b`).
-export component PText inherits Text {
+/// What `Turned.lines` is asked: one text, how it is set out in its box and where the box is.
+export struct TurnSpec {
+    text: string,
+    family: string,
+    size: float,
+    bold: bool,
+    pf: PaperFrame,
+    /// The box's top-left in paper coordinates, and its size.
+    a: float,
+    b: float,
+    w: float,
+    h: float,
+    line-factor: float,
+    /// Added after every character, px.
+    spacing: float,
+    /// 0 never, 1 at word breaks, 2 anywhere.
+    wrap: int,
+    /// 0 left, 1 centre, 2 right; vertically 0 top, 1 centre, 2 bottom.
+    align: int,
+    valign: int,
+    elide: bool,
+    /// Changes with the font, so the lines are made again.
+    epoch: float,
+    /// Screen px per logical px.
+    scale: float,
+}
+
+/// A line of text drawn turned onto the tilt (white ink in a picture), in the box's parent's px.
+export struct TurnedLine {
+    img: image,
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+}
+
+/// The Settings page's text drawn on the tilt of its Paper, by Rust (`ui_text.rs`). No lines means
+/// there is no turned drawing for this text, and `PText` shows the level one.
+export global Turned {
+    pure callback lines(TurnSpec) -> [TurnedLine];
+}
+
+/// A text with its top-left at paper coordinates (`a`, `b`). It is drawn turned by the Paper's tilt
+/// (`Turned`) and, where that is not possible, level at its tilted place.
+export component PText inherits Rectangle {
     in property <PaperFrame> pf;
     in property <float> a;
     in property <float> b;
     /// Slint sets a glyph about a pixel higher than a browser does on the same line box.
     in property <float> nudge: 1.0;
+    in property <string> text;
+    in property <length> font-size: 14px;
+    in property <int> font-weight: 400;
+    in property <string> font-family: Theme.handwriting;
+    in property <color> ink: #2B2F36;
+    in property <TextWrap> wrap: TextWrap.no-wrap;
+    in property <TextOverflow> overflow: TextOverflow.clip;
+    in property <TextHorizontalAlignment> horizontal-alignment: TextHorizontalAlignment.left;
+    in property <TextVerticalAlignment> vertical-alignment: TextVerticalAlignment.top;
+    in property <float> line-height-factor: 1.0;
+    in property <length> letter-spacing: 0px;
+    /// What the text takes up unwrapped, and wrapped into `width`.
+    out property <length> text-w: probe.preferred-width;
+    out property <length> text-h: probe.preferred-height;
+    /// Drawn turned (not the level text).
+    out property <bool> drawn: root.turned.length > 0;
+
+    property <[TurnedLine]> turned: Turned.lines({
+        text: root.text,
+        family: root.font-family,
+        size: root.font-size / 1px,
+        bold: root.font-weight >= 600,
+        pf: root.pf,
+        a: root.a,
+        b: root.b + root.nudge,
+        w: root.width / 1px,
+        h: root.height / 1px,
+        line-factor: root.line-height-factor,
+        spacing: root.letter-spacing / 1px,
+        wrap: root.wrap == TextWrap.word-wrap ? 1 : root.wrap == TextWrap.char-wrap ? 2 : 0,
+        align: root.horizontal-alignment == TextHorizontalAlignment.center ? 1 : root.horizontal-alignment == TextHorizontalAlignment.right ? 2 : 0,
+        valign: root.vertical-alignment == TextVerticalAlignment.center ? 1 : root.vertical-alignment == TextVerticalAlignment.bottom ? 2 : 0,
+        elide: root.overflow == TextOverflow.elide,
+        epoch: Theme.text-epoch,
+        scale: 1px / 1phx,
+    });
+
     x: PX.x(root.pf, root.a, root.b + root.nudge);
     y: PX.y(root.pf, root.a, root.b + root.nudge);
-    font-family: Theme.handwriting;
-    color: #2B2F36;
+    width: probe.preferred-width;
+    height: probe.preferred-height;
+
+    // The level text: it measures the box, and is what shows when nothing is drawn turned.
+    probe := Text {
+        width: root.width;
+        height: root.height;
+        text: root.text;
+        font-family: root.font-family;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        color: root.turned.length > 0 || root.text == "" ? transparent : root.ink;
+        wrap: root.wrap;
+        overflow: root.overflow;
+        horizontal-alignment: root.horizontal-alignment;
+        vertical-alignment: root.vertical-alignment;
+        line-height-factor: root.line-height-factor;
+        letter-spacing: root.letter-spacing;
+    }
+
+    for line in root.turned : Image {
+        x: line.x - root.x;
+        y: line.y - root.y;
+        width: line.w;
+        height: line.h;
+        source: line.img;
+        colorize: root.ink;
+        image-fit: fill;
+    }
 }
 
 /// An upright box whose top-left is at paper coordinates (`a`, `b`) in the Paper's own (tilted) axes.
@@ -145,6 +268,8 @@ export component UShadow inherits Rectangle {
 /// The dotted 2px rule of a row (`shape` is the dots along the tilt, from `tape.rs`), starting at
 /// paper coordinates (`a`, `b`).
 export component PRule inherits Path {
+    // The dotted rules are not drawn; the 2px they take in the layout stays.
+    visible: false;
     in property <PaperFrame> pf;
     in property <float> a;
     in property <float> b;
@@ -229,8 +354,8 @@ export component SettingRow inherits Rectangle {
 
     property <float> pitch: root.lh > 0 ? root.lh : (root.hint != "" ? 26.4 : 0.0);
     property <float> label-w: 448.0 - ctl.preferred-width / 1px - 16.0;
-    property <float> label-h: label-t.preferred-height / 1px;
-    property <float> hint-h: root.hint == "" ? 0.0 : hint-t.preferred-height / 1px;
+    property <float> label-h: label-t.text-h / 1px;
+    property <float> hint-h: root.hint == "" ? 0.0 : hint-t.text-h / 1px;
     property <float> block-h: root.label-h + root.hint-h;
     out property <float> content-h: max(root.min-h, root.block-h);
     out property <float> total: root.pad-top + root.content-h + (root.rule ? 2.0 : 0.0);
@@ -262,7 +387,7 @@ export component SettingRow inherits Rectangle {
         visible: root.hint != "";
         text: root.hint;
         font-size: 18px * Theme.ui-fit;
-        color: #5B616B;
+        ink: #5B616B;
         wrap: root.break-all ? TextWrap.char-wrap : TextWrap.word-wrap;
         line-height-factor: root.pitch > 0 ? root.pitch / (18.0 * TextMetrics.natural) : 1.0;
     }
@@ -285,29 +410,121 @@ export component SettingRow inherits Rectangle {
     }
 }
 
+/// Room around a control's box for its turned drawing to swing into.
+export global TiltPad {
+    out property <length> pad: 6px;
+}
+
+/// What a control draws its tilted look in: a scene the size of its box plus `TiltPad` all round (a
+/// tilted shape reaches past its level box), with the frame to draw in. Put it first in the control;
+/// shapes and texts take `pf: scene.pf` and are placed by coordinates from the scene's top-left, so
+/// a control's own point (x, y) is at `TiltPad.pad / 1px + x`.
+export component TiltScene inherits Rectangle {
+    in property <angle> tilt: PaperTheme.paper-tilt;
+    /// The control's own size.
+    in property <length> box-w;
+    in property <length> box-h;
+    out property <PaperFrame> pf: {
+        f: {
+            w: self.width / 1px,
+            h: self.height / 1px,
+            cx: self.width / 2px,
+            cy: self.height / 2px,
+            cs: root.tilt.cos(),
+            sn: root.tilt.sin(),
+        },
+        pw: self.width / 1px,
+        ph: self.height / 1px,
+    };
+    x: -TiltPad.pad;
+    y: -TiltPad.pad;
+    width: root.box-w + 2 * TiltPad.pad;
+    height: root.box-h + 2 * TiltPad.pad;
+}
+
+/// A level box of text turned by `tilt` about the box's centre (a label inside a control).
+export component TiltLabel inherits Rectangle {
+    in property <string> text;
+    in property <length> font-size: 14px;
+    in property <int> font-weight: 400;
+    in property <color> ink: #2B2F36;
+    in property <TextOverflow> overflow: TextOverflow.clip;
+    in property <TextHorizontalAlignment> horizontal-alignment: TextHorizontalAlignment.left;
+    in property <TextVerticalAlignment> vertical-alignment: TextVerticalAlignment.center;
+    in property <angle> tilt: PaperTheme.paper-tilt;
+
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        PText {
+            pf: scene.pf;
+            a: TiltPad.pad / 1px;
+            b: TiltPad.pad / 1px;
+            nudge: 0.0;
+            width: root.width;
+            height: root.height;
+            text: root.text;
+            font-size: root.font-size;
+            font-weight: root.font-weight;
+            ink: root.ink;
+            overflow: root.overflow;
+            horizontal-alignment: root.horizontal-alignment;
+            vertical-alignment: root.vertical-alignment;
+        }
+    }
+}
+
 /// The design's toggle: a 52x30 rounded track and a 20px knob.
 export component Switch inherits Rectangle {
     in property <bool> checked;
     in property <string> accessible-name;
+    in property <angle> tilt: PaperTheme.paper-tilt;
     callback toggled();
     width: 52px;
     height: 30px;
-    border-radius: 10px;
-    background: root.checked ? #2B2F36 : #E8E8E6;
-    border-width: root.checked ? 0px : 1.5px;
-    border-color: #8B919A;
     accessible-role: switch;
     accessible-checked: root.checked;
     accessible-label: root.accessible-name;
 
-    Rectangle {
-        x: root.checked ? 27px : 5px;
-        y: 5px;
-        width: 20px;
-        height: 20px;
-        border-radius: 7px;
-        background: root.checked ? #FFFFFD : #8B919A;
-        animate x { duration: 150ms; easing: ease-out; }
+    property <float> pad: TiltPad.pad / 1px;
+    property <float> knob-a: root.checked ? 27.0 : 5.0;
+    animate knob-a { duration: 150ms; easing: ease-out; }
+
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        // the track (an outline when it is off), then the knob
+        PRect {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad;
+            w: 52.0;
+            h: 30.0;
+            r: 10.0;
+            fill: root.checked ? #2B2F36 : #8B919A;
+        }
+
+        if !root.checked : PRect {
+            pf: scene.pf;
+            a: root.pad + 1.5;
+            b: root.pad + 1.5;
+            w: 49.0;
+            h: 27.0;
+            r: 8.5;
+            fill: #E8E8E6;
+        }
+
+        PRect {
+            pf: scene.pf;
+            a: root.pad + root.knob-a;
+            b: root.pad + 5.0;
+            w: 20.0;
+            h: 20.0;
+            r: 7.0;
+            fill: root.checked ? #FFFFFD : #8B919A;
+        }
     }
 
     TouchArea {
@@ -327,29 +544,56 @@ export component PillButton inherits Rectangle {
     in property <bool> outlined: false;
     /// Filled red with light text (the Uninstall confirm).
     in property <bool> filled: false;
+    in property <angle> tilt: PaperTheme.paper-tilt;
     callback clicked();
-    out property <length> natural-w: label.preferred-width + 28px;
+    out property <length> natural-w: label.text-w + 28px;
     width: root.natural-w;
     height: 40px;
-    border-radius: 10.8px;
-    background: root.filled ? (area.pressed ? #96201A : #B3261E)
-        : root.outlined ? #FFFFFD
-        : root.chosen ? #2B2F36
-        : (area.has-hover || area.pressed) ? #E6E6E3 : #F0F0EE;
-    border-width: root.outlined ? 1.5px : 0px;
-    border-color: #B3261E;
     opacity: root.enabled ? 1.0 : 0.45;
     accessible-role: button;
     accessible-label: root.accessible-name != "" ? root.accessible-name : root.text;
     accessible-enabled: root.enabled;
 
-    label := Text {
-        text: root.text;
-        font-family: Theme.handwriting;
-        font-size: 20px * Theme.ui-fit;
-        color: (root.filled || root.chosen) ? #FFFFFD : (root.outlined ? #B3261E : #2B2F36);
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    property <float> pad: TiltPad.pad / 1px;
+
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        PRect {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad;
+            w: root.width / 1px;
+            h: 40.0;
+            r: 10.8;
+            fill: root.outlined ? transparent : root.filled ? (area.pressed ? #96201A : #B3261E)
+                : root.chosen ? #2B2F36
+                : (area.has-hover || area.pressed) ? #E6E6E3 : #F0F0EE;
+        }
+
+        // the outline is the shape's own stroke: stacked shapes would show through at half opacity
+        if root.outlined : PRect {
+            pf: scene.pf;
+            a: root.pad + 0.75;
+            b: root.pad + 0.75;
+            w: root.width / 1px - 1.5;
+            h: 38.5;
+            r: 10.05;
+            fill: #FFFFFD;
+            stroke: #B3261E;
+            stroke-width: 1.5px;
+        }
+
+        label := PText {
+            pf: scene.pf;
+            a: root.pad + (root.width - self.text-w) / 2px;
+            b: root.pad + (root.height - self.text-h) / 2px;
+            nudge: 0.0;
+            text: root.text;
+            font-size: 20px * Theme.ui-fit;
+            ink: (root.filled || root.chosen) ? #FFFFFD : (root.outlined ? #B3261E : #2B2F36);
+        }
     }
 
     area := TouchArea {
@@ -363,19 +607,36 @@ export component PillButton inherits Rectangle {
 export component KeyCap inherits Rectangle {
     in property <string> text;
     in property <bool> dark: false;
-    out property <length> natural-w: max(40px, label.preferred-width + 20px);
+    in property <angle> tilt: PaperTheme.paper-tilt;
+    out property <length> natural-w: max(40px, label.text-w + 20px);
     width: root.natural-w;
     height: 36px;
-    border-radius: 8px;
-    background: root.dark ? #2B2F36 : #F0F0EE;
 
-    label := Text {
-        text: root.text;
-        font-family: Theme.handwriting;
-        font-size: 19px * Theme.ui-fit;
-        color: root.dark ? #FFFFFD : #2B2F36;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    property <float> pad: TiltPad.pad / 1px;
+
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        PRect {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad;
+            w: root.width / 1px;
+            h: 36.0;
+            r: 8.0;
+            fill: root.dark ? #2B2F36 : #F0F0EE;
+        }
+
+        label := PText {
+            pf: scene.pf;
+            a: root.pad + (root.width - self.text-w) / 2px;
+            b: root.pad + (root.height - self.text-h) / 2px;
+            nudge: 0.0;
+            text: root.text;
+            font-size: 19px * Theme.ui-fit;
+            ink: root.dark ? #FFFFFD : #2B2F36;
+        }
     }
 }
 
@@ -384,35 +645,54 @@ export component KeyCap inherits Rectangle {
 export component StatTile inherits Rectangle {
     in property <string> value;
     in property <string> caption;
+    in property <angle> tilt: PaperTheme.paper-tilt;
     width: 106px;
     height: 75.6px;
-    background: #F0F0EE;
-    border-radius: 10.8px;
     accessible-role: text;
     accessible-label: root.caption + ": " + root.value;
 
-    Text {
-        y: 10px;
-        width: 100%;
-        height: 28.6px;
-        text: root.value;
-        font-family: Theme.handwriting;
-        font-size: 26px * Theme.ui-fit;
-        color: #2B2F36;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
+    property <float> pad: TiltPad.pad / 1px;
 
-    Text {
-        y: 38.6px;
-        width: 100%;
-        height: 27px;
-        text: root.caption;
-        font-family: Theme.handwriting;
-        font-size: 17px * Theme.ui-fit;
-        color: #5B616B;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        PRect {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad;
+            w: 106.0;
+            h: 75.6;
+            r: 10.8;
+            fill: #F0F0EE;
+        }
+
+        PText {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad + 10.0;
+            nudge: 0.0;
+            width: 106px;
+            height: 28.6px;
+            text: root.value;
+            font-size: 26px * Theme.ui-fit;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        PText {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad + 38.6;
+            nudge: 0.0;
+            width: 106px;
+            height: 27px;
+            text: root.caption;
+            font-size: 17px * Theme.ui-fit;
+            ink: #5B616B;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -438,60 +718,79 @@ export component PickerButton inherits Rectangle {
     in property <color> chip-b-stripe;
     /// Greyed out and deaf to clicks when false.
     in property <bool> enabled: true;
+    in property <angle> tilt: PaperTheme.paper-tilt;
     callback clicked();
     width: 236px;
     height: 44px;
-    border-radius: 10.8px;
-    background: hit.has-hover ? #E6E6E3 : #F0F0EE;
     opacity: root.enabled ? 1.0 : 0.45;
     accessible-role: button;
     accessible-label: root.text;
     accessible-expanded: root.open;
     accessible-enabled: root.enabled;
 
-    if root.chips : StripedShape {
-        x: 12px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-a-base;
-        stripe: root.chip-a-stripe;
-        shadow: false;
-    }
+    property <float> pad: TiltPad.pad / 1px;
+    property <float> mid: root.pad + root.height / 2px;
+    property <float> chev: root.pad + root.width / 1px - 28.0;
 
-    if root.chips : StripedShape {
-        x: 46px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-b-base;
-        stripe: root.chip-b-stripe;
-        shadow: false;
-    }
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        PRect {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad;
+            w: root.width / 1px;
+            h: root.height / 1px;
+            r: 10.8;
+            fill: hit.has-hover ? #E6E6E3 : #F0F0EE;
+        }
 
-    Text {
-        x: root.chips ? 80px : 12px;
-        width: root.width - self.x - 38px;
-        height: root.height;
-        text: root.text;
-        font-family: Theme.handwriting;
-        font-size: 21px * Theme.ui-fit;
-        color: #2B2F36;
-        vertical-alignment: center;
-        overflow: elide;
-    }
+        if root.chips : VTape {
+            pf: scene.pf;
+            a: root.pad + 12.0 + self.shape.w / 2px;
+            b: root.mid;
+            shape: root.chip-shape;
+            base: root.chip-a-base;
+            stripe: root.chip-a-stripe;
+            shadow: false;
+        }
 
-    // The chevron: a 24-unit icon drawn at 16px, stroke 2.2 units.
-    Path {
-        x: root.width - 28px;
-        y: (root.height - 16px) / 2;
-        width: 16px;
-        height: 16px;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: "M 6 9 L 12 15 L 18 9";
-        stroke: #2B2F36;
-        stroke-width: 1.47px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
+        if root.chips : VTape {
+            pf: scene.pf;
+            a: root.pad + 46.0 + self.shape.w / 2px;
+            b: root.mid;
+            shape: root.chip-shape;
+            base: root.chip-b-base;
+            stripe: root.chip-b-stripe;
+            shadow: false;
+        }
+
+        PText {
+            pf: scene.pf;
+            a: root.pad + (root.chips ? 80.0 : 12.0);
+            b: root.pad;
+            nudge: 0.0;
+            width: root.width - (root.chips ? 80px : 12px) - 38px;
+            height: root.height;
+            text: root.text;
+            font-size: 21px * Theme.ui-fit;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // The chevron: a 24-unit icon drawn at 16px, stroke 2.2 units.
+        Path {
+            width: scene.width;
+            height: scene.height;
+            viewbox-width: self.width / 1px;
+            viewbox-height: self.height / 1px;
+            commands: PX.line3(scene.pf, root.chev + 4.0, root.mid - 2.0, root.chev + 8.0, root.mid + 2.0, root.chev + 12.0, root.mid - 2.0);
+            stroke: #2B2F36;
+            stroke-width: 1.47px;
+            stroke-line-cap: round;
+            stroke-line-join: round;
+        }
     }
 
     hit := TouchArea {
@@ -511,39 +810,59 @@ export component ListItem inherits Rectangle {
     in property <color> chip-a-stripe;
     in property <color> chip-b-base;
     in property <color> chip-b-stripe;
+    in property <angle> tilt: PaperTheme.paper-tilt;
     callback clicked();
     height: 42px;
-    border-radius: 8px;
-    background: (item-hit.has-hover || root.chosen) ? #F0F0EE : transparent;
 
-    if root.chips : StripedShape {
-        x: 10px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-a-base;
-        stripe: root.chip-a-stripe;
-        shadow: false;
-    }
+    property <float> pad: TiltPad.pad / 1px;
+    property <float> mid: root.pad + root.height / 2px;
 
-    if root.chips : StripedShape {
-        x: 46px;
-        y: (root.height - self.height) / 2;
-        shape: root.chip-shape;
-        base: root.chip-b-base;
-        stripe: root.chip-b-stripe;
-        shadow: false;
-    }
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        if item-hit.has-hover || root.chosen : PRect {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad;
+            w: root.width / 1px;
+            h: 42.0;
+            r: 8.0;
+            fill: #F0F0EE;
+        }
 
-    Text {
-        x: root.chips ? 82px : 10px;
-        width: root.width - self.x - 10px;
-        height: root.height;
-        text: root.text;
-        font-family: Theme.handwriting;
-        font-size: 21px * Theme.ui-fit;
-        font-weight: root.chosen ? 700 : 400;
-        color: #2B2F36;
-        vertical-alignment: center;
+        if root.chips : VTape {
+            pf: scene.pf;
+            a: root.pad + 10.0 + self.shape.w / 2px;
+            b: root.mid;
+            shape: root.chip-shape;
+            base: root.chip-a-base;
+            stripe: root.chip-a-stripe;
+            shadow: false;
+        }
+
+        if root.chips : VTape {
+            pf: scene.pf;
+            a: root.pad + 46.0 + self.shape.w / 2px;
+            b: root.mid;
+            shape: root.chip-shape;
+            base: root.chip-b-base;
+            stripe: root.chip-b-stripe;
+            shadow: false;
+        }
+
+        PText {
+            pf: scene.pf;
+            a: root.pad + (root.chips ? 82.0 : 10.0);
+            b: root.pad;
+            nudge: 0.0;
+            width: root.width - (root.chips ? 82px : 10px) - 10px;
+            height: root.height;
+            text: root.text;
+            font-size: 21px * Theme.ui-fit;
+            font-weight: root.chosen ? 700 : 400;
+            vertical-alignment: center;
+        }
     }
 
     item-hit := TouchArea {

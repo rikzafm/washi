@@ -185,9 +185,13 @@ fn every_ui_font_size_is_multiplied_by_the_ui_fit() {
     // The color picker draws in its own fixed face (Gelasio), not the Font in use, so the fit has nothing to correct.
     let exempt_files = ["text.slint", "block.slint", "toolbar.slint", "color-picker.slint"];
     let exempt_lines = [
-        ("font-manager.slint", "font-size: 22px;"),
-        ("style-tab.slint", "font-size: 24px;"),
-        ("style-tab.slint", "font-size: root.preview-font-size;"),
+        // PText and TiltLabel only pass on the size their user gave them (the user applies the fit)
+        ("settings-widgets.slint", "in property <length> font-size: 14px;"),
+        ("settings-widgets.slint", "font-size: root.font-size;"),
+        ("settings.slint", "font-size: root.font-size;"),
+        ("font-manager.slint", "font-size: 19px + 0px * Theme.text-epoch;"),
+        ("style-tab.slint", "font-size: 24px + 0px * Theme.text-epoch;"),
+        ("style-tab.slint", "font-size: root.preview-font-size + 0px * Theme.text-epoch;"),
     ];
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../washi/ui");
     let mut missing = Vec::new();

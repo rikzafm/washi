@@ -183,6 +183,7 @@ impl Editor {
     pub fn free_images(&self) {
         self.drop_layout();
         self.images.free();
+        self.free_words();
         self.sync_model();
     }
 

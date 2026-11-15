@@ -37,8 +37,19 @@ pub struct NoteImages {
 /// The text's tilt, degrees clockwise (`Theme.text-tilt`): a picture at rest lies on it.
 pub const TEXT_TILT_DEG: f64 = 1.45;
 
+/// Catmull-Rom weights of the four samples around a point `t` (0..1) past the second one.
+fn catmull_rom(t: f64) -> [f64; 4] {
+    let (t2, t3) = (t * t, t * t * t);
+    [
+        0.5 * (-t3 + 2.0 * t2 - t),
+        0.5 * (3.0 * t3 - 5.0 * t2 + 2.0),
+        0.5 * (-3.0 * t3 + 4.0 * t2 + t),
+        0.5 * (t3 - t2),
+    ]
+}
+
 /// `src` turned `deg` clockwise about its center, on a transparent canvas just big enough, with
-/// smooth edges. (Bilinear sampling; the corners and edges fade out over one pixel.)
+/// smooth edges. (Bicubic sampling; the corners and edges fade out over one pixel.)
 pub fn turn(src: &slint::SharedPixelBuffer<slint::Rgba8Pixel>, deg: f64) -> slint::SharedPixelBuffer<slint::Rgba8Pixel> {
     let (sw, sh) = (src.width() as f64, src.height() as f64);
     let (sin, cos) = deg.to_radians().sin_cos();
@@ -61,11 +72,22 @@ pub fn turn(src: &slint::SharedPixelBuffer<slint::Rgba8Pixel>, deg: f64) -> slin
             let (x0, y0) = (fx.floor(), fy.floor());
             let (tx, ty) = (fx - x0, fy - y0);
             let (x0, y0) = (x0 as i64, y0 as i64);
-            let (p00, p10, p01, p11) = (at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1));
+            // Catmull-Rom over the 4x4 neighbours: keeps detail that bilinear averages away.
+            let (wx, wy) = (catmull_rom(tx), catmull_rom(ty));
+            let mut taps = [[slint::Rgba8Pixel { r: 0, g: 0, b: 0, a: 0 }; 4]; 4];
+            for (j, row) in taps.iter_mut().enumerate() {
+                for (i, t) in row.iter_mut().enumerate() {
+                    *t = at(x0 - 1 + i as i64, y0 - 1 + j as i64);
+                }
+            }
             let mix = |c: fn(&slint::Rgba8Pixel) -> u8| {
-                let top = c(&p00) as f64 * (1.0 - tx) + c(&p10) as f64 * tx;
-                let bottom = c(&p01) as f64 * (1.0 - tx) + c(&p11) as f64 * tx;
-                top * (1.0 - ty) + bottom * ty
+                let mut sum = 0.0;
+                for j in 0..4 {
+                    for i in 0..4 {
+                        sum += c(&taps[j][i]) as f64 * wx[i] * wy[j];
+                    }
+                }
+                sum.clamp(0.0, 255.0)
             };
             dst[oy * ow as usize + ox] = slint::Rgba8Pixel {
                 r: mix(|p| p.r).round() as u8,

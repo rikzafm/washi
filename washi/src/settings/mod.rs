@@ -178,6 +178,7 @@ impl SettingsView {
         );
         style::wire(&ui, hooks.general.env.clone(), hooks.general.db.clone(), hooks.letter_spacing_changed.clone(), hooks.font_size_changed.clone());
         fonts::wire(&ui);
+        crate::ui_text::wire(&ui);
         let scale = crate::ui_scale::WindowScale::attach(ui.window());
         let view = Rc::new_cyclic(|me| SettingsView {
             ui,
@@ -223,6 +224,9 @@ impl SettingsView {
         let _ = view.ui.show();
         crate::win::set_window_icon_when_ready(&view.ui);
         view.scale.resync(view.ui.window(), true);
+        // the native window comes up at the monitor's own scale: text shaped in that moment stays that
+        // big (see `reshape_text_soon`), which showed as oversized letters until a Tab switch made new ones
+        crate::note_window::reshape_text_soon(&view.ui);
         view.start_ticking();
         Ok(view)
     }
@@ -326,6 +330,7 @@ impl SettingsView {
         if self.scale.resync(self.ui.window(), false) {
             self.sync_canvas();
         }
+        crate::note_window::reshape_text_soon(&self.ui);
     }
 
     /// How many times the view has moved or resized the native window so far.
@@ -342,19 +347,22 @@ impl SettingsView {
         self.canvas.set(Geometry { x: (p.x as f32 / s).round() as i32, y: (p.y as f32 / s).round() as i32, ..c });
     }
 
-    /// Before a transition from page bounds `a` to `b`: make the window cover both (with a pixel of
-    /// slack for rounding) in one move, and keep the page where it is on screen.
+    /// Before a transition from page bounds `a` to `b`: make the window cover both in one move, and
+    /// keep the page where it is on screen.
+    ///
+    /// Exactly both, with no slack around them: every pose in between lies inside the two ends, and
+    /// a window that already is the page the transition ends on needs no trim once it rests. Moving
+    /// the top left corner of a window that is on screen shows its old picture at the new corner
+    /// until the next paint (see "The stand-in" in `win/window_control.rs`), so a pixel of slack made
+    /// the whole page jump by a pixel and back when it came to rest.
     fn reserve(&self, a: Geometry, b: Geometry) {
         let u = union(a, b);
         if contains(self.canvas.get(), u) {
             return;
         }
-        let want = Geometry { x: u.x - 1, y: u.y - 1, w: u.w + 2, h: u.h + 2 };
-        {
-            let page = self.page_geometry();
-            self.place(want);
-            self.show_page(page);
-        }
+        let page = self.page_geometry();
+        self.place(u);
+        self.show_page(page);
     }
 
     /// The page rests: trim the window to it.

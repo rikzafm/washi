@@ -41,10 +41,15 @@ component MarkerShape inherits Path {
     }
     // the shape's own box: around the tilted rectangle (it is as high as the rectangle plus the
     // drop along its width), so the Path is only as big as the marker
-    property <float> ox: px(root.u0, root.v0) - root.pad;
-    property <float> oy: py(root.u0, root.v0) - root.pad;
+    out property <float> ox: px(root.u0, root.v0) - root.pad;
+    out property <float> oy: py(root.u0, root.v0) - root.pad;
+    /// How far down its clip the shape starts (the paper's top edge at the marker), so it is drawn
+    /// where it would be without the clip.
+    in property <length> lift: 0px;
+    /// The shape's middle across, as drawn, where the paper's top edge is taken for the cut.
+    out property <length> mid-x: root.px((root.u0 + root.u1) / 2, (root.v0 + root.v1) / 2) * 1px;
     x: root.ox * 1px;
-    y: root.oy * 1px;
+    y: root.oy * 1px - root.lift;
     width: (root.u1 - root.u0 + 2 * root.pad) * 1px;
     height: (root.v1 - root.v0 + (root.u1 - root.u0) * root.sn + 2 * root.pad) * 1px;
     viewbox-width: self.width / 1px;
@@ -260,7 +265,9 @@ component CheckClip inherits Rectangle {
 // `height` are the paper's.
 //
 // The mockup text is tilted with the paper but the software renderer cannot rotate text
-// (slint#6068). At rest every word is therefore its own upright Text on the tilted baseline
+// (slint#6068). At rest every word is therefore a small picture of itself turned onto the tilted
+// baseline, drawn by Rust (src/tilt_text.rs) and shown one pixel to one pixel; a word without a
+// picture (far out of sight, or in the first half of the settle) is its own upright Text there
 // (`runs`, laid out by src/textflow.rs). By default (`tilted-editing`) they stay there while a field
 // has the focus: the caret and the selection's wash are drawn tilted too, and the pointer is mapped
 // back through the tilt (`level-x`, `level-y`) for Rust. With the option off the words' offsets settle
@@ -308,6 +315,8 @@ export component TextLayer inherits Rectangle {
     /// selection (false while the note draws a selection across blocks).
     in property <int> focus-anchor: -1;
     in property <bool> wash: true;
+    /// The color picker is open: no selection wash is drawn anywhere.
+    in property <bool> wash-hidden: false;
     /// The note owns the pointer (Rust makes the selection): a left press (in this layer's
     /// frame, with Shift held or not), a drag with the button down, and the release.
     callback pointer-down(length, length, bool);
@@ -417,7 +426,7 @@ export component TextLayer inherits Rectangle {
     // the selection wash, level (a selection can only be made while editing), under the words
     for s in root.sel-rects: Rectangle {
         property <length> cut: root.below-edge(s.y, s.x, s.x + s.width);
-        visible: !root.tilted-editing;
+        visible: !root.tilted-editing && !root.wash-hidden;
         x: s.x;
         y: self.cut;
         width: s.width;
@@ -429,7 +438,7 @@ export component TextLayer inherits Rectangle {
     // at the paper's top in the level layout (`scroll-y`), which the tilt carries onto the tilted edge.
     for s in root.sel-rects: HandleShape {
         property <length> top: max(s.y, root.scroll-y);
-        visible: root.tilted-editing && s.y + s.height > self.top;
+        visible: root.tilted-editing && !root.wash-hidden && s.y + s.height > self.top;
         r: { x: s.x, y: self.top, width: s.width, height: max(0px, s.y + s.height - self.top) };
         ts: root.tilt-scale;
         shift-x: root.shift-x;
@@ -441,21 +450,31 @@ export component TextLayer inherits Rectangle {
     }
 
     // the markers: over the paper (and the opaque wash of a selection across blocks), under the words
-    for m in root.markers: MarkerShape {
-        m: m;
-        ts: root.tilt-scale;
-        shift-x: root.shift-x;
-        shift-y: root.shift-y;
-        paper-w: root.paper-w;
-        paper-h: root.paper-h;
-        visible: self.y + self.height >= root.edge-y(self.x + self.width / 2);
+    // Each in a clip whose top is the paper's tilted top edge, so a marker scrolled partly under
+    // the top is cut there instead of showing above the paper.
+    for m in root.markers: Rectangle {
+        property <length> cut: max(shape.oy * 1px, root.edge-y(shape.mid-x));
+        visible: shape.oy * 1px + shape.height >= root.edge-y(shape.mid-x);
+        y: self.cut;
+        width: root.width;
+        height: max(0px, shape.oy * 1px + shape.height - self.cut);
+        clip: true;
+        shape := MarkerShape {
+            m: m;
+            ts: root.tilt-scale;
+            shift-x: root.shift-x;
+            shift-y: root.shift-y;
+            paper-w: root.paper-w;
+            paper-h: root.paper-h;
+            lift: parent.cut;
+        }
     }
 
     // where the selection across blocks meets a marker: the wash again, see-through, so the marker
     // shows tinted (a selection inside one field is washed by the field over the marker anyway)
     for s in root.marker-wash: Rectangle {
         property <length> cut: root.below-edge(s.y, s.x, s.x + s.width);
-        visible: !root.tilted-editing;
+        visible: !root.tilted-editing && !root.wash-hidden;
         x: s.x;
         y: self.cut;
         width: s.width;
@@ -465,7 +484,7 @@ export component TextLayer inherits Rectangle {
 
     for s in root.marker-wash: HandleShape {
         property <length> top: max(s.y, root.scroll-y);
-        visible: root.tilted-editing && s.y + s.height > self.top;
+        visible: root.tilted-editing && !root.wash-hidden && s.y + s.height > self.top;
         r: { x: s.x, y: self.top, width: s.width, height: max(0px, s.y + s.height - self.top) };
         ts: root.tilt-scale;
         shift-x: root.shift-x;
@@ -504,8 +523,25 @@ export component TextLayer inherits Rectangle {
         // (at the paper's tilted edge); the bottom is the text view's clip.
         height: max(0px, self.run-y + r.pitch + r.size * root.descender-room - self.cut);
         clip: true;
+        // The word as Rust drew it turned (`r.img`), from the second half of the settle on. Before
+        // that, and for a word with no picture, it is the level Text below.
+        property <bool> turned: root.tilt-scale > 0.5 && r.img-w > 0;
+
+        Image {
+            visible: parent.turned;
+            // Its place at rest, moved along with the word while the text settles. Rust puts it on
+            // whole screen pixels, so it is shown one to one.
+            x: r.img-x - (1 - root.tilt-scale) * r.dx + root.shift-x * root.tilt-scale - parent.x;
+            y: r.img-y - (1 - root.tilt-scale) * r.dy + root.shift-y * root.tilt-scale - parent.y;
+            width: r.img-w;
+            height: r.img-h;
+            source: r.img;
+            image-rendering: pixelated;
+            colorize: word.color;
+        }
 
         word := Text {
+            visible: !parent.turned;
             // Not in the accessibility tree: the edit fields under the words carry the note's text.
             // As tree nodes, every word was rebuilt on each step of a resize (they all move), which
             // took as long as painting the note.
@@ -540,7 +576,21 @@ export component TextLayer inherits Rectangle {
         // never thinner than a screen pixel: below 100% a bar can cover no pixel centre and vanish
         height: max(r.height, 1phx);
         border-radius: min(r.width, r.height) / 2;
-        background: r.done ? Theme.ink-done : Theme.ink;
+        // The bar as Rust drew it turned (`r.img`, the whole bar on its first piece), from the
+        // second half of the settle on; until then, and without a picture, the level pieces.
+        property <bool> turned: root.tilt-scale > 0.5 && (r.img-w > 0 || r.joined);
+        property <color> ink: r.done ? Theme.ink-done : Theme.ink;
+        background: self.turned ? transparent : self.ink;
+        Image {
+            visible: parent.turned && r.img-w > 0;
+            x: r.img-x - (1 - root.tilt-scale) * r.dx + root.shift-x * root.tilt-scale - parent.x;
+            y: r.img-y - (1 - root.tilt-scale) * r.dy + root.shift-y * root.tilt-scale - parent.y;
+            width: r.img-w;
+            height: r.img-h;
+            source: r.img;
+            image-rendering: pixelated;
+            colorize: parent.ink;
+        }
     }
 
     // The boxes (and ticks) of the check items, each in its clip at the paper's top edge.
@@ -661,6 +711,7 @@ export component TextLayer inherits Rectangle {
             focus-offset: root.focus-offset;
             focus-anchor: root.focus-anchor;
             wash: root.wash;
+            wash-hidden: root.wash-hidden;
             caret: root.caret;
             caret-here: i == root.caret-block && i == root.focused-block;
             caret-serial: root.caret-serial;

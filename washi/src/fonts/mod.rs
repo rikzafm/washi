@@ -137,6 +137,38 @@ impl FaceData {
     }
 }
 
+/// One face parsed from a font file (a font's preview face): every style asked of it is this one.
+pub struct SingleFace {
+    // Dropped first: the face borrows from `_blob`.
+    face: Face<'static>,
+    _blob: Box<[u8]>,
+    id: u64,
+}
+
+impl SingleFace {
+    pub fn new(bytes: Vec<u8>) -> Option<SingleFace> {
+        thread_local! {
+            static NEXT: std::cell::Cell<u64> = const { std::cell::Cell::new(1 << 32) };
+        }
+        let blob = bytes.into_boxed_slice();
+        // SAFETY: as in `FaceData::new`: the slice lives in the heap block `_blob` owns, which does not
+        // move when `SingleFace` does and outlives `face`.
+        let static_bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(blob.as_ptr(), blob.len()) };
+        let face = Face::parse(static_bytes, 0).ok()?;
+        let id = NEXT.with(|n| n.replace(n.get() + 1));
+        Some(SingleFace { face, _blob: blob, id })
+    }
+}
+
+impl crate::tilt_text::FaceSource for SingleFace {
+    fn face(&self, _bold: bool, _italic: bool) -> &Face<'_> {
+        &self.face
+    }
+    fn epoch(&self) -> u64 {
+        self.id
+    }
+}
+
 /// The font-dependent numbers the UI sets on `Theme`, all in em. The room values are the
 /// engine's measured [`FontMetrics`] rounded up to the next 0.05 em, plus a little.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -371,7 +403,7 @@ impl ActiveFont {
         theme.set_handwriting(self.text_family.as_str().into());
         theme.set_caret_font(self.caret_family.as_str().into());
         self.metrics.apply(theme);
-        theme.set_ui_fit(self.ui_fit);
+        theme.set_ui_fit_value(self.ui_fit);
         SizeTokens::at(size()).apply(theme);
         theme.set_text_epoch(theme.get_text_epoch().wrapping_add(1));
     }

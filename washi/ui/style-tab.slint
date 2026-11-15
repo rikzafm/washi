@@ -13,7 +13,7 @@
 
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
-import { PX, PaperFrame, TapeShape, TapePalette, TextMetrics, PText, PBox, PRect, PShadow, VTape, SettingRow, PillButton, PickerButton, ListItem, ListPanel } from "settings-widgets.slint";
+import { PX, PaperFrame, TapeShape, TapePalette, TextMetrics, PText, PBox, PRect, PShadow, VTape, SettingRow, PillButton, PickerButton, ListItem, ListPanel, TiltLabel, TiltScene, TiltPad } from "settings-widgets.slint";
 import { PSlider, NumberBox } from "controls.slint";
 import { Theme } from "theme.slint";
 
@@ -55,7 +55,7 @@ export component StyleTab inherits Rectangle {
     // text on 1.4 lines).
     // The card is as tall as the preview text is at Font size 22, whatever the size: the rows below
     // stay where they are while the slider is dragged, and a bigger preview is cut at the card.
-    property <float> text-h: base-t.preferred-height / 1px;
+    property <float> text-h: base-t.text-h / 1px;
     property <float> card-h: 16.0 + (24.0 + root.text-h) + 14.0;
     property <float> rows-y: root.top + root.card-h + 18.0;
     // Each plain row is 56px and its 2px rule.
@@ -178,7 +178,7 @@ export component StyleTab inherits Rectangle {
         width: 380px;
         text: preview-t.text;
         font-family: Theme.handwriting;
-        font-size: 24px;
+        font-size: 24px + 0px * Theme.text-epoch;
         letter-spacing: 24px * root.spacing-em[root.spacing];
         wrap: word-wrap;
         line-height-factor: 1.4 / TextMetrics.natural;
@@ -192,7 +192,7 @@ export component StyleTab inherits Rectangle {
         height: root.text-h * 1px;
         text: "Currently POG no Weapon : Ideal for him are Never Rest or White Night Nova.";
         font-family: Theme.handwriting;
-        font-size: root.preview-font-size;
+        font-size: root.preview-font-size + 0px * Theme.text-epoch;
         letter-spacing: root.preview-font-size * root.spacing-em[root.spacing];
         wrap: word-wrap;
         overflow: clip;
@@ -249,15 +249,13 @@ export component StyleTab inherits Rectangle {
                 committed(v) => { root.set-size(v); }
             }
 
-            Text {
+            TiltLabel {
                 x: 228px;
                 width: 34px;
                 height: 44px;
                 text: "px";
-                font-family: Theme.handwriting;
                 font-size: 19px * Theme.ui-fit;
-                color: #5B616B;
-                vertical-alignment: center;
+                ink: #5B616B;
             }
         }
     }
@@ -295,40 +293,53 @@ export component StyleTab inherits Rectangle {
             width: 262px;
             height: 48px;
 
+            // the Font in use's name box: its name in its own face, and a summary of its Axis values under it
             Rectangle {
                 x: 0px;
                 width: 206px;
                 height: 48px;
-                border-radius: 10.8px;
-                background: #F0F0EE;
                 accessible-role: text;
                 accessible-label: root.font-name + ", " + root.font-summary;
 
-                // the name in its own face, and a summary of its Axis values under it
-                Text {
-                    x: 12px;
-                    y: 3px;
-                    width: parent.width - 24px;
-                    height: 26px;
-                    text: root.font-name;
-                    font-family: Theme.handwriting;
-                    font-size: 20px * Theme.ui-fit;
-                    color: #2B2F36;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
+                name-scene := TiltScene {
+                    box-w: 206px;
+                    box-h: 48px;
+                    PRect {
+                        pf: name-scene.pf;
+                        a: TiltPad.pad / 1px;
+                        b: TiltPad.pad / 1px;
+                        w: 206.0;
+                        h: 48.0;
+                        r: 10.8;
+                        fill: #F0F0EE;
+                    }
 
-                Text {
-                    x: 12px;
-                    y: 28px;
-                    width: parent.width - 24px;
-                    height: 17px;
-                    text: root.font-summary;
-                    font-family: Theme.handwriting;
-                    font-size: 14px * Theme.ui-fit;
-                    color: #5B616B;
-                    vertical-alignment: center;
-                    overflow: elide;
+                    PText {
+                        pf: name-scene.pf;
+                        a: TiltPad.pad / 1px + 12.0;
+                        b: TiltPad.pad / 1px + 3.0;
+                        nudge: 0.0;
+                        width: 182px;
+                        height: 26px;
+                        text: root.font-name;
+                        font-size: 20px * Theme.ui-fit;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    PText {
+                        pf: name-scene.pf;
+                        a: TiltPad.pad / 1px + 12.0;
+                        b: TiltPad.pad / 1px + 28.0;
+                        nudge: 0.0;
+                        width: 182px;
+                        height: 17px;
+                        text: root.font-summary;
+                        font-size: 14px * Theme.ui-fit;
+                        ink: #5B616B;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
                 }
             }
 
@@ -337,26 +348,47 @@ export component StyleTab inherits Rectangle {
                 x: 214px;
                 width: 48px;
                 height: 48px;
-                border-radius: 10.8px;
-                background: root.manager-open ? #2B2F36 : (manage-hit.has-hover ? #F0F0EE : #FFFFFD);
-                border-width: 1.5px;
-                border-color: #2B2F36;
                 accessible-role: button;
                 accessible-label: root.manage-label;
                 accessible-expanded: root.manager-open;
 
-                // the sliders icon: three lines, each with a knob
-                Path {
-                    x: 12px;
-                    y: 12px;
-                    width: 24px;
-                    height: 24px;
-                    viewbox-width: 24;
-                    viewbox-height: 24;
-                    commands: "M 3 6 H 11.5 M 16.5 6 H 21 M 3 12 H 6.5 M 11.5 12 H 21 M 3 18 H 12.5 M 17.5 18 H 21 M 14 6 m -2.5 0 a 2.5 2.5 0 1 0 5 0 a 2.5 2.5 0 1 0 -5 0 M 9 12 m -2.5 0 a 2.5 2.5 0 1 0 5 0 a 2.5 2.5 0 1 0 -5 0 M 15 18 m -2.5 0 a 2.5 2.5 0 1 0 5 0 a 2.5 2.5 0 1 0 -5 0";
-                    stroke: root.manager-open ? #FFFFFD : #2B2F36;
-                    stroke-width: 1.6px;
-                    stroke-line-cap: round;
+                manage-scene := TiltScene {
+                    box-w: 48px;
+                    box-h: 48px;
+                    PRect {
+                        pf: manage-scene.pf;
+                        a: TiltPad.pad / 1px;
+                        b: TiltPad.pad / 1px;
+                        w: 48.0;
+                        h: 48.0;
+                        r: 10.8;
+                        fill: #2B2F36;
+                    }
+
+                    PRect {
+                        pf: manage-scene.pf;
+                        a: TiltPad.pad / 1px + 1.5;
+                        b: TiltPad.pad / 1px + 1.5;
+                        w: 45.0;
+                        h: 45.0;
+                        r: 9.3;
+                        fill: root.manager-open ? #2B2F36 : (manage-hit.has-hover ? #F0F0EE : #FFFFFD);
+                    }
+
+                    // the sliders icon: three lines, each with a knob (the 24-unit icon drawn at 24px, 12px in)
+                    Path {
+                        width: manage-scene.width;
+                        height: manage-scene.height;
+                        viewbox-width: self.width / 1px;
+                        viewbox-height: self.height / 1px;
+                        commands: PX.seg(manage-scene.pf, 18.0 + 3.0, 18.0 + 6.0, 18.0 + 11.5, 18.0 + 6.0) + PX.seg(manage-scene.pf, 18.0 + 16.5, 18.0 + 6.0, 18.0 + 21.0, 18.0 + 6.0)
+                            + PX.seg(manage-scene.pf, 18.0 + 3.0, 18.0 + 12.0, 18.0 + 6.5, 18.0 + 12.0) + PX.seg(manage-scene.pf, 18.0 + 11.5, 18.0 + 12.0, 18.0 + 21.0, 18.0 + 12.0)
+                            + PX.seg(manage-scene.pf, 18.0 + 3.0, 18.0 + 18.0, 18.0 + 12.5, 18.0 + 18.0) + PX.seg(manage-scene.pf, 18.0 + 17.5, 18.0 + 18.0, 18.0 + 21.0, 18.0 + 18.0)
+                            + PX.ring(manage-scene.pf, 18.0 + 14.0, 18.0 + 6.0, 2.5) + PX.ring(manage-scene.pf, 18.0 + 9.0, 18.0 + 12.0, 2.5) + PX.ring(manage-scene.pf, 18.0 + 15.0, 18.0 + 18.0, 2.5);
+                        stroke: root.manager-open ? #FFFFFD : #2B2F36;
+                        stroke-width: 1.6px;
+                        stroke-line-cap: round;
+                    }
                 }
 
                 manage-hit := TouchArea {

@@ -551,6 +551,41 @@ fn opening_and_closing_do_not_resize_the_window_every_frame() {
     assert!(!h.is_settings_open());
 }
 
+/// Moving a window that is on screen shows its old picture at the new corner for a frame: the page
+/// jumped by a pixel and back when the open transition came to rest and the window was trimmed.
+#[test]
+fn opening_never_moves_or_resizes_the_window_once_it_is_shown() {
+    let mut h = Harness::new();
+    h.start().unwrap();
+    h.place_note(0, Geometry { x: 600, y: 100, ..h.note_geometry(0) });
+    h.toggle_dropdown(0);
+    h.invoke_dropdown_settings();
+    assert_eq!(h.settings_window_resizes(), 1, "placed once, before it shows");
+    let shown_at = h.settings_native_window_geometry();
+    h.advance_frames(ms(600));
+    assert_eq!(h.settings_window_resizes(), 1, "the window that was shown is the page at rest: no trim");
+    assert_eq!(h.settings_native_window_geometry(), shown_at);
+    assert_eq!(h.settings_native_window_geometry(), h.settings_window_geometry());
+}
+
+/// A Tab switch changes the window at most once and never moves its corner: a shorter Tab trims the
+/// window when the page rests, a taller one grows it before the page does and needs no trim after.
+#[test]
+fn a_tab_switch_resizes_the_window_once_and_keeps_its_corner() {
+    let mut h = Harness::new();
+    open_at_rest(&mut h);
+    let (x, y, ..) = h.settings_native_window_geometry().unwrap();
+    for (tab, what) in [(tab::STYLE, "shorter: trimmed once"), (tab::GENERAL, "taller: grown once, never trimmed")] {
+        let before = h.settings_window_resizes();
+        h.settings_click_tab(tab);
+        h.advance_frames(ms(250));
+        let (x2, y2, ..) = h.settings_native_window_geometry().unwrap();
+        assert_eq!((x2, y2), (x, y), "tab {tab}");
+        assert_eq!(h.settings_window_resizes() - before, 1, "tab {tab} is {what}");
+        assert_eq!(h.settings_native_window_geometry(), h.settings_window_geometry(), "tab {tab}");
+    }
+}
+
 #[test]
 fn a_taller_tab_lifts_the_page_near_the_bottom_of_the_screen() {
     let mut h = Harness::new();

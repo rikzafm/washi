@@ -139,6 +139,16 @@ impl Editor {
             });
         }
 
+        // Wire on_scroll_moved: the turned words follow the view
+        {
+            let editor_weak = editor_weak.clone();
+            let weak_ui = ui.as_weak();
+            ui.on_scroll_moved(move || {
+                let (Some(editor), Some(ui)) = (editor_weak.upgrade(), weak_ui.upgrade()) else { return };
+                editor.scrolled(&ui);
+            });
+        }
+
         // Wire on_block_key
         {
             let changed = changed.clone();

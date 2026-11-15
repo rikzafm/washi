@@ -13,11 +13,11 @@ use crate::note_window::{AxisRow, FontListRow, SettingsWindow};
 use slint::{ModelRc, VecModel};
 
 /// A row of the list with nothing extra under it, in logical px.
-pub const ROW_H: f32 = 64.0;
+pub const ROW_H: f32 = 58.0;
 
 /// One line of the Axis panel and the room around the three of them, logical px.
-pub const AXIS_H: f32 = 50.0;
-pub const PANEL_PAD: f32 = 10.0;
+pub const AXIS_H: f32 = 48.0;
+pub const PANEL_PAD: f32 = 22.0;
 /// The room the Axis panel takes under the Font in use's row (`RowSpec::extra`).
 pub const PANEL_H: f32 = 3.0 * AXIS_H + PANEL_PAD;
 
@@ -184,8 +184,8 @@ fn axis_row(a: &AxisSpec) -> AxisRow {
 }
 
 /// The slip's title block above the list and its install area under it (`ManagerMetrics`).
-pub const HEAD_H: f32 = 76.0;
-pub const FOOT_H: f32 = 116.0;
+pub const HEAD_H: f32 = 71.0;
+pub const FOOT_H: f32 = 118.0;
 
 /// Show the Default font as the Font in use (Settings has just opened; the app then calls [`show`]).
 pub fn wire(ui: &SettingsWindow) {
@@ -300,6 +300,6 @@ mod tests {
         open.extra = 100.0;
         let list = model(&[open, default_row(false), default_row(false)]);
         let tops: Vec<(f32, f32)> = list.iter().map(|r| (r.top, r.height)).collect();
-        assert_eq!(tops, vec![(0.0, 164.0), (164.0, 64.0), (228.0, 64.0)]);
+        assert_eq!(tops, vec![(0.0, ROW_H + 100.0), (ROW_H + 100.0, ROW_H), (2.0 * ROW_H + 100.0, ROW_H)]);
     }
 }

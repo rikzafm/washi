@@ -13,6 +13,7 @@ use super::{FaceSet, RegularFace};
 use slint::fontique_011::{fontique, shared_collection};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use fontique::{Blob, FontInfoOverride, FontStyle, FontWeight, FontWidth};
@@ -39,6 +40,8 @@ thread_local! {
     static IN_USE: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     /// Preview faces by font id, to draw each font's name in its own face.
     static PREVIEWS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    /// The outlines of each preview face by its family, to draw a font's name turned (`ui_text`).
+    static PREVIEW_FACES: RefCell<HashMap<String, Rc<super::SingleFace>>> = RefCell::new(HashMap::new());
     /// The family of the Regular-only face a slider drag is showing, if one is.
     static DRAG: RefCell<Option<String>> = const { RefCell::new(None) };
 }
@@ -89,15 +92,24 @@ pub fn preview_family(id: &str, source: &[u8]) -> String {
             .or_insert_with(|| {
                 let family = format!("Washi Preview {id}");
                 register(source, &family, 400.0, false);
+                if let Some(face) = super::SingleFace::new(source.to_vec()) {
+                    PREVIEW_FACES.with(|f| f.borrow_mut().insert(family.clone(), Rc::new(face)));
+                }
                 family
             })
             .clone()
     })
 }
 
+/// The outlines of the preview face registered under `family`, if there are any.
+pub fn preview_face(family: &str) -> Option<Rc<super::SingleFace>> {
+    PREVIEW_FACES.with(|f| f.borrow().get(family).cloned())
+}
+
 /// Take a font's preview face out (the font was removed or replaced).
 pub fn forget_preview(id: &str) {
     if let Some(family) = PREVIEWS.with(|p| p.borrow_mut().remove(id)) {
+        PREVIEW_FACES.with(|f| f.borrow_mut().remove(&family));
         unregister(&family, 400.0, false);
     }
 }

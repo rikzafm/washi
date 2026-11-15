@@ -4763,6 +4763,7 @@ dependencies = [
  "unicode-linebreak",
  "windows-sys 0.59.0",
  "write-fonts",
+ "zeno",
  "zeroize",
  "zip",
  "zune-core",

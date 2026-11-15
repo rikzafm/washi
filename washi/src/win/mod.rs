@@ -75,9 +75,20 @@ pub fn set_window_icon(hwnd: isize) {
     }
 }
 
+thread_local! {
+    /// Whether this process is the real app ([`set_app_identity`] ran), whose windows are native ones.
+    static NATIVE_WINDOWS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Like [`set_window_icon`] for a window that was just shown: winit creates the native window a
 /// little after `show()`, so there is no handle yet. Look again every few ms until it exists.
+///
+/// Only in the real app. Anywhere else (the test harness draws without native windows) a handle
+/// never comes, and the retries would be timers left running: a suspended app must have none.
 pub fn set_window_icon_when_ready<W: slint::ComponentHandle + 'static>(ui: &W) {
+    if !NATIVE_WINDOWS.with(|n| n.get()) {
+        return;
+    }
     fn attempt<W: slint::ComponentHandle + 'static>(weak: slint::Weak<W>, tries: u32) {
         let Some(ui) = weak.upgrade() else { return };
         if let Some(h) = crate::popup::hwnd_of(ui.window()) {
@@ -92,6 +103,7 @@ pub fn set_window_icon_when_ready<W: slint::ComponentHandle + 'static>(ui: &W) {
 /// Group every note's taskbar button under one Washi identity. Call once at startup, before
 /// any window exists.
 pub fn set_app_identity() {
+    NATIVE_WINDOWS.with(|n| n.set(true));
     let id = wide("Washi.Notes");
     // SAFETY: NUL-terminated string, copied by the call.
     unsafe { windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };

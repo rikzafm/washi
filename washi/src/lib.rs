@@ -26,6 +26,8 @@ pub mod popups;
 pub mod settings;
 pub mod sidebar_panel;
 pub mod textflow;
+pub mod tilt_text;
+pub mod ui_text;
 pub mod storage;
 pub mod suspend;
 pub mod trace;

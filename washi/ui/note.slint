@@ -26,6 +26,7 @@ export { CaptionPiece, ImageViewerWindow } from "viewer.slint";
 export { DropdownMenuWindow, DropdownNoteItem } from "dropdown.slint";
 export { ContextMenuWindow, ClosedItem } from "context-menu.slint";
 import { TapeShape } from "settings-widgets.slint";
+export { Turned, TurnSpec, TurnedLine } from "settings-widgets.slint";
 export { AllNoteItem } from "all-notes.slint";
 export { SidebarPanel } from "sidebar-panel.slint";
 export { SettingsWindow } from "settings.slint";
@@ -248,7 +249,10 @@ export component NoteWindow inherits Window {
     in-out property <length> scroll-y: 0px;
     in-out property <bool> scrolling: false;
     callback scroll-activity();
+    /// The note scrolled: Rust draws the turned words that came near the view (`RunData.img`).
+    callback scroll-moved();
     changed scroll-y => {
+        root.scroll-moved();
         if (root.max-scroll > 0px && !scrollbar.dragging && !root.suspended) {
             root.scrolling = true;
             root.scroll-activity();
@@ -523,6 +527,7 @@ export component NoteWindow inherits Window {
                         focus-serial: root.focus-serial;
                         focus-anchor: root.focus-anchor;
                         wash: root.wash;
+                        wash-hidden: root.picker-open;
                         pointer-down(x, y, shift) => { root.picker-open = false; root.list-menu-open = false; root.pointer-down(x, y, shift); }
                         pointer-drag(x, y) => { root.pointer-drag(x, y); }
                         pointer-up => { root.pointer-up(); }

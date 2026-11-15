@@ -12,7 +12,9 @@
 //!
 //! The mockup text is tilted with the paper, but the software renderer cannot rotate text. At rest
 //! the note therefore draws every word as its own upright `Text`, moved to where the tilted word
-//! would be (the paper's tilt about the paper's center). While editing, the stock level `TextInput`
+//! would be (the paper's tilt about the paper's center); the words near the view are then drawn
+//! over again as pictures truly turned onto that baseline (`crate::tilt_text`, placed by
+//! `editor::layout`), which is what shows at rest. While editing, the stock level `TextInput`
 //! only places the caret and the selection, and the words stay where they are (tilted editing,
 //! Settings › General) or settle flat. Everything here is in the level layout either way: the note
 //! maps what it draws and what the pointer touches through the tilt. Both must break lines in the same
@@ -455,6 +457,9 @@ pub struct Rule {
     pub dy: f64,
     /// Part of a ticked check item: drawn grey.
     pub done: bool,
+    /// The whole bar this is a piece of, its x and width: a bar wider than `Tokens::max_run` is cut
+    /// into pieces, each level on the tilted baseline; turned, it is drawn in one (`tilt_text`).
+    pub bar: (f64, f64),
 }
 
 /// The box of a check item, level in the paper's frame, with the offset onto the tilted baseline.
@@ -529,7 +534,7 @@ fn draw_block(b: &Block, bi: usize, number: usize, indent: f64, top: f64, lines:
         while at < width - 1e-9 {
             let w = (width - at).min(t.max_run);
             let (dx, dy) = tilt_offset(x + at + w / 2.0, y + height / 2.0, paper, t.tilt_deg);
-            rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy, done });
+            rules.push(Rule { block: bi, x: x + at, y, width: w, height, dx, dy, done, bar: (x, width) });
             at += w;
         }
     };
@@ -726,6 +731,21 @@ impl Layout {
     /// Every word (or piece of a word) to draw, upright, with its offset onto the tilted baseline.
     pub fn runs(&self) -> &[Run] {
         &self.runs
+    }
+
+    /// The font the lines were wrapped in.
+    pub fn font(&self) -> &Rc<ActiveFont> {
+        &self.font
+    }
+
+    /// Where the baseline of `run` is below the top of its line box, in the run's own face.
+    pub fn run_baseline(&self, run: &Run) -> f64 {
+        baseline(&Measure::of(&self.font, run.bold, run.italic, run.size), run.pitch)
+    }
+
+    /// Extra space after every character of `run` (letter spacing), logical px.
+    pub fn run_spacing(&self, run: &Run) -> f64 {
+        self.tokens.letter_spacing * run.size
     }
 
     /// The bars: underlines, strike-throughs and list bullets.

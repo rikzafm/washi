@@ -6,6 +6,8 @@
 // with the dark filled part, a thumb, and a dot under every snap point.
 
 import { Theme } from "theme.slint";
+import { PaperTheme } from "paper-theme.slint";
+import { PRect, PText, TiltPad, TiltScene } from "settings-widgets.slint";
 
 /// A slider over whole numbers `minimum..=maximum`.
 ///
@@ -28,6 +30,8 @@ export component PSlider inherits Rectangle {
     /// Dragging within this many units of a snap point lands on it.
     in property <int> pull: 1;
     in property <string> accessible-name;
+    /// How much the control is turned: the Paper's tilt, or the Font manager's.
+    in property <angle> tilt: PaperTheme.paper-tilt;
     /// The pointer is down on the slider.
     out property <bool> dragging: area.pressed;
     callback moved(int);
@@ -74,45 +78,74 @@ export component PSlider inherits Rectangle {
         root.committed(root.value);
     }
 
-    // The track, its filled part and the dots under the snap points.
-    Rectangle {
-        x: root.thumb / 2;
-        y: 14px;
-        width: root.span;
-        height: 8px;
-        border-radius: 4px;
-        background: #E1E1DE;
-    }
+    property <float> pad: TiltPad.pad / 1px;
 
-    Rectangle {
-        x: root.thumb / 2;
-        y: 14px;
-        width: root.span * root.frac;
-        height: 8px;
-        border-radius: 4px;
-        background: #2B2F36;
-    }
+    // The track, its filled part and the dots under the snap points, turned.
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        PRect {
+            pf: scene.pf;
+            a: root.pad + root.thumb / 2px;
+            b: root.pad + 14.0;
+            w: root.span / 1px;
+            h: 8.0;
+            r: 4.0;
+            fill: #E1E1DE;
+        }
 
-    for s[i] in root.snaps : Rectangle {
-        x: root.x-of(s) - 2px;
-        y: 33px;
-        width: 4px;
-        height: 4px;
-        border-radius: 2px;
-        background: root.value == s ? #2B2F36 : #8B919A;
-    }
+        PRect {
+            pf: scene.pf;
+            a: root.pad + root.thumb / 2px;
+            b: root.pad + 14.0;
+            w: root.span / 1px * root.frac;
+            h: 8.0;
+            r: 4.0;
+            fill: #2B2F36;
+        }
 
-    Rectangle {
-        x: root.span * root.frac;
-        y: 8px;
-        width: root.thumb;
-        height: 20px;
-        border-radius: 7px;
-        background: #FFFFFD;
-        border-width: 2px;
-        border-color: #2B2F36;
-        drop-shadow-color: fs.has-focus ? #6FA2F5 : transparent;
-        drop-shadow-blur: 5px;
+        for s[i] in root.snaps : PRect {
+            pf: scene.pf;
+            a: root.pad + root.x-of(s) / 1px - 2.0;
+            b: root.pad + 33.0;
+            w: 4.0;
+            h: 4.0;
+            r: 2.0;
+            fill: root.value == s ? #2B2F36 : #8B919A;
+        }
+
+        // the keyboard focus: a soft ring round the thumb
+        if fs.has-focus : PRect {
+            pf: scene.pf;
+            a: root.pad + root.span / 1px * root.frac - 2.5;
+            b: root.pad + 5.5;
+            w: 25.0;
+            h: 25.0;
+            r: 9.5;
+            fill: #6FA2F566;
+        }
+
+        // the thumb: a dark ring round a white centre
+        PRect {
+            pf: scene.pf;
+            a: root.pad + root.span / 1px * root.frac;
+            b: root.pad + 8.0;
+            w: 20.0;
+            h: 20.0;
+            r: 7.0;
+            fill: #2B2F36;
+        }
+
+        PRect {
+            pf: scene.pf;
+            a: root.pad + root.span / 1px * root.frac + 2.0;
+            b: root.pad + 10.0;
+            w: 16.0;
+            h: 16.0;
+            r: 5.0;
+            fill: #FFFFFD;
+        }
     }
 
     fs := FocusScope {
@@ -173,6 +206,7 @@ export component NumberBox inherits Rectangle {
     in property <int> step: 1;
     in property <bool> compact: false;
     in property <string> accessible-name;
+    in property <angle> tilt: PaperTheme.paper-tilt;
     /// The box has the keyboard focus (for tests).
     out property <bool> editing: input.has-focus;
     /// What the box shows (for tests).
@@ -181,8 +215,6 @@ export component NumberBox inherits Rectangle {
 
     width: root.compact ? 46px : 60px;
     height: root.compact ? 32px : 44px;
-    border-radius: root.compact ? 8px : 10.8px;
-    background: #2B2F36;
     accessible-role: spinbox;
     accessible-label: root.accessible-name;
     accessible-value: root.value;
@@ -210,6 +242,39 @@ export component NumberBox inherits Rectangle {
         }
     }
 
+    property <float> pad: TiltPad.pad / 1px;
+
+    scene := TiltScene {
+        tilt: root.tilt;
+        box-w: root.width;
+        box-h: root.height;
+        PRect {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad;
+            w: root.width / 1px;
+            h: root.height / 1px;
+            r: root.compact ? 8.0 : 10.8;
+            fill: #2B2F36;
+        }
+
+        // the digits turned; the level field takes over while the box has the focus
+        digits := PText {
+            pf: scene.pf;
+            a: root.pad;
+            b: root.pad + (root.height - input.height) / 2px;
+            nudge: 0.0;
+            width: root.width;
+            height: input.height;
+            visible: !input.has-focus;
+            text: input.text;
+            font-size: (root.compact ? 14px : 19px) * Theme.ui-fit;
+            ink: #FFFFFD;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
     input := TextInput {
         x: 0px;
         y: (root.height - self.height) / 2;
@@ -221,7 +286,7 @@ export component NumberBox inherits Rectangle {
         vertical-alignment: center;
         font-family: Theme.handwriting;
         font-size: (root.compact ? 14px : 19px) * Theme.ui-fit;
-        color: #FFFFFD;
+        color: !self.has-focus && digits.drawn ? transparent : #FFFFFD;
         selection-background-color: #6FA2F5;
         selection-foreground-color: #FFFFFD;
         single-line: true;

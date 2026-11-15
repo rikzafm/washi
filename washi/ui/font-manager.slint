@@ -13,7 +13,7 @@
 import { Theme } from "theme.slint";
 import "../../fonts/ShadowsIntoLight.ttf";
 import "../../fonts/ShadowsIntoLight-Bold.ttf";
-import { PX, PaperFrame, TapeShape, PText, PBox, PRect, PShadow, VTape } from "settings-widgets.slint";
+import { PX, PaperFrame, TapeShape, PText, PBox, PRect, PRule, PShadow, VTape } from "settings-widgets.slint";
 import { PSlider, NumberBox } from "controls.slint";
 import { PaperTheme } from "paper-theme.slint";
 import { ScrollBar } from "scroll.slint";
@@ -63,16 +63,16 @@ export global ManagerMetrics {
     /// The slip's top, below the Paper's top edge.
     out property <length> top-offset: 34px;
     /// The title block above the list, and the install area under it.
-    out property <length> head-h: 76px;
-    out property <length> foot-h: 116px;
+    out property <length> head-h: 71px;
+    out property <length> foot-h: 118px;
     out property <angle> tilt: -1.2deg;
     /// How far the slip slides in from (it fades in as it does).
     out property <length> slide: 150px;
 }
 
-/// One line of the Axis panel: its label, a slider and a small number box with the unit, or "Not in
-/// this font". The controls are level (the tilt only moves where they are), laid out at paper
-/// coordinates (`a`, `b`) like everything else in the frame `pf`; `b` is the line's top.
+/// One line of the Axis panel (the mockup's 48px line): its label, a slider and a small number box with
+/// the unit, or "Not in this font". The controls are level (the tilt only moves where they are), laid
+/// out at paper coordinates (`a`, `b`) like everything else in the frame `pf`; `b` is the line's top.
 component AxisLine inherits Rectangle {
     in property <PaperFrame> pf;
     in property <AxisRow> data;
@@ -83,7 +83,7 @@ component AxisLine inherits Rectangle {
 
     /// The value both controls show; the slider and the box move it, and each other with it.
     property <int> value: root.data.value;
-    property <float> mid: root.b + 25.0;
+    property <float> mid: root.b + 24.0;
 
     x: 0px;
     y: 0px;
@@ -92,50 +92,53 @@ component AxisLine inherits Rectangle {
 
     PText {
         pf: root.pf;
-        a: 60.0;
-        b: root.mid - 14.0;
-        width: 70px;
-        height: 28px;
+        a: 30.0;
+        b: root.mid - 11.0;
+        width: 66px;
+        height: 22px;
         text: root.data.label;
-        font-size: 17px * Theme.ui-fit;
+        font-size: 15px * Theme.ui-fit;
+        ink: root.data.present ? #2B2F36 : #5E626A;
         vertical-alignment: center;
     }
 
     if !root.data.present : PText {
         pf: root.pf;
-        a: 134.0;
-        b: root.mid - 14.0;
+        a: 96.0;
+        b: root.mid - 11.0;
         width: 200px;
-        height: 28px;
+        height: 22px;
         text: "Not in this font";
-        font-size: 16px * Theme.ui-fit;
-        color: #8B919A;
+        font-size: 14px * Theme.ui-fit;
+        ink: #5E626A;
         vertical-alignment: center;
     }
 
     if root.data.present : PSlider {
-        x: PX.x(root.pf, 199.0, root.mid) - self.width / 2;
-        y: PX.y(root.pf, 199.0, root.mid) - self.height / 2;
-        width: 130px;
+        x: PX.x(root.pf, 182.0, root.mid) - self.width / 2;
+        y: PX.y(root.pf, 182.0, root.mid) - self.height / 2;
+        width: 172px;
         minimum: root.data.min;
         maximum: root.data.max;
         step: root.data.step;
         pull: root.data.pull;
         snaps: root.data.snaps;
         accessible-name: root.data.label;
+        tilt: ManagerMetrics.tilt;
         value <=> root.value;
         moved(v) => { root.moved(v); }
         committed(v) => { root.committed(v); }
     }
 
     if root.data.present : NumberBox {
-        x: PX.x(root.pf, 299.0, root.mid) - self.width / 2;
-        y: PX.y(root.pf, 299.0, root.mid) - self.height / 2;
+        x: PX.x(root.pf, 297.0, root.mid) - self.width / 2;
+        y: PX.y(root.pf, 297.0, root.mid) - self.height / 2;
         compact: true;
         minimum: root.data.min;
         maximum: root.data.max;
         step: root.data.step;
         accessible-name: root.data.label;
+        tilt: ManagerMetrics.tilt;
         value <=> root.value;
         committed(v) => { root.committed(v); }
     }
@@ -143,21 +146,23 @@ component AxisLine inherits Rectangle {
     if root.data.present && root.data.unit != "" : PText {
         pf: root.pf;
         a: 326.0;
-        b: root.mid - 14.0;
-        width: 22px;
-        height: 28px;
+        b: root.mid - 10.0;
+        width: 16px;
+        height: 20px;
         text: root.data.unit;
-        font-size: 15px * Theme.ui-fit;
-        color: #5B616B;
+        font-size: 13px * Theme.ui-fit;
+        ink: #5E626A;
         vertical-alignment: center;
     }
 }
 
-/// A row of the list: radio dot, the Font's name in its own face, a subtitle, and at the right the
-/// lock and "Default" or "Remove". `pf` is the list's frame; the row sits `row.top` down the list.
+/// A row of the list (the mockup's: a 56px line and a dotted 2px rule): radio dot, the Font's name in
+/// its own face, a subtitle, and at the right the lock and "Default" or "Remove". `pf` is the list's
+/// frame; the row sits `row.top` down the list. The Font in use has its Axis panel under the line.
 component FontRowItem inherits Rectangle {
     in property <PaperFrame> pf;
     in property <FontListRow> data;
+    in property <TapeShape> rule;
     callback clicked();
     callback remove();
     /// An Axis slider of the panel moved to a value (dragging), or let go at it / a number was typed.
@@ -172,88 +177,99 @@ component FontRowItem inherits Rectangle {
     property <float> pw: root.pf.pw;
     property <float> b: (ManagerMetrics.head-h + root.data.top) / 1px;
     property <float> h: root.data.height / 1px;
-    /// The row's own part (`ROW_H`): the dot, the lock, the tag and the press area sit in it, and the
-    /// Axis panel of the Font in use under it.
-    property <float> oh: 64.0;
-    property <float> tag-a: root.pw - 24.0 - tag-t.preferred-width / 1px;
+    /// The row's own line: the dot, the lock, the tag and the press area sit in it.
+    property <float> oh: 56.0;
+    /// Where the tag's text ends: 8px of the button's padding in from the content's edge ("Remove"), or
+    /// 4px for "Default".
+    property <float> tag-right: root.data.locked ? root.pw - 22.0 : root.pw - 26.0;
+    property <float> tag-a: root.tag-right - tag-t.text-w / 1px;
 
-    if pick.has-hover || root.data.active : PRect {
+    // the Axis panel of the Font in use: a grey slab under its line
+    if root.data.axes.length > 0 : PRect {
         pf: root.pf;
-        a: 14.0;
-        b: root.b + 3.0;
-        w: root.pw - 28.0;
-        h: root.h - 6.0;
-        r: 10.8;
+        a: 18.0;
+        b: root.b + root.oh;
+        w: root.pw - 36.0;
+        h: root.h - root.oh - 2.0 - 10.0;
+        r: 10.0;
         fill: #F0F0EE;
     }
 
-    // the radio dot
+    // the dotted rule that ends the row
+    PRule {
+        pf: root.pf;
+        a: 18.0;
+        b: root.b + root.h - 9.0;
+        shape: root.rule;
+    }
+
+    // the radio dot: a 2px ring, white inside, and a dark centre when it is the Font in use
     PRect {
         pf: root.pf;
-        a: 26.0;
-        b: root.b + root.oh / 2.0 - 10.0;
-        w: 20.0;
-        h: 20.0;
-        r: 10.0;
+        a: 18.0;
+        b: root.b + root.oh / 2.0 - 8.0;
+        w: 16.0;
+        h: 16.0;
+        r: 8.0;
         fill: #2B2F36;
     }
 
     PRect {
         pf: root.pf;
-        a: 28.0;
-        b: root.b + root.oh / 2.0 - 8.0;
-        w: 16.0;
-        h: 16.0;
-        r: 8.0;
+        a: 20.0;
+        b: root.b + root.oh / 2.0 - 6.0;
+        w: 12.0;
+        h: 12.0;
+        r: 6.0;
         fill: #FFFFFD;
     }
 
     if root.data.active : PRect {
         pf: root.pf;
-        a: 31.0;
-        b: root.b + root.oh / 2.0 - 5.0;
-        w: 10.0;
-        h: 10.0;
-        r: 5.0;
+        a: 22.0;
+        b: root.b + root.oh / 2.0 - 4.0;
+        w: 8.0;
+        h: 8.0;
+        r: 4.0;
         fill: #2B2F36;
     }
 
     PText {
         pf: root.pf;
-        a: 60.0;
-        b: root.b + 8.0;
-        width: root.tag-a * 1px - 60px - 28px;
-        height: 28px;
+        a: 44.0;
+        b: root.b + 8.8;
+        width: root.tag-a * 1px - 44px - 10px;
+        height: 22.8px;
         text: root.data.name;
         font-family: root.data.family;
-        font-size: 22px;
+        font-size: 19px + 0px * Theme.text-epoch;
         vertical-alignment: center;
         overflow: elide;
     }
 
     PText {
         pf: root.pf;
-        a: 60.0;
-        b: root.b + 36.0;
-        width: root.tag-a * 1px - 60px - 28px;
-        height: 20px;
+        a: 44.0;
+        b: root.b + 31.6;
+        width: root.tag-a * 1px - 44px - 10px;
+        height: 15.6px;
         text: root.data.subtitle;
-        font-size: 16px * Theme.ui-fit;
-        color: #5B616B;
+        font-size: 13px * Theme.ui-fit;
+        ink: #5E626A;
         vertical-alignment: center;
         overflow: elide;
     }
 
     if root.data.locked : Path {
-        x: PX.x(root.pf, root.tag-a - 14.0, root.b + root.oh / 2.0) - 8px;
-        y: PX.y(root.pf, root.tag-a - 14.0, root.b + root.oh / 2.0) - 8px;
-        width: 16px;
-        height: 16px;
-        viewbox-width: 24;
-        viewbox-height: 24;
-        commands: "M 6 11 H 18 V 21 H 6 Z M 8.5 11 V 7.5 A 3.5 3.5 0 0 1 15.5 7.5 V 11";
-        stroke: #5B616B;
-        stroke-width: 2px;
+        x: PX.x(root.pf, root.tag-a - 11.0, root.b + root.oh / 2.0) - 6px;
+        y: PX.y(root.pf, root.tag-a - 11.0, root.b + root.oh / 2.0) - 6px;
+        width: 12px;
+        height: 12px;
+        viewbox-width: 12;
+        viewbox-height: 12;
+        commands: "M 2.5 5.5 H 9.5 V 10.5 H 2.5 Z M 4 5.5 V 4 A 2 2 0 0 1 8 4 V 5.5";
+        stroke: #5E626A;
+        stroke-width: 1.4px;
         stroke-line-join: round;
         fill: transparent;
     }
@@ -261,20 +277,20 @@ component FontRowItem inherits Rectangle {
     tag-t := PText {
         pf: root.pf;
         a: root.tag-a;
-        b: root.b + root.oh / 2.0 - 14.0;
+        b: root.b + root.oh / 2.0 - 11.0;
         width: self.preferred-width;
-        height: 28px;
+        height: 22px;
         text: root.data.tag;
-        font-size: 17px * Theme.ui-fit;
-        color: #5B616B;
+        font-size: (root.data.locked ? 14px : 15px) * Theme.ui-fit;
+        ink: root.data.locked ? #5E626A : #A3312B;
         vertical-alignment: center;
     }
 
     // The row (the Font in use is picked by pressing it) and, over it, the tag of a removable one.
     pick := TouchArea {
-        x: PX.x(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.oh / 2.0) - (root.pw - 28.0) * 0.5px;
-        y: PX.y(root.pf, 14.0 + (root.pw - 28.0) / 2.0, root.b + root.oh / 2.0) - root.oh * 0.5px;
-        width: (root.pw - 28.0) * 1px;
+        x: PX.x(root.pf, 18.0 + (root.pw - 36.0) / 2.0, root.b + root.oh / 2.0) - (root.pw - 36.0) * 0.5px;
+        y: PX.y(root.pf, 18.0 + (root.pw - 36.0) / 2.0, root.b + root.oh / 2.0) - root.oh * 0.5px;
+        width: (root.pw - 36.0) * 1px;
         height: root.oh * 1px;
         mouse-cursor: pointer;
         accessible-role: list-item;
@@ -285,21 +301,21 @@ component FontRowItem inherits Rectangle {
     }
 
     if !root.data.locked : TouchArea {
-        x: PX.x(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.oh / 2.0) - tag-t.preferred-width / 2 - 6px;
-        y: PX.y(root.pf, root.tag-a + tag-t.preferred-width / 2px, root.b + root.oh / 2.0) - 16px;
-        width: tag-t.preferred-width + 12px;
-        height: 32px;
+        x: PX.x(root.pf, root.tag-a + tag-t.text-w / 2px, root.b + root.oh / 2.0) - tag-t.text-w / 2 - 8px;
+        y: PX.y(root.pf, root.tag-a + tag-t.text-w / 2px, root.b + root.oh / 2.0) - 22px;
+        width: tag-t.text-w + 16px;
+        height: 44px;
         mouse-cursor: pointer;
         accessible-role: button;
         accessible-label: root.data.tag + " " + root.data.name;
         clicked => { root.remove(); }
     }
 
-    // The Axis panel of the Font in use: a line each for Weight, Width and Slant, under the row.
+    // The Axis panel's lines of the Font in use: 6px of padding, then a 48px line each.
     for ax[k] in root.data.axes : AxisLine {
         pf: root.pf;
         data: ax;
-        b: root.b + root.oh + k * 50.0;
+        b: root.b + root.oh + 6.0 + k * 48.0;
         moved(v) => { root.axis-moved(k, v); }
         committed(v) => { root.axis-committed(k, v); }
     }
@@ -317,6 +333,8 @@ export component FontManager inherits Rectangle {
     in property <TapeShape> tape;
     in property <color> tape-base;
     in property <color> tape-stripe;
+    /// The dotted rule between rows (322 px along the tilt).
+    in property <TapeShape> rule;
     in property <string> heading: "Installed fonts";
     in property <string> install-heading: "Install a font";
     in property <string> install-hint: "Drop a Google Fonts .zip here, or click to browse";
@@ -432,12 +450,12 @@ export component FontManager inherits Rectangle {
 
     PText {
         pf: root.pf;
-        a: 28.0;
-        b: 24.0;
-        width: 314px;
-        height: 44px;
+        a: 18.0;
+        b: 26.0;
+        width: 334px;
+        height: 35px;
         text: root.heading;
-        font-size: 32px * Theme.ui-fit;
+        font-size: 26px * Theme.ui-fit;
         vertical-alignment: center;
     }
 
@@ -461,6 +479,7 @@ export component FontManager inherits Rectangle {
             for row[i] in root.fonts : FontRowItem {
                 pf: root.list-pf;
                 data: row;
+                rule: root.rule;
                 clicked => { root.row-clicked(i); }
                 remove => { root.remove-clicked(i); }
                 axis-moved(axis, v) => { root.axis-moved(axis, v); }
@@ -469,49 +488,87 @@ export component FontManager inherits Rectangle {
         }
     }
 
-    // The install area: a heading and a box to drop a file on (it darkens while one is held over the window).
-    PText {
-        pf: root.pf;
-        a: 28.0;
-        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 12.0;
-        width: 314px;
-        height: 32px;
-        text: root.install-heading;
-        font-size: 22px * Theme.ui-fit;
-        font-weight: 700;
-        vertical-alignment: center;
-    }
-
+    // The install area: a dashed box to drop a file on (it darkens while one is held over the window),
+    // with "+ Install a font" and the hint centred in it. The mockup's button: 2px dashes, 10px round
+    // corners, 12px of padding, 14px under the list.
     PRect {
         pf: root.pf;
-        a: 24.0;
-        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 52.0;
-        w: 322.0;
-        h: 46.0;
-        r: 10.8;
-        fill: root.install-hover ? #DADAD6 : #F0F0EE;
+        a: 18.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 14.0;
+        w: 334.0;
+        h: 86.0;
+        r: 10.0;
+        fill: root.install-hover ? #DADAD6 : #FFFFFD;
+    }
+
+    for k in 20 : PRect {
+        pf: root.pf;
+        a: 26.0 + k * 15.8;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 14.0;
+        w: 9.0;
+        h: 2.0;
+        fill: #A9ADB4;
+    }
+
+    for k in 20 : PRect {
+        pf: root.pf;
+        a: 26.0 + k * 15.8;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 98.0;
+        w: 9.0;
+        h: 2.0;
+        fill: #A9ADB4;
+    }
+
+    for k in 5 : PRect {
+        pf: root.pf;
+        a: 18.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 22.0 + k * 15.0;
+        w: 2.0;
+        h: 9.0;
+        fill: #A9ADB4;
+    }
+
+    for k in 5 : PRect {
+        pf: root.pf;
+        a: 350.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 22.0 + k * 15.0;
+        w: 2.0;
+        h: 9.0;
+        fill: #A9ADB4;
     }
 
     PText {
         pf: root.pf;
-        a: 36.0;
-        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 52.0;
-        width: 298px;
-        height: 46px;
-        text: root.install-hint;
-        font-size: 16px * Theme.ui-fit;
-        color: #5B616B;
+        a: 32.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 28.0;
+        width: 306px;
+        height: 21px;
+        text: "+  " + root.install-heading;
+        font-size: 17px * Theme.ui-fit;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+
+    PText {
+        pf: root.pf;
+        a: 32.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 51.0;
+        width: 306px;
+        height: 36px;
+        text: root.install-hint;
+        font-size: 14px * Theme.ui-fit;
+        ink: #5E626A;
+        horizontal-alignment: center;
+        vertical-alignment: top;
         wrap: word-wrap;
     }
 
     PBox {
         pf: root.pf;
-        a: 24.0;
-        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 52.0;
-        width: 322px;
-        height: 46px;
+        a: 18.0;
+        b: root.pf.ph - ManagerMetrics.foot-h / 1px + 14.0;
+        width: 334px;
+        height: 86px;
 
         TouchArea {
             mouse-cursor: pointer;
@@ -543,7 +600,7 @@ export component FontManager inherits Rectangle {
     VTape {
         pf: root.pf;
         a: root.pf.pw / 2.0;
-        b: 6.0;
+        b: 0.0;
         shape: root.tape;
         base: root.tape-base;
         stripe: root.tape-stripe;

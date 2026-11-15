@@ -80,8 +80,23 @@ pub fn dotted_rule(len: f32, tilt_deg: f32) -> (String, f32, f32) {
     (path, len * c + 4.0, len * s + 6.0)
 }
 
+/// A dotted rule that rises to the right by `rise_deg`: `dotted_rule`'s dots with the left end `rise`
+/// px down in the box, so none falls outside it. The box is that much taller.
+pub fn dotted_rule_rising(len: f32, rise_deg: f32) -> (String, f32, f32) {
+    let rise = len * rise_deg.to_radians().sin();
+    let c = rise_deg.to_radians().cos();
+    let mut path = String::new();
+    let n = (len / 4.0).floor() as i32;
+    for k in 0..n {
+        let u = 4.0 * k as f32;
+        let (x, y) = (2.0 + u * c, 3.0 + rise - u * rise_deg.to_radians().sin());
+        path.push_str(&format!("M {:.2} {:.2} a 1 1 0 1 0 2 0 a 1 1 0 1 0 -2 0 Z ", x - 1.0, y));
+    }
+    (path, len * c + 6.0, rise + 6.0)
+}
+
 /// The Settings page's tapes: 0 the Paper's 113 by 33 strips, 1 the preview's 56 by 17 ones, 2 a
-/// 26 by 11 chip of the Tape color picker, 3 the dotted row rule.
+/// 26 by 11 chip of the Tape color picker, 3 the dotted row rule, 4 the Font manager's.
 pub fn set_preview_tapes(ui: &crate::note_window::SettingsWindow) {
     use crate::note_window::TapeShape;
     let tape = |w: f32, h: f32, angle: f32, band: f32| {
@@ -90,7 +105,12 @@ pub fn set_preview_tapes(ui: &crate::note_window::SettingsWindow) {
     };
     let (dots, dw, dh) = dotted_rule(448.0, PAPER_TILT);
     let rule = TapeShape { outline: dots.into(), stripes: "".into(), w: dw, h: dh };
-    let shapes = vec![tape(113.0, 33.0, TAPE_ANGLE, 8.0), tape(56.0, 17.0, TAPE_ANGLE, 5.0), tape(26.0, 11.0, 0.0, 4.0), rule];
+    // 4 the Font manager's row rule: 334 px along the slip's own tilt (-1.2 degrees)
+    // (the tilt runs up to the right, so the dots are shifted down by the rise to stay in the box;
+    // the slip's rule is placed that much (`MANAGER_RULE_RISE`) higher)
+    let (mdots, mw, mh) = dotted_rule_rising(334.0, 1.2);
+    let mrule = TapeShape { outline: mdots.into(), stripes: "".into(), w: mw, h: mh };
+    let shapes = vec![tape(113.0, 33.0, TAPE_ANGLE, 8.0), tape(56.0, 17.0, TAPE_ANGLE, 5.0), tape(26.0, 11.0, 0.0, 4.0), rule, mrule, tape(100.0, 28.0, -4.2, 8.0)];
     ui.set_preview_tapes(slint::ModelRc::new(slint::VecModel::from(shapes)));
 }
 

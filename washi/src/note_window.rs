@@ -105,13 +105,18 @@ impl Autosave {
     }
 }
 
-/// Make Slint shape the note's words and edit fields again (see `Theme.text-epoch`), on the next
-/// turn of the event loop. Called after every scale change of a window that shows a note. At
+/// Make Slint shape the window's text again (see `Theme.text-epoch`: a note's words and edit fields,
+/// and the UI text through `Theme.ui-fit`), on the next turn of the event loop. Called after every
+/// scale change of a window that shows a note, and of Settings. At
 /// startup the window briefly has the monitor's own scale before the UI size goes back on top;
 /// text Slint shaped in that moment kept the monitor's size (drawn too big for its place, so
 /// letters overlapped) until something else made it shape again, such as a resize. Bumping right
 /// in the scale callback is too early: the stale text is drawn after it.
-pub(crate) fn reshape_text_soon(ui: &NoteWindow) {
+pub(crate) fn reshape_text_soon<W>(ui: &W)
+where
+    W: ComponentHandle + 'static,
+    for<'a> Theme<'a>: slint::Global<'a, W>,
+{
     let weak = ui.as_weak();
     Timer::single_shot(Duration::ZERO, move || {
         if let Some(ui) = weak.upgrade() {

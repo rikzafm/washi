@@ -29,6 +29,49 @@ export global SettingsMetrics {
     out property <float> title-bottom: 38.0 + 52.8;
 }
 
+/// A label of the Sidebar with its text-shadow copies (`halo`, the Transparent theme's), drawn turned
+/// in the panel's frame `pf`: the box's top-left is at paper coordinates (`a`, `b`).
+component TiltHalo inherits Rectangle {
+    in property <PaperFrame> pf;
+    in property <float> a;
+    in property <float> b;
+    in property <string> text;
+    in property <length> font-size;
+    in property <int> font-weight: 400;
+    in property <[HaloOffset]> halo: [];
+
+    // the texts are placed in the frame's coordinates, which are the parent's
+    x: 0px;
+    y: 0px;
+
+    for o in root.halo : PText {
+        pf: root.pf;
+        a: root.a + o.dx;
+        b: root.b + o.dy;
+        nudge: 0.0;
+        width: root.width;
+        height: root.height;
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        ink: SidebarThemes.halo-color;
+        vertical-alignment: center;
+    }
+
+    PText {
+        pf: root.pf;
+        a: root.a;
+        b: root.b;
+        nudge: 0.0;
+        width: root.width;
+        height: root.height;
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        vertical-alignment: center;
+    }
+}
+
 /// One tab label in the Sidebar (the mockup's `.tab`: 48px tall, 24px text, 16px left padding),
 /// drawn in the panel's tilted frame `pf`; `b` is its top in the panel.
 component SidebarTab inherits Rectangle {
@@ -79,17 +122,15 @@ component SidebarTab inherits Rectangle {
     }
 
     // (a pixel higher than its line box, as `PText` with `nudge: -1`; the shadow along the panel's tilt)
-    HaloText {
-        x: PX.x(root.pf, 29.0, root.b - 1.0);
-        y: PX.y(root.pf, 29.0, root.b - 1.0);
-        cs: root.pf.f.cs;
-        sn: root.pf.f.sn;
+    TiltHalo {
+        pf: root.pf;
+        a: 29.0;
+        b: root.b - 1.0;
         width: SidebarPanel.label-w * 1px;
         height: 48px;
         text: root.text;
         font-size: 24px * Theme.ui-fit;
         font-weight: root.selected ? 700 : 400;
-        vertical-alignment: center;
         halo: root.halo;
     }
 
@@ -162,16 +203,14 @@ component SettingsSidebar inherits Rectangle {
 
     // "Settings": 44px on its natural line, 6px in from the 12px padding, 14px down (its text
     // shadow first, in the Transparent theme).
-    HaloText {
-        x: PX.x(root.pf, 19.0, 14.0 - 1.0);
-        y: PX.y(root.pf, 19.0, 14.0 - 1.0);
-        cs: root.pf.f.cs;
-        sn: root.pf.f.sn;
+    TiltHalo {
+        pf: root.pf;
+        a: 19.0;
+        b: 14.0 - 1.0;
         width: 240px;
         height: 71px;
         text: "Settings";
         font-size: 44px * Theme.ui-fit;
-        vertical-alignment: center;
         halo: SidebarThemes.halo-for(root.theme);
     }
 
@@ -771,9 +810,10 @@ export component SettingsWindow inherits Window {
             fonts: root.manager-fonts;
             install-hover: root.manager-install-hover;
             max-h: root.paper-h;
-            tape: root.preview-tapes[0];
-            tape-base: TapePalette.a-light[style.tape];
-            tape-stripe: TapePalette.a-deep[style.tape];
+            tape: root.preview-tapes[5];
+            rule: root.preview-tapes[4];
+            tape-base: TapePalette.b-light[style.tape];
+            tape-stripe: TapePalette.b-deep[style.tape];
             row-clicked(i) => { fs.focus(); root.manager-row-clicked(i); }
             remove-clicked(i) => { fs.focus(); root.manager-remove-clicked(i); }
             install-clicked => { fs.focus(); root.manager-install-clicked(); }

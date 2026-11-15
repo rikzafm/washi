@@ -12,9 +12,10 @@ use std::sync::mpsc;
 /// The default text-area width in logical px (the paper's default width minus the text insets).
 pub const DEFAULT_TEXT_WIDTH: u32 = 363 - 32 - 40;
 
-/// Stored images fit in a box this many px on a side: twice the default text-area width, which
-/// keeps them sharp at 200% display scaling and a decoded image near 1 MB.
-pub const MAX_STORED: u32 = 2 * DEFAULT_TEXT_WIDTH;
+/// Stored images fit in a box this many px on a side: three times the default text-area width,
+/// which keeps them sharp at 200% display scaling and when the picture is stretched wider than
+/// the default, for a decoded image of about 2 MB.
+pub const MAX_STORED: u32 = 3 * DEFAULT_TEXT_WIDTH;
 
 /// Refuse pictures above this many pixels rather than try to decode them (memory).
 const MAX_PIXELS: u64 = 120_000_000;
@@ -251,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn a_12_megapixel_jpeg_is_stored_in_about_100_kb() {
+    fn a_12_megapixel_jpeg_is_stored_in_about_250_kb() {
         let big = photo(4000, 3000);
         let jpeg = jpeg_of(&big, 92);
         assert!(jpeg.len() > 1_000_000, "the source is a real photo-sized file");
@@ -262,7 +263,7 @@ mod tests {
         let stored = prepare(Source::File(path)).unwrap();
         assert!(stored.width <= MAX_STORED && stored.height <= MAX_STORED);
         assert_eq!((stored.width, stored.height), (MAX_STORED, MAX_STORED * 3 / 4));
-        assert!(stored.data.len() <= 100 * 1024, "stored {} bytes", stored.data.len());
+        assert!(stored.data.len() <= 250 * 1024, "stored {} bytes", stored.data.len());
         // and it is still the picture
         let back = decode(&stored.data).unwrap();
         assert_eq!((back.width, back.height), (stored.width, stored.height));
