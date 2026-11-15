@@ -103,6 +103,34 @@ impl Editor {
         Some(caret)
     }
 
+    /// Tab or Shift+Tab pressed in block `block`: every list the selection (or the caret's paragraph)
+    /// touches moves in or back out, whole (one undo step). `None` when the key is no Tab or none of
+    /// those paragraphs is a list or check item, so the key is not ours; `Unchanged` when the lists
+    /// are already there (the key is still taken, it types no tab).
+    pub fn indent_key(&self, key: &str, shift: bool, block: usize) -> Option<Formatted> {
+        use slint::platform::Key;
+        let outdent = if key == char::from(Key::Tab).to_string() {
+            shift
+        } else if key == char::from(Key::Backtab).to_string() {
+            true
+        } else {
+            return None;
+        };
+        let sel = self.selection.get();
+        let (s, e) = sel.ordered();
+        let range = if (s.block..=e.block).contains(&block) { sel } else { Range { anchor: Caret { block, offset: 0 }, focus: Caret { block, offset: 0 } } };
+        let before = self.doc().clone();
+        let (s, e) = range.ordered();
+        if !(s.block..=e.block.min(before.len() - 1)).any(|i| before.blocks()[i].kind.is_item()) {
+            return None;
+        }
+        if !self.doc_mut().set_indent_range(range, !outdent) {
+            return Some(Formatted::Unchanged);
+        }
+        self.structural(before);
+        Some(Formatted::Reindented)
+    }
+
     /// A press on a check box ticks or unticks its item (one undo step). False when the point is no box.
     pub fn toggle_check_at(&self, ui: &NoteWindow, at: (f32, f32)) -> bool {
         let Some(block) = self.layout(ui).check_at((at.0 as f64, at.1 as f64)) else { return false };
@@ -141,13 +169,23 @@ impl Editor {
             FORMAT_ITALIC => Flags::ITALIC,
             FORMAT_UNDERLINE => Flags::UNDERLINE,
             FORMAT_STRIKE => Flags::STRIKE,
-            FORMAT_CHECK | FORMAT_LIST => {
+            FORMAT_CHECK | FORMAT_LIST | FORMAT_BULLETED | FORMAT_NUMBERED => {
                 let before = self.doc().clone();
                 let sel = self.selection.get();
-                let done = if what == FORMAT_CHECK {
-                    self.doc_mut().toggle_check_range(sel)
-                } else {
-                    self.doc_mut().toggle_list_range(sel)
+                let numbered_last = self.db.numbered_list_last();
+                let in_list = before.blocks().get(i).is_some_and(|b| b.kind.is_list());
+                let done = match what {
+                    FORMAT_CHECK => self.doc_mut().toggle_check_range(sel),
+                    FORMAT_LIST if in_list => self.doc_mut().clear_list_range(sel),
+                    FORMAT_LIST => self.doc_mut().set_list_range(sel, if numbered_last { Kind::Numbered } else { Kind::ListItem }),
+                    _ => {
+                        let numbered = what == FORMAT_NUMBERED;
+                        if numbered != numbered_last {
+                            // (a preference that cannot be saved only lasts until the app closes)
+                            let _ = self.db.set_numbered_list_last(numbered);
+                        }
+                        self.doc_mut().set_list_range(sel, if numbered { Kind::Numbered } else { Kind::ListItem })
+                    }
                 };
                 if !done {
                     return Formatted::Unchanged;
@@ -222,7 +260,13 @@ impl Editor {
         ui.set_fmt_italic(style.contains(Flags::ITALIC));
         ui.set_fmt_underline(style.contains(Flags::UNDERLINE));
         ui.set_fmt_strike(style.contains(Flags::STRIKE));
-        ui.set_fmt_list(b.is_some_and(|b| b.kind == Kind::ListItem));
+        // 0 no list, 1 bulleted, 2 numbered; and the type a click on the list button applies
+        ui.set_fmt_list(match b.map(|b| b.kind) {
+            Some(Kind::ListItem) => 1,
+            Some(Kind::Numbered) => 2,
+            _ => 0,
+        });
+        ui.set_list_last(if self.db.numbered_list_last() { 2 } else { 1 });
         ui.set_fmt_check(b.is_some_and(|b| b.kind.is_check()));
         self.fill_handles(&doc, &self.layout(ui));
         let sel = self.selection.get();

@@ -64,8 +64,14 @@ pub const FORMAT_BOLD: i32 = 0;
 pub const FORMAT_ITALIC: i32 = 1;
 pub const FORMAT_UNDERLINE: i32 = 2;
 pub const FORMAT_STRIKE: i32 = 3;
+/// The list button (and Ctrl+Shift+L): a list paragraph at the caret loses its list, else the
+/// selection takes the list type picked last.
 pub const FORMAT_LIST: i32 = 4;
 pub const FORMAT_CHECK: i32 = 5;
+/// A list type picked in the list button's flyout: applied to the selection's paragraphs (off where
+/// they all already have it), and remembered as the type picked last.
+pub const FORMAT_BULLETED: i32 = 6;
+pub const FORMAT_NUMBERED: i32 = 7;
 
 /// Typing is snapshotted once it pauses this long; structural changes are snapshotted at once.
 pub const HISTORY_PAUSE: Duration = Duration::from_millis(500);
@@ -122,6 +128,7 @@ fn block_kind(kind: Kind) -> BlockKind {
         Kind::Heading => BlockKind::Heading,
         Kind::Body => BlockKind::Body,
         Kind::ListItem => BlockKind::ListItem,
+        Kind::Numbered => BlockKind::Numbered,
         Kind::Check => BlockKind::Check,
         Kind::Checked => BlockKind::Checked,
         Kind::Image => BlockKind::Image,
@@ -258,6 +265,8 @@ pub struct Editor {
     pub runs: Rc<VecModel<RunData>>,
     pub rules: Rc<VecModel<RuleData>>,
     pub checks: Rc<VecModel<CheckData>>,
+    /// How far each block's text is moved in from the text area's left edge (lists, see `textflow`).
+    pub indents: Rc<VecModel<f32>>,
     pub sel_rects: Rc<VecModel<SelRect>>,
     pub handles: Rc<VecModel<SelRect>>,
     markers: RefCell<Vec<textflow::Marker>>,
@@ -329,6 +338,7 @@ impl Editor {
         let runs = Rc::new(VecModel::default());
         let rules = Rc::new(VecModel::default());
         let checks = Rc::new(VecModel::default());
+        let indents = Rc::new(VecModel::default());
         let sel_rects = Rc::new(VecModel::default());
         let handles = Rc::new(VecModel::default());
         let marker_data = Rc::new(VecModel::default());
@@ -350,6 +360,7 @@ impl Editor {
             runs,
             rules,
             checks,
+            indents,
             sel_rects,
             handles,
             markers: RefCell::new(vec![]),

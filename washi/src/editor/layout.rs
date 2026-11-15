@@ -76,6 +76,7 @@ impl Editor {
                 })
                 .collect::<Vec<_>>(),
         );
+        sync_rows(&self.indents, (0..layout.block_count()).map(|b| layout.indent(b) as f32).collect::<Vec<_>>());
         sync_rows(&self.checks,
             layout
                 .checks()

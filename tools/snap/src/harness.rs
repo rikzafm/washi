@@ -489,11 +489,45 @@ impl Harness {
         self.settle();
     }
 
-    /// The center of toolbar button `k` (0 B, 1 I, 2 U, 3 ab, 4 A, 5 list, 6 image) in window
+    /// The center of toolbar button `k` (slot: 0 B, 1 I, 2 U, 3 ab, 4 A, 5 list, 6 check, 7 image) in window
     /// coordinates: the button row sits in the paper's frame, turned about the paper's center.
     pub fn toolbar_button(&self, note: usize, k: usize) -> (f32, f32) {
         let du = 23.2 + 16.0 + k as f32 * 42.667;
         self.paper_point(note, du, -40.0 + 16.0 + self.paper_size(note).1)
+    }
+
+    /// The center of the list button's corner notch (it opens the list flyout), in window coordinates.
+    pub fn list_notch(&self, note: usize) -> (f32, f32) {
+        let du = 23.2 + 16.0 + 5.0 * 42.667;
+        self.paper_point(note, du + 11.0, -40.0 + 16.0 + self.paper_size(note).1 + 11.0)
+    }
+
+    /// The center of choice `k` (0 bulleted, 1 numbered) of the open list flyout, in window
+    /// coordinates (toolbar.slint ListFlyout: two 40 px choices, 6 px apart, 10 px above the band).
+    pub fn list_choice(&self, note: usize, k: usize) -> (f32, f32) {
+        let button_u = 23.2 + 16.0 + 5.0 * 42.667;
+        let top = self.paper_size(note).1 - BAND - 10.0 - 52.0;
+        self.paper_point(note, button_u - 49.0 + 6.0 + 20.0 + k as f32 * 46.0, top + 26.0)
+    }
+
+    /// Whether the list flyout is open.
+    pub fn list_menu_open(&self, note: usize) -> bool {
+        self.app().with_note(self.id(note), |n| n.ui().get_list_menu_open()).unwrap()
+    }
+
+    /// What the list button shows: the caret paragraph's list type (0 none, 1 bulleted, 2 numbered)
+    /// and the type a click applies (1 bulleted, 2 numbered).
+    pub fn list_shown(&self, note: usize) -> (i32, i32) {
+        self.app().with_note(self.id(note), |n| (n.ui().get_fmt_list(), n.ui().get_list_last())).unwrap()
+    }
+
+    /// Hold the left button down at `(x, y)` for `held`, then let go there (moving there first).
+    pub fn hold(&mut self, note: usize, x: f32, y: f32, held: Duration) {
+        self.pointer_move(note, x, y);
+        self.press_button(note, x, y, false);
+        self.advance(held);
+        self.release_button(note, x, y, false);
+        self.settle();
     }
 
     /// A point inside the color popover's body, in window coordinates (the caption row, clear of

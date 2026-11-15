@@ -15,7 +15,8 @@ and the check box indent narrows it so the words fall onto one more line than th
 fn long_text(n: usize) -> String {
     let mut t = String::from("# Caret in view");
     for i in 1..=n {
-        t.push_str(&format!("\n{i}. {LONG}"));
+        // (not `{i}. `: that line would be a numbered item)
+        t.push_str(&format!("\nPart {i}: {LONG}"));
     }
     t
 }
@@ -48,7 +49,7 @@ fn caret_at_the_bottom(h: &mut Harness) -> usize {
 
 /// Click the check button with the real pointer (it shows the toolbar first, as a user would).
 fn click_check_button(h: &mut Harness) {
-    let (x, y) = h.toolbar_button(0, 5);
+    let (x, y) = h.toolbar_button(0, 6);
     h.pointer_move(0, x, y);
     h.advance(ms(300));
     h.click(0, x, y);

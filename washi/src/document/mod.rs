@@ -8,6 +8,7 @@
 //! ## **Thermite Cutter : POG**       Heading (+ bold)
 //! Currently **POG** no *Weapon*      Body, with bold and italic words
 //! - list item                        ListItem
+//! 1. numbered item                  Numbered (its number counted again on reading)
 //! - [ ] to do / - [x] done           Check / Checked
 //! ![](img:42)                        Image
 //! ```
@@ -30,6 +31,9 @@ pub enum Kind {
     Heading,
     Body,
     ListItem,
+    /// A paragraph with its number in front (`1.`, `2.` ...). The number is not stored on the block:
+    /// it counts the unbroken run of numbered items it is in ([`Document::number`]).
+    Numbered,
     /// A paragraph with a box in front, not ticked yet.
     Check,
     /// A check paragraph that is ticked: drawn grey and struck through.
@@ -41,6 +45,16 @@ impl Kind {
     /// Whether this is a check paragraph, ticked or not.
     pub fn is_check(self) -> bool {
         matches!(self, Kind::Check | Kind::Checked)
+    }
+
+    /// Whether this is a bulleted or numbered list item.
+    pub fn is_list(self) -> bool {
+        matches!(self, Kind::ListItem | Kind::Numbered)
+    }
+
+    /// Whether this is a bulleted, numbered or check item: the kinds a list is made of.
+    pub fn is_item(self) -> bool {
+        self.is_list() || self.is_check()
     }
 }
 
@@ -152,16 +166,20 @@ pub struct Block {
     pub image_pct: u8,
     /// An image's place in the text area.
     pub align: Align,
+    /// Whether the list this item belongs to is moved in (Tab). Only meaningful on list and check
+    /// items, and only the first item of a list counts ([`indents_of`]); [`Document`] keeps every
+    /// item of a list the same.
+    pub indented: bool,
 }
 
 impl Block {
     pub fn new(kind: Kind, text: &str) -> Block {
         let text = one_line(text);
-        Block { kind, marks: vec![Style::NONE; text.len()], paints: vec![Paint::default(); text.len()], text, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
+        Block { kind, marks: vec![Style::NONE; text.len()], paints: vec![Paint::default(); text.len()], text, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left, indented: false }
     }
 
     pub fn image(id: i64) -> Block {
-        Block { kind: Kind::Image, text: String::new(), marks: vec![], paints: vec![], image_id: Some(id), image_pct: IMAGE_PCT_MAX, align: Align::Left }
+        Block { kind: Kind::Image, text: String::new(), marks: vec![], paints: vec![], image_id: Some(id), image_pct: IMAGE_PCT_MAX, align: Align::Left, indented: false }
     }
 
     /// The box of an image `avail` wide whose pixels are `px`: its x offset from the text area's
@@ -330,10 +348,12 @@ impl Default for Document {
 /// The kind a body block turns into when its text becomes `text` with the caret at `cursor` after
 /// the marker's space was typed (`old` is the text before the edit).
 fn auto_format_kind(kind: Kind, old: &str, text: &str, cursor: usize) -> Option<(Kind, usize)> {
-    const MARKERS: [(&str, Kind); 6] = [
+    const MARKERS: [(&str, Kind); 8] = [
         ("# ", Kind::Heading),
         ("- ", Kind::ListItem),
         ("* ", Kind::ListItem),
+        ("1. ", Kind::Numbered),
+        ("1, ", Kind::Numbered),
         ("[] ", Kind::Check),
         ("[ ] ", Kind::Check),
         ("[x] ", Kind::Checked),
@@ -469,7 +489,9 @@ impl Document {
                 text_format::parse_line(i, line)
             })
             .collect();
-        Document { blocks }
+        let mut doc = Document { blocks };
+        doc.settle_indents();
+        doc
     }
 
     /// The stored text (inverse of [`Document::parse`]).
@@ -480,11 +502,12 @@ impl Document {
             return String::new();
         }
         let mut out = String::new();
+        let (numbers, indents) = (self.numbers(), self.indents());
         for (i, b) in self.blocks.iter().enumerate() {
             if i > 0 {
                 out.push('\n');
             }
-            out.push_str(&text_format::write_block(b));
+            out.push_str(&text_format::write_block(b, numbers[i], indents[i]));
         }
         out
     }
@@ -523,8 +546,10 @@ impl Document {
             self.blocks.insert(block + 1, Block::new(Kind::Body, ""));
             return Caret { block: block + 1, offset: 0 };
         }
-        if (b.kind == Kind::ListItem || b.kind.is_check()) && b.text.is_empty() {
+        if (b.kind.is_list() || b.kind.is_check()) && b.text.is_empty() {
             self.blocks[block].kind = Kind::Body;
+            self.blocks[block].indented = false;
+            self.settle_indents();
             return Caret { block, offset: 0 };
         }
         let at = floor_boundary(&b.text, offset);
@@ -544,12 +569,18 @@ impl Document {
         if offset != 0 || block == 0 || !self.blocks.get(block)?.is_text() {
             return None;
         }
-        if self.blocks[block].kind == Kind::ListItem || self.blocks[block].kind.is_check() {
-            self.blocks[block].kind = Kind::Body;
+        if self.blocks[block].kind.is_item() {
+            // an item in a list that is moved in first moves the list back, then loses its marker
+            if !self.set_indent_range(Range { anchor: Caret { block, offset: 0 }, focus: Caret { block, offset: 0 } }, false) {
+                self.blocks[block].kind = Kind::Body;
+                self.blocks[block].indented = false;
+                self.settle_indents();
+            }
             return Some(Caret { block, offset: 0 });
         }
         if self.blocks[block - 1].kind == Kind::Image {
             self.blocks.remove(block - 1);
+            self.settle_indents();
             return Some(Caret { block: block - 1, offset: 0 });
         }
         let cur = self.blocks.remove(block);
@@ -558,6 +589,7 @@ impl Document {
         prev.text.push_str(&cur.text);
         prev.marks.extend(cur.marks);
         prev.paints.extend(cur.paints);
+        self.settle_indents();
         Some(Caret { block: block - 1, offset: at })
     }
 
@@ -573,6 +605,7 @@ impl Document {
             self.blocks[block].marks.extend(next.marks);
             self.blocks[block].paints.extend(next.paints);
         }
+        self.settle_indents();
         Some(Caret { block, offset })
     }
 
@@ -580,12 +613,14 @@ impl Document {
     /// before the edit, the caret is now at `cursor`) turns it into a heading or list item and
     /// drops the marker. Returns the caret (the start of the block) when it did.
     pub fn auto_format(&mut self, block: usize, old: &str, cursor: usize) -> Option<Caret> {
+        let snap = self.item_snapshot();
         let b = self.blocks.get_mut(block)?;
         let (kind, len) = auto_format_kind(b.kind, old, &b.text, cursor)?;
         b.kind = kind;
         b.text.drain(..len);
         b.marks.drain(..len);
         b.paints.drain(..len);
+        self.adopt_range(&[block], snap);
         Some(Caret { block, offset: 0 })
     }
 
@@ -747,37 +782,147 @@ impl Document {
 
     /// Toggle a body block into a list item and back. False for titles, headings and images.
     pub fn toggle_list(&mut self, block: usize) -> bool {
+        let snap = self.item_snapshot();
         match self.blocks.get_mut(block) {
             Some(b) if b.kind == Kind::Body => {
                 b.kind = Kind::ListItem;
+                self.adopt_range(&[block], snap);
                 true
             }
             Some(b) if b.kind == Kind::ListItem => {
                 b.kind = Kind::Body;
+                self.adopt_range(&[block], snap);
                 true
             }
             _ => false,
         }
     }
 
-    /// The list button over a range: if every body or list paragraph in it is a list item they
-    /// all become body, else they all become list items. False when it holds neither.
+    /// The bullet list over a range: [`Document::set_list_range`] with bulleted items.
     pub fn toggle_list_range(&mut self, range: Range) -> bool {
+        self.set_list_range(range, Kind::ListItem)
+    }
+
+    /// A list type picked for a range (`to` is [`Kind::ListItem`] or [`Kind::Numbered`]): if every
+    /// paragraph in it that can be a list already is one of that type they all become body, else
+    /// they all become that type. Paragraphs outside the range keep their kind. False when it holds
+    /// no such paragraph.
+    pub fn set_list_range(&mut self, range: Range, to: Kind) -> bool {
+        debug_assert!(to.is_list());
         let (s, e) = self.ordered_in(range);
         let eligible = self.list_eligible(s.block, e.block);
         if eligible.is_empty() {
             return false;
         }
-        let to = if eligible.iter().all(|&i| self.blocks[i].kind == Kind::ListItem) { Kind::Body } else { Kind::ListItem };
-        for i in eligible {
+        let to = if eligible.iter().all(|&i| self.blocks[i].kind == to) { Kind::Body } else { to };
+        let snap = self.item_snapshot();
+        for &i in &eligible {
             self.blocks[i].kind = to;
         }
+        self.adopt_range(&eligible, snap);
         true
+    }
+
+    /// Every list paragraph (bulleted or numbered) in a range becomes body. False when it holds none.
+    pub fn clear_list_range(&mut self, range: Range) -> bool {
+        let (s, e) = self.ordered_in(range);
+        let mut done = false;
+        for i in s.block..=e.block {
+            if self.blocks[i].kind.is_list() {
+                self.blocks[i].kind = Kind::Body;
+                self.blocks[i].indented = false;
+                done = true;
+            }
+        }
+        self.settle_indents();
+        done
+    }
+
+    /// The number shown in front of `block`: its place (from 1) in the unbroken run of numbered
+    /// items it belongs to. `None` when it is no numbered item.
+    pub fn number(&self, block: usize) -> Option<usize> {
+        if self.blocks.get(block)?.kind != Kind::Numbered {
+            return None;
+        }
+        Some(1 + self.blocks[..block].iter().rev().take_while(|b| b.kind == Kind::Numbered).count())
+    }
+
+    /// [`Document::number`] of every block, 0 for the blocks that are no numbered item.
+    pub fn numbers(&self) -> Vec<usize> {
+        numbers_of(&self.blocks)
+    }
+
+    /// Whether each block is in a list that is moved in (Tab); see [`indents_of`].
+    pub fn indents(&self) -> Vec<bool> {
+        indents_of(&self.blocks)
+    }
+
+    /// The first and last block of the unbroken run of list and check items `block` is in; `None`
+    /// when it is none.
+    pub fn list_run(&self, block: usize) -> Option<(usize, usize)> {
+        if !self.blocks.get(block)?.kind.is_item() {
+            return None;
+        }
+        let first = (0..block).rev().take_while(|&i| self.blocks[i].kind.is_item()).last().unwrap_or(block);
+        let last = (block + 1..self.blocks.len()).take_while(|&i| self.blocks[i].kind.is_item()).last().unwrap_or(block);
+        Some((first, last))
+    }
+
+    /// Tab (`indented`) or Shift+Tab over a range: every list the range touches moves, whole. False
+    /// when the range touches no list or every list it touches is already there.
+    pub fn set_indent_range(&mut self, range: Range, indented: bool) -> bool {
+        let (s, e) = self.ordered_in(range);
+        let before = self.indents();
+        let mut i = s.block;
+        while i <= e.block {
+            match self.list_run(i) {
+                Some((first, last)) => {
+                    for b in &mut self.blocks[first..=last] {
+                        b.indented = indented;
+                    }
+                    i = last + 1;
+                }
+                None => i += 1,
+            }
+        }
+        self.indents() != before
+    }
+
+    /// Which blocks are list or check items now and where their lists stand: taken before an edit
+    /// that makes items, for [`Self::adopt_range`].
+    fn item_snapshot(&self) -> (Vec<bool>, Vec<bool>) {
+        (self.blocks.iter().map(|b| b.kind.is_item()).collect(), self.indents())
+    }
+
+    /// After an edit made items out of `blocks` (`was` and `before` from [`Self::item_snapshot`] taken
+    /// before it): each new item takes the position of the nearest item that was in its list before
+    /// (the one above first), so a new item does not move the list next to it; a block that is no
+    /// item any more loses its position; then every list takes one position.
+    fn adopt_range(&mut self, blocks: &[usize], (was, before): (Vec<bool>, Vec<bool>)) {
+        for &i in blocks {
+            if !self.blocks[i].kind.is_item() {
+                self.blocks[i].indented = false;
+                continue;
+            }
+            let up = (0..i).rev().take_while(|&j| self.blocks[j].kind.is_item()).find(|&j| was.get(j) == Some(&true));
+            let down = (i + 1..self.blocks.len()).take_while(|&j| self.blocks[j].kind.is_item()).find(|&j| was.get(j) == Some(&true));
+            let src = if was[i] { Some(i) } else { up.or(down) };
+            self.blocks[i].indented = src.is_some_and(|j| before[j]);
+        }
+        self.settle_indents();
+    }
+
+    /// Give every list the position of its first item, after an edit that may have joined lists.
+    fn settle_indents(&mut self) {
+        let ind = self.indents();
+        for (b, f) in self.blocks.iter_mut().zip(ind) {
+            b.indented = f;
+        }
     }
 
     /// The paragraphs of blocks `from..=to` that can be a list or check item (not title, heading, picture).
     fn list_eligible(&self, from: usize, to: usize) -> Vec<usize> {
-        (from..=to).filter(|&i| matches!(self.blocks[i].kind, Kind::Body | Kind::ListItem | Kind::Check | Kind::Checked)).collect()
+        (from..=to).filter(|&i| matches!(self.blocks[i].kind, Kind::Body | Kind::ListItem | Kind::Numbered | Kind::Check | Kind::Checked)).collect()
     }
 
     /// The check button over a range: if every body, list or check paragraph in it is a check item
@@ -790,10 +935,12 @@ impl Document {
             return false;
         }
         let all = eligible.iter().all(|&i| self.blocks[i].kind.is_check());
-        for i in eligible {
+        let snap = self.item_snapshot();
+        for &i in &eligible {
             let b = &mut self.blocks[i];
             b.kind = if all { Kind::Body } else if b.kind == Kind::Checked { Kind::Checked } else { Kind::Check };
         }
+        self.adopt_range(&eligible, snap);
         true
     }
 
@@ -838,6 +985,7 @@ impl Document {
             return None;
         }
         self.blocks.remove(block);
+        self.settle_indents();
         if block >= self.blocks.len() {
             self.blocks.push(Block::new(Kind::Body, ""));
         }
@@ -853,6 +1001,7 @@ impl Document {
     pub fn insert_image(&mut self, block: usize, id: i64) -> usize {
         let at = block.min(self.blocks.len() - 1) + 1;
         self.blocks.insert(at, Block::image(id));
+        self.settle_indents();
         if at + 1 == self.blocks.len() {
             self.blocks.push(Block::new(Kind::Body, ""));
         }
@@ -952,6 +1101,7 @@ impl Document {
             merged.paints.extend_from_slice(&end.paints[at..]);
         }
         self.blocks.splice(s.block..=e.block, [merged]);
+        self.settle_indents();
         self.insert_text(s.block, from, from, text)
     }
 
@@ -993,6 +1143,7 @@ impl Document {
                 text_block @ (ParsedBlock::Title { .. }
                 | ParsedBlock::Heading { .. }
                 | ParsedBlock::ListItem { .. }
+                | ParsedBlock::Numbered { .. }
                 | ParsedBlock::Check { .. }
                 | ParsedBlock::Checked { .. }
                 | ParsedBlock::Body { .. }) => {
@@ -1000,6 +1151,7 @@ impl Document {
                         ParsedBlock::Title { text, marks, paints } => (Kind::Title, text, marks, paints),
                         ParsedBlock::Heading { text, marks, paints } => (Kind::Heading, text, marks, paints),
                         ParsedBlock::ListItem { text, marks, paints } => (Kind::ListItem, text, marks, paints),
+                        ParsedBlock::Numbered { text, marks, paints } => (Kind::Numbered, text, marks, paints),
                         ParsedBlock::Check { text, marks, paints } => (Kind::Check, text, marks, paints),
                         ParsedBlock::Checked { text, marks, paints } => (Kind::Checked, text, marks, paints),
                         ParsedBlock::Body { text, marks, paints } => (Kind::Body, text, marks, paints),
@@ -1014,7 +1166,7 @@ impl Document {
                         if let Some(prev) = cur_block.take() {
                             new_blocks.push(prev);
                         }
-                        cur_block = Some(Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left });
+                        cur_block = Some(Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left, indented: false });
                     }
                 }
                 ParsedBlock::Image { rgba } => {
@@ -1037,6 +1189,7 @@ impl Document {
 
         let final_count = new_blocks.len();
         self.blocks.splice(block_idx..=block_idx, new_blocks);
+        self.settle_indents();
         let res_block = block_idx + final_count - 1;
         Caret { block: res_block, offset: caret_offset }
     }
@@ -1056,10 +1209,43 @@ impl Document {
 fn following(prev: &Block, text: String, marks: Vec<Style>, paints: Vec<Paint>) -> Block {
     let kind = match prev.kind {
         Kind::ListItem => Kind::ListItem,
+        Kind::Numbered => Kind::Numbered,
         Kind::Check | Kind::Checked => Kind::Check,
         _ => Kind::Body,
     };
-    Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left }
+    Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left, indented: kind.is_item() && prev.indented }
+}
+
+/// Whether each block is in a list that is moved in: every list and check item of an unbroken run
+/// of them takes the flag of the run's first item; any other block is `false`.
+pub(crate) fn indents_of(blocks: &[Block]) -> Vec<bool> {
+    let mut run = false;
+    blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            if !b.kind.is_item() {
+                return false;
+            }
+            if i == 0 || !blocks[i - 1].kind.is_item() {
+                run = b.indented;
+            }
+            run
+        })
+        .collect()
+}
+
+/// The number of every block (0 for one that is no numbered item): numbered items count from 1 in
+/// each unbroken run of them.
+pub(crate) fn numbers_of(blocks: &[Block]) -> Vec<usize> {
+    let mut run = 0;
+    blocks
+        .iter()
+        .map(|b| {
+            run = if b.kind == Kind::Numbered { run + 1 } else { 0 };
+            run
+        })
+        .collect()
 }
 
 pub(crate) fn floor_boundary(s: &str, mut i: usize) -> usize {

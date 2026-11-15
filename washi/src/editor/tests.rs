@@ -455,15 +455,6 @@ fn the_default_tokens_are_the_themes() {
 }
 
 #[test]
-fn the_check_item_indent_is_the_themes() {
-    // the layout indents a check item's words by its own constant and the theme moves the edit field
-    // by `check-indent`: if they differ, the caret leaves the words of every check item
-    let (_dir, _editor, ui) = test_editor_with_ui("x");
-    let theme = ui.global::<Theme>().get_check_indent() as f64;
-    assert!((textflow::CHECK_INDENT - theme).abs() < 1e-6, "layout {} vs theme {theme}", textflow::CHECK_INDENT);
-}
-
-#[test]
 fn a_check_box_and_its_tick_are_drawn_until_wholly_above_the_papers_top_edge() {
     // the note's drawing rule; that composing does not hide them is checked with a real input
     // method event in tools/snap/tests/block_editing.rs

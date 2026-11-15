@@ -274,6 +274,8 @@ export component TextLayer inherits Rectangle {
     in property <[RuleData]> rules;
     /// The boxes of the check items (Rust).
     in property <[CheckData]> checks;
+    /// How far each block's text is moved in from the text area's left edge (Rust).
+    in property <[length]> block-indents;
     /// Highlights behind the words, and the boxes where the selection's wash meets them (Rust).
     in property <[MarkerData]> markers;
     in property <[SelRect]> marker-wash;
@@ -648,6 +650,7 @@ export component TextLayer inherits Rectangle {
                 return root.range-key(e.text) != 0;
             }
             italic: b.italic;
+            indent: root.block-indents[i];
             autofocus: i == 0 && root.allow-autofocus;
             tilted: root.tilted-editing;
             show-input: !root.hide-inputs && (root.tilted-editing ? root.editing : root.flat >= 0.99);

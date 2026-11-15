@@ -1,7 +1,7 @@
 //! Serializes and parses lightweight HTML for the clipboard (`CF_HTML`).
 //!
 //! Restricts formatting to Washi's tool menu:
-//! - Blocks: Title (h1), Heading (h2), ListItem (li), Check item (li with a checkbox input), Body (p), Image (img).
+//! - Blocks: Title (h1), Heading (h2), ListItem (li in ul), Numbered (li in ol), Check item (li with a checkbox input), Body (p), Image (img).
 //! - Inline marks: Bold (b), Italic (i), Underline (u), Strike (s).
 //! - Paints: Ink color and Marker highlight via inline CSS.
 //! - Images: Embedded PNG/JPEG data URIs (`data:image/...;base64,...`).
@@ -16,6 +16,7 @@ pub enum ParsedBlock {
     Heading { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     Body { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     ListItem { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
+    Numbered { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     Check { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     Checked { text: String, marks: Vec<Flags>, paints: Vec<Paint> },
     Image { rgba: Rgba },
@@ -28,6 +29,7 @@ impl ParsedBlock {
             | ParsedBlock::Heading { text, .. }
             | ParsedBlock::Body { text, .. }
             | ParsedBlock::ListItem { text, .. }
+            | ParsedBlock::Numbered { text, .. }
             | ParsedBlock::Check { text, .. }
             | ParsedBlock::Checked { text, .. } => text.is_empty(),
             ParsedBlock::Image { .. } => false,
@@ -61,14 +63,14 @@ pub fn to_html_and_text(
 
     let mut plain_lines = Vec::new();
     let mut html = String::new();
-    let mut in_list = false;
+    // the list element open around the items written so far: "ul" or "ol"
+    let mut in_list: Option<&str> = None;
 
     for i in from_block..=to_block {
         let b = &blocks[i];
         if b.kind == Kind::Image {
-            if in_list {
-                html.push_str("</ul>\n");
-                in_list = false;
+            if let Some(l) = in_list.take() {
+                html.push_str(&format!("</{l}>\n"));
             }
             if let Some(rgba) = get_rgba(b) {
                 if let Ok(png) = crate::images::encode_png(&rgba) {
@@ -89,20 +91,25 @@ pub fn to_html_and_text(
         let slice = &text[from_offset..to_offset.max(from_offset)];
         plain_lines.push(slice.to_string());
 
-        if b.kind == Kind::ListItem || b.kind.is_check() {
-            if !in_list {
-                html.push_str("<ul>\n");
-                in_list = true;
+        let list = match b.kind {
+            Kind::Numbered => Some("ol"),
+            Kind::ListItem | Kind::Check | Kind::Checked => Some("ul"),
+            _ => None,
+        };
+        if in_list != list {
+            if let Some(l) = in_list {
+                html.push_str(&format!("</{l}>\n"));
             }
-        } else if in_list {
-            html.push_str("</ul>\n");
-            in_list = false;
+            if let Some(l) = list {
+                html.push_str(&format!("<{l}>\n"));
+            }
+            in_list = list;
         }
 
         let tag = match b.kind {
             Kind::Title => "h1",
             Kind::Heading => "h2",
-            Kind::ListItem | Kind::Check | Kind::Checked => "li",
+            Kind::ListItem | Kind::Numbered | Kind::Check | Kind::Checked => "li",
             Kind::Body => "p",
             Kind::Image => unreachable!(),
         };
@@ -185,8 +192,8 @@ pub fn to_html_and_text(
         html.push_str(">\n");
     }
 
-    if in_list {
-        html.push_str("</ul>\n");
+    if let Some(l) = in_list {
+        html.push_str(&format!("</{l}>\n"));
     }
 
     (plain_lines.join("\n"), html)
@@ -276,6 +283,8 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
         children_emitted: usize,
     }
     let mut block_stack: Vec<BlockFrame> = Vec::new();
+    // the list elements open around the text: true for an `ol`
+    let mut lists: Vec<bool> = Vec::new();
     let mut last_was_br = false;
 
     let flush_text = |blocks: &mut Vec<ParsedBlock>,
@@ -292,6 +301,7 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                 Kind::Title => blocks.push(ParsedBlock::Title { text, marks, paints }),
                 Kind::Heading => blocks.push(ParsedBlock::Heading { text, marks, paints }),
                 Kind::ListItem => blocks.push(ParsedBlock::ListItem { text, marks, paints }),
+                Kind::Numbered => blocks.push(ParsedBlock::Numbered { text, marks, paints }),
                 Kind::Check => blocks.push(ParsedBlock::Check { text, marks, paints }),
                 Kind::Checked => blocks.push(ParsedBlock::Checked { text, marks, paints }),
                 Kind::Body | Kind::Image => blocks.push(ParsedBlock::Body { text, marks, paints }),
@@ -309,6 +319,7 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
             Kind::Title => blocks.push(ParsedBlock::Title { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::Heading => blocks.push(ParsedBlock::Heading { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::ListItem => blocks.push(ParsedBlock::ListItem { text: String::new(), marks: vec![], paints: vec![] }),
+            Kind::Numbered => blocks.push(ParsedBlock::Numbered { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::Check => blocks.push(ParsedBlock::Check { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::Checked => blocks.push(ParsedBlock::Checked { text: String::new(), marks: vec![], paints: vec![] }),
             Kind::Body | Kind::Image => blocks.push(ParsedBlock::Body { text: String::new(), marks: vec![], paints: vec![] }),
@@ -386,9 +397,16 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                         // a check box in a list item makes it a check item
                         let t = tag_str.to_lowercase().replace(|c| c == '"' || c == '\'', "");
                         if !is_close && t.contains("type=checkbox") {
-                            if let Some(f) = block_stack.last_mut().filter(|f| matches!(f.kind, Kind::ListItem | Kind::Check | Kind::Checked)) {
+                            if let Some(f) = block_stack.last_mut().filter(|f| matches!(f.kind, Kind::ListItem | Kind::Numbered | Kind::Check | Kind::Checked)) {
                                 f.kind = if t.split_whitespace().any(|w| w == "checked" || w.starts_with("checked=")) { Kind::Checked } else { Kind::Check };
                             }
+                        }
+                    }
+                    "ul" | "ol" => {
+                        if is_close {
+                            lists.pop();
+                        } else {
+                            lists.push(tag_name == "ol");
                         }
                     }
                     "mark" => {
@@ -402,6 +420,7 @@ pub fn from_html(html: &str) -> Vec<ParsedBlock> {
                         let kind = match tag_name.as_str() {
                             "h1" => Kind::Title,
                             "h2" | "h3" | "h4" | "h5" | "h6" => Kind::Heading,
+                            "li" if lists.last() == Some(&true) => Kind::Numbered,
                             "li" => Kind::ListItem,
                             _ => Kind::Body,
                         };
@@ -622,6 +641,7 @@ mod tests {
             image_id: Some(1),
             image_pct: 100,
             align: Align::Left,
+            indented: false,
         };
         let blocks = vec![block];
         let range = Range { anchor: Caret { block: 0, offset: 0 }, focus: Caret { block: 0, offset: 0 } };
@@ -724,5 +744,22 @@ mod tests {
         let parsed = from_html(html);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0], body("Visible"));
+    }
+    #[test]
+    fn numbered_items_copy_as_an_ordered_list_and_an_ordered_list_pastes_as_numbered_items() {
+        let blocks = vec![Block::new(Kind::Numbered, "one"), Block::new(Kind::Numbered, "two"), Block::new(Kind::ListItem, "dot")];
+        let range = Range { anchor: Caret { block: 0, offset: 0 }, focus: Caret { block: 2, offset: 3 } };
+        let (_, html) = to_html_and_text(&blocks, range, &|_| None);
+        assert!(html.contains("<ol>\n<li>one</li>\n<li>two</li>\n</ol>\n<ul>\n<li>dot</li>\n</ul>"), "{html}");
+        let parsed = from_html("<ol><li>one</li><li>two</li></ol><ul><li>dot</li></ul><li>bare</li>");
+        let kinds: Vec<&str> = parsed
+            .iter()
+            .map(|p| match p {
+                ParsedBlock::Numbered { .. } => "numbered",
+                ParsedBlock::ListItem { .. } => "bullet",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["numbered", "numbered", "bullet", "bullet"]);
     }
 }

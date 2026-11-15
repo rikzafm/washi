@@ -1053,3 +1053,197 @@ fn ticking_toggles_only_check_items() {
     assert_eq!(d.blocks()[1].kind, Kind::Check);
     assert!(!d.toggle_checked(2) && !d.toggle_checked(0) && !d.toggle_checked(9));
 }
+
+#[test]
+fn numbered_items_count_from_one_in_each_unbroken_run() {
+    let d = doc(&[
+        (Kind::Title, "t"),
+        (Kind::Numbered, "a"),
+        (Kind::Numbered, "b"),
+        (Kind::Body, "x"),
+        (Kind::Numbered, "c"),
+        (Kind::ListItem, "y"),
+        (Kind::Numbered, "d"),
+        (Kind::Numbered, "e"),
+    ]);
+    assert_eq!(d.numbers(), [0, 1, 2, 0, 1, 0, 1, 2]);
+    assert_eq!((d.number(2), d.number(3), d.number(7)), (Some(2), None, Some(2)));
+}
+
+#[test]
+fn one_dot_or_one_comma_then_space_at_the_start_of_a_body_makes_a_numbered_item() {
+    for marker in ["1. ", "1, "] {
+        let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, &format!("{marker}milk"))]);
+        assert_eq!(d.auto_format(1, &format!("{}milk", marker.trim_end()), 3), Some(Caret { block: 1, offset: 0 }), "{marker:?}");
+        assert_eq!((d.blocks()[1].kind, d.blocks()[1].text.as_str()), (Kind::Numbered, "milk"));
+    }
+    // another number, the middle of a paragraph, or a paragraph that is no body: plain text
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "3. x")]);
+    assert_eq!(d.auto_format(1, "3.x", 3), None);
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "1. x")]);
+    assert_eq!(d.auto_format(1, "1.x", 3), None);
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "a 1. x")]);
+    assert_eq!(d.auto_format(1, "a 1.x", 5), None);
+}
+
+#[test]
+fn enter_continues_a_numbered_list_and_ends_it_on_an_empty_item_and_backspace_drops_the_number() {
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::Numbered, "milk")]);
+    assert_eq!(d.split(1, 4), Caret { block: 2, offset: 0 });
+    assert_eq!(kinds(&d), [Kind::Title, Kind::Numbered, Kind::Numbered]);
+    assert_eq!(d.split(2, 0), Caret { block: 2, offset: 0 });
+    assert_eq!(kinds(&d), [Kind::Title, Kind::Numbered, Kind::Body], "Enter on an empty item ends the list");
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::Numbered, "a"), (Kind::Numbered, "b")]);
+    assert_eq!(d.backspace(2, 0), Some(Caret { block: 2, offset: 0 }));
+    assert_eq!(kinds(&d), [Kind::Title, Kind::Numbered, Kind::Body]);
+}
+
+#[test]
+fn a_list_type_picked_for_a_range_changes_only_its_paragraphs() {
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "a"), (Kind::Body, "b"), (Kind::Check, "c"), (Kind::Heading, "h"), (Kind::ListItem, "d")]);
+    let r = Range { anchor: Caret { block: 1, offset: 0 }, focus: Caret { block: 4, offset: 1 } };
+    assert!(d.set_list_range(r, Kind::Numbered));
+    assert_eq!(kinds(&d), [Kind::Title, Kind::Numbered, Kind::Numbered, Kind::Numbered, Kind::Heading, Kind::ListItem]);
+    // all of them already numbered: they all become body
+    assert!(d.set_list_range(r, Kind::Numbered));
+    assert_eq!(kinds(&d), [Kind::Title, Kind::Body, Kind::Body, Kind::Body, Kind::Heading, Kind::ListItem]);
+    // clearing takes off bullets and numbers, and nothing else
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "a"), (Kind::Numbered, "b"), (Kind::Check, "c")]);
+    assert!(d.clear_list_range(d.all()));
+    assert_eq!(kinds(&d), [Kind::Title, Kind::Body, Kind::Body, Kind::Check]);
+    assert!(!d.clear_list_range(d.all()));
+}
+
+#[test]
+fn numbered_items_are_stored_with_their_numbers_and_a_body_that_looks_numbered_is_escaped() {
+    let d = doc(&[(Kind::Title, "t"), (Kind::Numbered, "a"), (Kind::Numbered, "b"), (Kind::Body, "3. apples"), (Kind::Numbered, "c"), (Kind::ListItem, "1. x")]);
+    let text = d.to_text();
+    assert_eq!(text, "# t\n1. a\n2. b\n\\3. apples\n1. c\n- \\1. x");
+    assert_eq!(Document::parse(&text), d);
+    // any number reads as a numbered item, counted again
+    let d = Document::parse("# t\n7. a\n12. b\n2024 plans\n3.no space");
+    assert_eq!(kinds(&d), [Kind::Title, Kind::Numbered, Kind::Numbered, Kind::Body, Kind::Body]);
+    assert_eq!(texts(&d), ["t", "a", "b", "2024 plans", "3.no space"]);
+    assert_eq!(d.to_text(), "# t\n1. a\n2. b\n2024 plans\n3.no space");
+}
+
+// ---- lists that are moved in (Tab) ----
+
+fn moved(d: &Document) -> Vec<bool> {
+    d.indents()
+}
+
+fn caret_range(block: usize) -> Range {
+    Range::within(block, 0, 0)
+}
+
+#[test]
+fn tab_moves_the_whole_list_the_caret_is_in_and_no_other() {
+    let mut d = doc(&[
+        (Kind::Title, "t"),
+        (Kind::ListItem, "a"),
+        (Kind::Numbered, "b"),
+        (Kind::Check, "c"),
+        (Kind::Body, "x"),
+        (Kind::ListItem, "d"),
+    ]);
+    assert!(d.set_indent_range(caret_range(2), true));
+    assert_eq!(moved(&d), [false, true, true, true, false, false]);
+    assert!(!d.set_indent_range(caret_range(2), true), "already there");
+    assert!(!d.set_indent_range(caret_range(4), true), "a body paragraph is no list");
+    assert!(d.set_indent_range(caret_range(3), false));
+    assert_eq!(moved(&d), [false; 6]);
+}
+
+#[test]
+fn tab_over_a_selection_moves_every_list_it_touches() {
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "a"), (Kind::Body, "x"), (Kind::ListItem, "b"), (Kind::Body, "y"), (Kind::ListItem, "c")]);
+    let sel = Range { anchor: Caret { block: 1, offset: 0 }, focus: Caret { block: 3, offset: 0 } };
+    assert!(d.set_indent_range(sel, true));
+    assert_eq!(moved(&d), [false, true, false, true, false, false]);
+}
+
+#[test]
+fn backspace_at_the_front_of_a_moved_in_item_moves_the_list_back_then_drops_the_marker() {
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "a"), (Kind::ListItem, "b")]);
+    d.set_indent_range(caret_range(1), true);
+    assert_eq!(d.backspace(2, 0), Some(Caret { block: 2, offset: 0 }));
+    assert_eq!((moved(&d), d.blocks()[2].kind), (vec![false; 3], Kind::ListItem), "the list moved back, the marker stayed");
+    assert_eq!(d.backspace(2, 0), Some(Caret { block: 2, offset: 0 }));
+    assert_eq!(d.blocks()[2].kind, Kind::Body);
+}
+
+#[test]
+fn enter_in_a_moved_in_list_continues_it_there_and_a_new_item_joins_the_list_next_to_it() {
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "ab")]);
+    d.set_indent_range(caret_range(1), true);
+    d.split(1, 1);
+    assert_eq!(moved(&d), [false, true, true]);
+    // a paragraph made a list item takes the position of the list above it, or else below it
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "a"), (Kind::Body, "b"), (Kind::Body, "c"), (Kind::ListItem, "d")]);
+    d.set_indent_range(caret_range(1), true);
+    assert!(d.set_list_range(caret_range(2), Kind::ListItem));
+    assert_eq!(moved(&d), [false, true, true, false, false], "joined the list above, which stays where it was");
+    assert!(d.set_list_range(caret_range(3), Kind::Numbered));
+    assert_eq!(moved(&d), [false, true, true, true, true], "the list below it joins the list above, and follows its position");
+}
+
+#[test]
+fn a_new_list_next_to_a_moved_in_list_does_not_move_it() {
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::Body, "a"), (Kind::ListItem, "b"), (Kind::ListItem, "c")]);
+    d.set_indent_range(caret_range(2), true);
+    assert!(d.set_list_range(caret_range(1), Kind::ListItem));
+    assert_eq!(moved(&d), [false, true, true, true]);
+}
+
+#[test]
+fn lists_joined_by_a_deletion_take_the_position_of_the_upper_one() {
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "a"), (Kind::Body, ""), (Kind::ListItem, "b")]);
+    d.set_indent_range(caret_range(3), true);
+    assert_eq!(moved(&d), [false, false, false, true]);
+    d.backspace(2, 0);
+    d.delete(1, 1);
+    assert!(moved(&d).iter().all(|&m| !m), "{:?}", moved(&d));
+}
+
+#[test]
+fn a_moved_in_list_round_trips_through_the_stored_text_in_every_kind() {
+    let mut d = doc(&[
+        (Kind::Title, "t"),
+        (Kind::ListItem, "a"),
+        (Kind::Numbered, "b"),
+        (Kind::Check, "c"),
+        (Kind::Body, "x"),
+        (Kind::Numbered, "d"),
+    ]);
+    d.set_indent_range(caret_range(1), true);
+    d.set_indent_range(caret_range(5), true);
+    let text = d.to_text();
+    assert_eq!(text, "# t\n    - a\n    1. b\n    - [ ] c\nx\n    1. d");
+    assert_eq!(Document::parse(&text), d);
+}
+
+#[test]
+fn a_body_that_starts_with_four_spaces_and_a_marker_stays_a_body() {
+    for text in ["    - x", "    3. x", "    - [ ] x"] {
+        let d = doc(&[(Kind::Title, "t"), (Kind::Body, text)]);
+        let back = Document::parse(&d.to_text());
+        assert_eq!(back, d, "{text:?} -> {:?}", d.to_text());
+        assert_eq!(back.blocks()[1].kind, Kind::Body);
+    }
+    // an item whose text starts that way too
+    let mut d = doc(&[(Kind::Title, "t"), (Kind::ListItem, "    - x")]);
+    d.set_indent_range(caret_range(1), true);
+    assert_eq!(Document::parse(&d.to_text()), d);
+}
+
+#[test]
+fn old_notes_and_other_lines_read_as_before() {
+    let d = Document::parse("# t\n    plain\n  - two spaces\n- a\n1. b");
+    assert_eq!(moved(&d), [false; 5]);
+    assert_eq!(d.blocks()[1].kind, Kind::Body);
+    assert_eq!(d.blocks()[2].kind, Kind::Body);
+    // a later item of a list is read at the position of the list's first
+    let d = Document::parse("# t\n- a\n    - b");
+    assert_eq!(moved(&d), [false, false, false]);
+}

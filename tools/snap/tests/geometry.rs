@@ -31,8 +31,8 @@ const CY: f32 = 235.0;
 
 /// On the pink tape (its center is about 37 px right of and 6 px below the paper's top-left).
 const TAPE: (f32, f32) = (80.0, 48.0);
-/// On the blue tape (bottom-right).
-const BLUE_TAPE: (f32, f32) = (363.0, 421.0);
+/// On the blue tape (bottom-right), below the toolbar row: the eighth button reaches into the tape.
+const BLUE_TAPE: (f32, f32) = (363.0, 440.0);
 /// In the middle of the text area.
 const TEXT: (f32, f32) = (150.0, 180.0);
 /// On the first toolbar button.

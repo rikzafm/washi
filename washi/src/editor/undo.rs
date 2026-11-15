@@ -74,7 +74,7 @@ impl Editor {
         };
         let mut doc = self.doc_mut();
         let kinds_only = doc.len() == target.doc.len()
-            && doc.blocks().iter().zip(target.doc.blocks()).all(|(a, b)| Block { kind: b.kind, ..a.clone() } == *b);
+            && doc.blocks().iter().zip(target.doc.blocks()).all(|(a, b)| Block { kind: b.kind, indented: b.indented, ..a.clone() } == *b);
         let at = doc.blocks().iter().zip(target.doc.blocks()).take_while(|(a, b)| a == b).count();
         let block = at.min(target.doc.len() - 1);
         let offset = target.doc.blocks()[block].text.len();

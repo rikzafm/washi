@@ -11,6 +11,21 @@ const INLINE: [char; 4] = ['\\', '*', '~', '<'];
 /// Characters that start a block marker: escaped as the first character of a line.
 const LINE_START: [char; 3] = ['#', '-', '!'];
 
+/// The length of the `N. ` that starts a numbered item's stored line (one or more ASCII digits, a
+/// dot and a space), if `s` starts with one.
+pub(super) fn number_marker(s: &str) -> Option<usize> {
+    let digits = s.bytes().take_while(u8::is_ascii_digit).count();
+    (digits > 0 && s[digits..].starts_with(". ")).then_some(digits + 2)
+}
+
+/// What starts the stored line of an item of a list that is moved in (Tab), before its marker.
+const INDENT: &str = "    ";
+
+/// Whether `s` starts with the marker of a list, numbered or check item.
+fn item_marker(s: &str) -> bool {
+    s.starts_with("- ") || number_marker(s).is_some()
+}
+
 /// What follows `- ` on the stored line of a check item.
 const CHECK_MARKERS: [(&str, Kind); 2] = [("[ ] ", Kind::Check), ("[x] ", Kind::Checked)];
 
@@ -73,8 +88,12 @@ fn paint_markers(out: &mut String, from: Paint, to: Paint) {
 }
 
 /// A block as one stored line: its kind's marker and then its text, or the whole picture line.
-pub(super) fn write_block(b: &Block) -> String {
+/// `number` is the block's number when it is a numbered item.
+pub(super) fn write_block(b: &Block, number: usize, indented: bool) -> String {
     let mut out = String::new();
+    if indented && b.kind.is_item() {
+        out.push_str(INDENT);
+    }
     match b.kind {
         Kind::Title => out.push_str("# "),
         Kind::Heading => out.push_str("## "),
@@ -85,6 +104,7 @@ pub(super) fn write_block(b: &Block) -> String {
                 out.push('\\');
             }
         }
+        Kind::Numbered => out.push_str(&format!("{}. ", number.max(1))),
         Kind::Check => out.push_str("- [ ] "),
         Kind::Checked => out.push_str("- [x] "),
         Kind::Body => {}
@@ -114,7 +134,11 @@ pub(super) fn write_inline(b: &Block) -> String {
         markers(&mut out, cur, style);
         paint_markers(&mut out, cur_paint, paint);
         for c in b.text[start..end].chars() {
-            if INLINE.contains(&c) || (out.is_empty() && LINE_START.contains(&c)) {
+            // (a text that starts like `3. ` has its first digit escaped, so it is not read as a number)
+            // (a text that starts with four spaces and a marker has its first space escaped, so the
+            // line is not read as an item of a list that is moved in)
+            let spaced = c == ' ' && b.text.strip_prefix(INDENT).is_some_and(item_marker) && out.is_empty() && b.text.starts_with(INDENT);
+            if INLINE.contains(&c) || spaced || (out.is_empty() && (LINE_START.contains(&c) || (c.is_ascii_digit() && number_marker(&b.text).is_some()))) {
                 out.push('\\');
             }
             out.push(c);
@@ -137,7 +161,7 @@ fn read_inline(s: &str) -> Option<(String, Vec<Style>, Vec<Paint>)> {
     let mut rest = s;
     while let Some(c) = rest.chars().next() {
         let (flag, len, on) = if c == '\\' {
-            let n = rest[1..].chars().next().filter(|n| INLINE.contains(n) || LINE_START.contains(n))?;
+            let n = rest[1..].chars().next().filter(|n| INLINE.contains(n) || LINE_START.contains(n) || n.is_ascii_digit() || *n == ' ')?;
             text.push(n);
             marks.extend(std::iter::repeat_n(cur, n.len_utf8()));
             paints.extend(std::iter::repeat_n(paint, n.len_utf8()));
@@ -178,7 +202,7 @@ fn read_inline(s: &str) -> Option<(String, Vec<Style>, Vec<Paint>)> {
         clean.push_str(&rest[..len]);
         rest = &rest[len..];
     }
-    let b = Block { kind: Kind::Body, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left };
+    let b = Block { kind: Kind::Body, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left, indented: false };
     (write_inline(&b) == clean).then_some((b.text, b.marks, b.paints))
 }
 
@@ -204,7 +228,7 @@ fn color_tag(s: &str) -> Option<(char, usize, Option<u8>)> {
 /// A block of `kind` from the stored rest of its line (after the kind's marker).
 fn read_block(kind: Kind, rest: &str) -> Block {
     match read_inline(rest) {
-        Some((text, marks, paints)) => Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left },
+        Some((text, marks, paints)) => Block { kind, text, marks, paints, image_id: None, image_pct: IMAGE_PCT_MAX, align: Align::Left, indented: false },
         None => {
             let (style, text) = unwrap_inline(rest);
             Block::new(kind, &text).with_style(style)
@@ -237,8 +261,22 @@ pub(super) fn parse_line(index: usize, line: &str) -> Block {
     if let Some(b) = image_line(line) {
         return b;
     }
+    // four spaces before an item's marker: its list is moved in
+    let (indented, line) = match line.strip_prefix(INDENT) {
+        Some(r) if item_marker(r) => (true, r),
+        _ => (false, line),
+    };
+    let mut b = parse_marked(line);
+    b.indented = indented && b.kind.is_item();
+    b
+}
+
+/// A block from a stored line without any leading indent.
+fn parse_marked(line: &str) -> Block {
     let (kind, rest) = if let Some(r) = line.strip_prefix("## ").or_else(|| line.strip_prefix("# ")) {
         (Kind::Heading, r)
+    } else if let Some(len) = number_marker(line) {
+        (Kind::Numbered, &line[len..])
     } else if let Some(r) = line.strip_prefix("- ") {
         match CHECK_MARKERS.iter().find_map(|&(m, k)| r.strip_prefix(m).map(|rest| (k, rest))) {
             Some((kind, rest)) => (kind, rest),

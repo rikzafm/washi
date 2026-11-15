@@ -6,7 +6,7 @@ import "../../fonts/ShadowsIntoLight-BoldItalic.ttf";
 import "../../fonts/WashiCaret.ttf";
 import { Theme } from "theme.slint";
 
-export enum BlockKind { title, heading, body, list-item, check, checked, image }
+export enum BlockKind { title, heading, body, list-item, numbered, check, checked, image }
 
 export struct BlockData {
     kind: BlockKind,
@@ -130,6 +130,9 @@ export component BlockView inherits Rectangle {
     in property <bool> autofocus: false;
     /// Space above the block, in logical px (set by the stack from the kinds around it).
     in property <length> gap-before: 0px;
+    /// How far the text is moved in from the left edge: a list hangs its marker in the margin and
+    /// can be moved in as a whole (src/textflow.rs `indents`).
+    in property <length> indent: 0px;
     /// The level text field is drawn only while editing; at rest the stepped words are.
     in property <bool> show-input: true;
     /// The text changed: the new text and where the caret is now.
@@ -361,8 +364,7 @@ export component BlockView inherits Rectangle {
     }
 
     input := TextInput {
-        // a check item's text is indented to leave room for its box (src/textflow.rs CHECK_INDENT)
-        x: root.kind == BlockKind.check || root.kind == BlockKind.checked ? Theme.check-indent : 0px;
+        x: root.indent;
         y: root.gap-before;
         width: parent.width - self.x;
         height: root.lines * root.pitch;

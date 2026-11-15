@@ -80,6 +80,8 @@ pub struct ClosedNote {
 
 pub struct Db {
     conn: Connection,
+    /// [`Db::numbered_list_last`] as last read or written (asked on every caret move).
+    numbered_last: std::cell::Cell<Option<bool>>,
 }
 
 fn hex_key(raw: &[u8; 32]) -> Zeroizing<String> {
@@ -114,7 +116,7 @@ impl Db {
         conn.pragma_update(None, "cache_size", -512)?;
         conn.pragma_update(None, "secure_delete", "ON")?;
         migrations::migrate(&mut conn, now_ms)?;
-        Ok(Db { conn })
+        Ok(Db { conn, numbered_last: std::cell::Cell::new(None) })
     }
 
     pub fn schema_version(&self) -> Result<u32, DbError> {
@@ -223,6 +225,22 @@ impl Db {
 
     pub fn set_tilted_editing(&self, on: bool) -> Result<(), DbError> {
         self.set_meta("tilted_editing", if on { "1" } else { "0" })
+    }
+
+    /// Whether the list type picked last (the toolbar list button's flyout) is numbered: what one
+    /// click of the button applies to a plain paragraph. Bulleted when never set; shared by every note.
+    pub fn numbered_list_last(&self) -> bool {
+        if let Some(v) = self.numbered_last.get() {
+            return v;
+        }
+        let v = self.meta("list_last").is_some_and(|v| v == "numbered");
+        self.numbered_last.set(Some(v));
+        v
+    }
+
+    pub fn set_numbered_list_last(&self, numbered: bool) -> Result<(), DbError> {
+        self.numbered_last.set(Some(numbered));
+        self.set_meta("list_last", if numbered { "numbered" } else { "bulleted" })
     }
 
     /// A stored app-wide preference (`meta` table), if it was ever set.
@@ -734,6 +752,19 @@ mod tests {
         assert!(!db.tilted_editing());
         db.set_tilted_editing(true).unwrap();
         assert!(db.tilted_editing());
+    }
+
+    #[test]
+    fn the_last_list_type_is_bulleted_until_set_and_survives_reopening() {
+        let (dir, db) = test_db();
+        assert!(!db.numbered_list_last(), "never set: bulleted");
+        db.set_numbered_list_last(true).unwrap();
+        assert!(db.numbered_list_last());
+        drop(db);
+        let db = Db::open(&dir.path().join("test.db"), &[0x42; 32], 2000).unwrap();
+        assert!(db.numbered_list_last());
+        db.set_numbered_list_last(false).unwrap();
+        assert!(!db.numbered_list_last());
     }
 
     #[test]

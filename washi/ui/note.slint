@@ -34,6 +34,7 @@ export { DeleteNoteDialog } from "delete-dialog.slint";
 export { PaletteEntry, PickerPalette } from "color-picker.slint";
 import {
     Toolbar,
+    ListFlyout,
     ToolbarMetrics,
     MenuButton,
     Frame,
@@ -122,6 +123,8 @@ export component NoteWindow inherits Window {
     in property <[RuleData]> rules;
     /// The boxes of the check items (Rust).
     in property <[CheckData]> checks;
+    /// How far each block's text is moved in from the text area's left edge (Rust).
+    in property <[length]> block-indents;
     /// The wash of the selection (Rust): a level box for each line it touches.
     in property <[SelRect]> sel-rects;
     /// A selected picture's frame and its resize grip (Rust): two level boxes, or none.
@@ -145,10 +148,19 @@ export component NoteWindow inherits Window {
     in property <bool> fmt-italic: false;
     in property <bool> fmt-underline: false;
     in property <bool> fmt-strike: false;
-    in property <bool> fmt-list: false;
+    /// The list type of the caret's paragraph: 0 none, 1 bulleted, 2 numbered.
+    in property <int> fmt-list: 0;
+    /// The list type a click on the list button applies (picked last in its flyout): 1 bulleted, 2 numbered.
+    in property <int> list-last: 1;
+    /// The list button's flyout is open. It closes like the color popover.
+    in-out property <bool> list-menu-open: false;
+    /// The flyout choice the keyboard has reached: -1 none, 0 bulleted, 1 numbered.
+    in-out property <int> list-menu-focus: -1;
+    changed list-menu-open => { if (!root.list-menu-open) { root.list-menu-focus = -1; } }
     in property <bool> fmt-check: false;
-    /// Format the selected text (0 bold, 1 italic, 2 underline, 3 strike), or the paragraph holding
-    /// the caret (4 list, 5 check item): a toolbar button or its shortcut.
+    /// Format the selected text (0 bold, 1 italic, 2 underline, 3 strike), or the paragraphs of the
+    /// selection (4 list button, 5 check item, 6 bulleted and 7 numbered from the list flyout): a
+    /// toolbar button or its shortcut.
     callback format(int);
     /// The ink and marker index of the selection (marker -1 mixed); drive the "A" button and the rings.
     in property <int> fmt-ink: 0;
@@ -172,17 +184,17 @@ export component NoteWindow inherits Window {
     callback focus-entered(int);
     /// The paper (window minus margins) changed size: Rust lays the words out again.
     callback paper-resized(length, length);
-    changed width => { root.picker-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
-    changed height => { root.picker-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
-    changed sidebar-w => { root.picker-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
+    changed width => { root.picker-open = false; root.list-menu-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
+    changed height => { root.picker-open = false; root.list-menu-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
+    changed sidebar-w => { root.picker-open = false; root.list-menu-open = false; root.paper-resized(root.note-w - 2 * root.margin, root.height - 2 * root.margin); }
     /// 1 at rest (words on the tilted baseline), 0 while editing (level).
     out property <float> text-tilt-scale: text-layer.tilt-scale;
     /// The block whose field has the focus (-1 none). Rust clears it when it replaces the blocks.
     in-out property <int> text-focused-block <=> text-layer.focused-block;
-    changed text-focused-block => { if (root.text-focused-block < 0) { root.picker-open = false; } }
+    changed text-focused-block => { if (root.text-focused-block < 0) { root.picker-open = false; root.list-menu-open = false; } }
     /// Suspended (covered, minimized): the look must not change, so no redraw is asked for.
     in property <bool> suspended: false;
-    changed suspended => { if (root.suspended) { root.picker-open = false; } }
+    changed suspended => { if (root.suspended) { root.picker-open = false; root.list-menu-open = false; } }
     in property <float> pitch-scale: 1;
     /// The note's own content (text, toolbar, menu button, scrollbar): faded out while the note turns
     /// into the Settings page. The paper, shadow and tapes stay.
@@ -367,7 +379,7 @@ export component NoteWindow inherits Window {
             root.all-notes-confirming-delete = false;
             root.all-notes-close-view();
         }
-        start-move => { root.picker-open = false; root.start-move(); }
+        start-move => { root.picker-open = false; root.list-menu-open = false; root.start-move(); }
     }
 
     // Everything of the note itself, shifted right by the sidebar's strip.
@@ -411,6 +423,15 @@ export component NoteWindow inherits Window {
             // focus of its own (its hit areas never take it). Space and Enter pick only once an
             // arrow has put the focus ring on a swatch; before that they stay plain typing.
             capture-key-pressed(e) => {
+                    if (root.list-menu-open && !e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta && !e.modifiers.shift) {
+                        if (e.text == Key.LeftArrow || e.text == Key.UpArrow) { root.list-menu-focus = 0; return accept; }
+                        if (e.text == Key.RightArrow || e.text == Key.DownArrow) { root.list-menu-focus = 1; return accept; }
+                        if ((e.text == Key.Return || e.text == " ") && root.list-menu-focus >= 0) {
+                            root.list-menu-open = false;
+                            root.format(root.list-menu-focus == 1 ? 7 : 6);
+                            return accept;
+                        }
+                    }
                     if (!root.picker-open || e.modifiers.control || e.modifiers.alt || e.modifiers.meta || e.modifiers.shift) { return reject; }
                     if (e.text == Key.LeftArrow || e.text == Key.RightArrow || e.text == Key.UpArrow || e.text == Key.DownArrow) {
                         root.picker-focus = ColorPickerNav.step(root.picker-focus, e.text);
@@ -423,6 +444,7 @@ export component NoteWindow inherits Window {
                     reject
                 }
                 key-pressed(e) => {
+                    if (e.text == Key.Escape && root.list-menu-open) { root.list-menu-open = false; return accept; }
                     if (e.text == Key.Escape && root.all-notes-open && !root.picker-open) {
                         if (root.all-notes-confirming-delete) {
                             root.all-notes-confirming-delete = false;
@@ -481,6 +503,7 @@ export component NoteWindow inherits Window {
                         runs: root.runs;
                         rules: root.rules;
                         checks: root.checks;
+                        block-indents: root.block-indents;
                         sel-rects: root.sel-rects;
                         caret: root.caret;
                         caret-block: root.caret-block;
@@ -499,7 +522,7 @@ export component NoteWindow inherits Window {
                         focus-serial: root.focus-serial;
                         focus-anchor: root.focus-anchor;
                         wash: root.wash;
-                        pointer-down(x, y, shift) => { root.picker-open = false; root.pointer-down(x, y, shift); }
+                        pointer-down(x, y, shift) => { root.picker-open = false; root.list-menu-open = false; root.pointer-down(x, y, shift); }
                         pointer-drag(x, y) => { root.pointer-drag(x, y); }
                         pointer-up => { root.pointer-up(); }
                         right-click(x, y) => { root.context-menu(x, y); }
@@ -513,9 +536,9 @@ export component NoteWindow inherits Window {
                         copy-range => { return root.copy-range(); }
                         cut-range => { return root.cut-range(); }
                         paste-range => { return root.paste-range(); }
-                        range-replace(t) => { root.picker-open = false; root.range-replace(t); }
+                        range-replace(t) => { root.picker-open = false; root.list-menu-open = false; root.range-replace(t); }
                         range-key(k) => { return root.range-key(k); }
-                        block-edited(i, t, c) => { root.picker-open = false; root.block-edited(i, t, c); }
+                        block-edited(i, t, c) => { root.picker-open = false; root.list-menu-open = false; root.block-edited(i, t, c); }
                         block-key(i, k, m, o) => { return root.block-key(i, k, m, o); }
                         block-history(r) => { root.block-history(r); }
                         caret-moved(i, o, a) => { root.caret-moved(i, o, a); }
@@ -552,9 +575,9 @@ export component NoteWindow inherits Window {
                 y: 0px;
                 width: root.note-w;
                 height: root.height;
-                start-move => { root.picker-open = false; root.start-move(); }
-                start-resize(d) => { root.picker-open = false; root.start-resize(d); }
-                right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
+                start-move => { root.picker-open = false; root.list-menu-open = false; root.start-move(); }
+                start-resize(d) => { root.picker-open = false; root.list-menu-open = false; root.start-resize(d); }
+                right-click(x, y) => { root.picker-open = false; root.list-menu-open = false; root.context-menu(x, y); }
                 pointer-over => { root.pointer-moved(); }
             }
 
@@ -571,8 +594,8 @@ export component NoteWindow inherits Window {
                 content: root.content;
                 offset <=> root.scroll-y;
                 scrolling: root.scrolling;
-                pressed => { root.picker-open = false; }
-                right-click(x, y) => { root.picker-open = false; root.context-menu(x, y); }
+                pressed => { root.picker-open = false; root.list-menu-open = false; }
+                right-click(x, y) => { root.picker-open = false; root.list-menu-open = false; root.context-menu(x, y); }
                 pointer-over => { root.pointer-moved(); }
             }
 
@@ -592,15 +615,23 @@ export component NoteWindow inherits Window {
                 italic-active: root.fmt-italic;
                 underline-active: root.fmt-underline;
                 strike-active: root.fmt-strike;
+                list-kind: root.fmt-list;
+                list-last: root.list-last;
+                list-menu-open: root.list-menu-open;
+                list-menu => {
+                    root.picker-open = false;
+                    root.list-menu-open = !root.list-menu-open;
+                }
                 check-active: root.fmt-check;
                 picker-open: root.picker-open;
                 color-active: root.fmt-ink != 0 || root.fmt-marker != 0;
                 ink-color: PickerPalette.ink(root.fmt-ink);
                 marker-color: PickerPalette.marker(root.fmt-marker);
                 activated(k) => {
+                    root.list-menu-open = false;
                     if (k == 4) { root.picker-open = !root.picker-open; return; }
                     root.picker-open = false;
-                    if (k < 4) { root.format(k); } else if (k == 5) { root.format(5); } else { root.insert-image(); }
+                    if (k < 4) { root.format(k); } else if (k == 7) { root.format(4); } else if (k == 5) { root.format(5); } else { root.insert-image(); }
                 }
                 property <bool> wanted: paper-touch.has-hover || self.any-pressed || root.dropdown-open;
                 opacity: root.content-opacity * (self.wanted ? 1 : 0);
@@ -666,6 +697,26 @@ export component NoteWindow inherits Window {
             pick-marker(i) => { root.pick-marker(i); }
             clear => { root.clear-color(); }
             dismiss => { root.picker-open = false; }
+        }
+
+        // The list button's flyout: above the toolbar band at the list button, like the color popover.
+    ListFlyout {
+            x: 0px;
+            y: 0px;
+            width: root.note-w;
+            height: root.height;
+            paper-x: root.margin;
+            paper-y: root.paper-top;
+            paper-w: root.note-w - 2 * root.margin;
+            paper-h: root.height - 2 * root.margin;
+            tilt: root.tilt;
+            open: !root.all-notes-open && root.list-menu-open;
+            list-kind: root.fmt-list;
+            focus-index: root.list-menu-focus;
+            pick(k) => {
+                root.list-menu-open = false;
+                root.format(k == 2 ? 7 : 6);
+            }
         }
 
         // The tapes lie over the paper.

@@ -88,7 +88,7 @@ fn a_heading_shows_b_active() {
 
 #[test]
 fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
-    let cases = [(1, "*body*"), (2, "<u>body</u>"), (3, "~~body~~"), (5, "- [ ] body")];
+    let cases = [(1, "*body*"), (2, "<u>body</u>"), (3, "~~body~~"), (6, "- [ ] body")];
     for (k, stored) in cases {
         let mut h = note("title\nbody");
         h.press(0, Key::DownArrow);
@@ -96,7 +96,7 @@ fn each_button_toggles_its_format_and_a_second_click_takes_it_off() {
         click_button(&mut h, k);
         assert_eq!(h.note_text(0), format!("# title\n{stored}"), "button {k}");
         let mut active = [false; 5];
-        active[if k == 5 { 4 } else { k }] = true; // the fifth shows the check item
+        active[if k == 6 { 4 } else { k }] = true; // slot 6 shows the check item
         assert_eq!(h.toolbar_active(0), active, "button {k}");
         click_button(&mut h, k);
         assert_eq!(h.note_text(0), "# title\nbody", "button {k} again");
@@ -244,7 +244,7 @@ fn formats_are_saved_and_come_back_after_a_restart() {
     click_button(&mut h, 2);
     h.press(0, Key::End);
     h.press(0, Key::DownArrow);
-    click_button(&mut h, 5);
+    click_button(&mut h, 6);
     h.press(0, Key::End);
     h.press_shift(0, Key::Home, 1);
     h.press_ctrl(0, 'i');

@@ -31,6 +31,7 @@ impl Editor {
         ui.set_runs(slint::ModelRc::from(self.runs.clone()));
         ui.set_rules(slint::ModelRc::from(self.rules.clone()));
         ui.set_checks(slint::ModelRc::from(self.checks.clone()));
+        ui.set_block_indents(slint::ModelRc::from(self.indents.clone()));
         ui.set_sel_rects(slint::ModelRc::from(self.sel_rects.clone()));
         ui.set_image_handles(slint::ModelRc::from(self.handles.clone()));
         ui.set_markers(slint::ModelRc::from(self.marker_data.clone()));
@@ -147,6 +148,15 @@ impl Editor {
                 let (block, offset) = (i.max(0) as usize, offset.max(0) as usize);
                 if editor.try_move(&ui, key.as_str(), &mods, block, offset) {
                     return true;
+                }
+                if !mods.control {
+                    if let Some(done) = editor.indent_key(key.as_str(), mods.shift, block) {
+                        if done.changed() {
+                            changed(None);
+                            editor.reveal_caret(&ui);
+                        }
+                        return true;
+                    }
                 }
                 if mods.control || mods.selecting {
                     // Ctrl+Backspace and the like, or a selection inside the field: the field's own

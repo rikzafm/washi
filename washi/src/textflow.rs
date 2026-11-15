@@ -66,15 +66,40 @@ pub const HEADING_PITCH: f64 = 34.0;
 pub const BODY_SIZE: f64 = 22.65;
 pub const BODY_PITCH: f64 = 33.0;
 
-/// How far a check item's text is indented from the text area's left edge (its box takes the room).
-/// The same value as `Theme.check-indent` in `ui/theme.slint`, where the edit field is moved by it.
-pub const CHECK_INDENT: f64 = 26.0;
+/// How far a list moves in when it is indented (Tab): the room a check box or a number takes.
+/// The same value as `Theme.list-indent` in `ui/theme.slint`.
+pub const LIST_INDENT: f64 = 26.0;
 /// The side of a check box, logical px.
 pub const CHECK_BOX: f64 = 17.0;
 
-/// The indent of a block's text from the text area's left edge.
-fn indent(kind: Kind) -> f64 {
-    if kind.is_check() { CHECK_INDENT } else { 0.0 }
+/// The gap between a numbered item's number (`12.`) and its text, logical px.
+pub const NUMBER_GAP: f64 = 6.0;
+
+/// The least room kept between the paper's edge and the widest number of a list that is not moved in.
+const NUMBER_EDGE: f64 = 4.0;
+
+/// How far each block's text is moved in from the text area's left edge. A list's markers (bullet,
+/// number, check box) hang in the margin left of the text, so a list that is not indented has its
+/// text in line with body text, and an indented one [`LIST_INDENT`] further. A numbered list whose
+/// widest number does not fit in the margin moves all its text right just enough, items of the
+/// same list always together. Every other block is not moved.
+fn indents(blocks: &[Block], t: &Tokens) -> Vec<f64> {
+    let (numbers, moved) = (crate::document::numbers_of(blocks), crate::document::indents_of(blocks));
+    let mut out = vec![0.0; blocks.len()];
+    let mut i = 0;
+    while i < blocks.len() {
+        if !blocks[i].kind.is_item() {
+            i += 1;
+            continue;
+        }
+        let end = (i..blocks.len()).find(|&j| !blocks[j].kind.is_item()).unwrap_or(blocks.len());
+        let widest = numbers[i..end].iter().copied().max().unwrap_or(0);
+        let need = if widest > 0 { t.measure(t.style(Kind::Numbered).size).width(&format!("{widest}.")) + NUMBER_GAP + NUMBER_EDGE - t.inset_left } else { 0.0 };
+        let at = if moved[i] { LIST_INDENT } else { 0.0 }.max(need);
+        out[i..end].fill(at);
+        i = end;
+    }
+    out
 }
 
 /// Fixed logical values from `ui/theme.slint`.
@@ -108,7 +133,7 @@ impl Tokens {
         match kind {
             Kind::Title => self.title,
             Kind::Heading => self.heading,
-            Kind::Body | Kind::ListItem | Kind::Check | Kind::Checked | Kind::Image => self.body,
+            Kind::Body | Kind::ListItem | Kind::Numbered | Kind::Check | Kind::Checked | Kind::Image => self.body,
         }
     }
 }
@@ -337,7 +362,7 @@ fn look_runs(b: &Block, start: usize, end: usize) -> Vec<(usize, usize)> {
 
 /// Blocks of one group share a rhythm (line pitch); a change of group opens a gap.
 fn group(kind: Kind) -> Kind {
-    if kind == Kind::ListItem || kind.is_check() { Kind::Body } else { kind }
+    if kind.is_list() || kind.is_check() { Kind::Body } else { kind }
 }
 
 /// Where the caret is within a block's wrapped lines.
@@ -474,11 +499,11 @@ pub fn image_height(width: f64, pixels: (u32, u32)) -> f64 {
 
 /// The words, bars and markers of one text block whose lines start at `top`, pushed onto the lists.
 #[allow(clippy::too_many_arguments)]
-fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, paper: (f64, f64), t: &Tokens, runs: &mut Vec<Run>, rules: &mut Vec<Rule>, markers: &mut Vec<Marker>, checks: &mut Vec<CheckBox>) {
+fn draw_block(b: &Block, bi: usize, number: usize, indent: f64, top: f64, lines: &[Vec<Word>], m: &Measure, paper: (f64, f64), t: &Tokens, runs: &mut Vec<Run>, rules: &mut Vec<Rule>, markers: &mut Vec<Marker>, checks: &mut Vec<CheckBox>) {
     let st = t.style(b.kind);
     let base = baseline(m, st.pitch);
     let thick = (st.size / 20.0).max(1.0);
-    let left = t.inset_left + indent(b.kind);
+    let left = t.inset_left + indent;
     let done = b.kind == Kind::Checked;
     let bar = |rules: &mut Vec<Rule>, x: f64, y: f64, width: f64, height: f64| {
         let mut at = 0.0;
@@ -491,10 +516,20 @@ fn draw_block(b: &Block, bi: usize, top: f64, lines: &[Vec<Word>], m: &Measure, 
     };
     if b.kind == Kind::ListItem {
         let d = (st.size / 4.0).max(3.0);
-        bar(rules, t.inset_left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
+        bar(rules, left - 2.5 * d, top + base - 0.3 * st.size - d / 2.0, d, d);
+    }
+    if b.kind == Kind::Numbered {
+        // the number, right-aligned to the gap before the text, in the paragraph's size and in the
+        // ink of its first character
+        let text = format!("{number}.");
+        let width = m.width(&text);
+        let x = left - NUMBER_GAP - width;
+        let ink = b.paints.first().map_or(0, |p| p.ink);
+        let (dx, dy) = tilt_offset(x + width / 2.0, top + st.pitch / 2.0, paper, t.tilt_deg);
+        runs.push(Run { block: bi, kind: b.kind, bold: false, italic: false, ink, marker: 0, done, line: 0, text, x, y: top, width, size: st.size, pitch: st.pitch, dx, dy });
     }
     if b.kind.is_check() {
-        let (x, y) = (t.inset_left, top + base - 0.3 * st.size - CHECK_BOX / 2.0);
+        let (x, y) = (left - LIST_INDENT, top + base - 0.3 * st.size - CHECK_BOX / 2.0);
         let (dx, dy) = tilt_offset(x + CHECK_BOX / 2.0, y + CHECK_BOX / 2.0, paper, t.tilt_deg);
         checks.push(CheckBox { block: bi, x, y, size: CHECK_BOX, dx, dy, checked: done });
     }
@@ -591,6 +626,8 @@ struct Wrapped {
 
 struct BlockLayout {
     kind: Kind,
+    /// How far its text is moved in from the text area's left edge (see [`indents`]).
+    indent: f64,
     /// Where the block starts, in the paper's frame.
     top: f64,
     /// The text this was wrapped from (queries measure in it).
@@ -628,6 +665,8 @@ impl Layout {
         let (mut runs, mut rules, mut markers, mut checks) = (vec![], vec![], vec![], vec![]);
         let mut laid = Vec::with_capacity(blocks.len());
         let mut top = t.inset_top;
+        let numbers = crate::document::numbers_of(blocks);
+        let indents = indents(blocks, t);
         for (bi, b) in blocks.iter().enumerate() {
             let st = t.style(b.kind);
             if bi > 0 && group(blocks[bi - 1].kind) != group(b.kind) {
@@ -637,15 +676,15 @@ impl Layout {
                 let image = image_size(b).map_or((0.0, avail, st.pitch), |px| b.image_box(avail, px));
                 // a picture has one empty line, as far as the caret is concerned
                 let lines = Wrapped { lines: vec![vec![]], starts: vec![0] };
-                laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(lines), image: Some(image) });
+                laid.push(BlockLayout { kind: b.kind, indent: 0.0, top, text: Rc::from(&*b.text), lines: Rc::new(lines), image: Some(image) });
                 top += image.2;
                 continue;
             }
             let m = t.measure(st.size);
-            let lines = wrap(&b.text, avail - indent(b.kind), &m);
-            draw_block(b, bi, top, &lines.lines, &m, paper, t, &mut runs, &mut rules, &mut markers, &mut checks);
+            let lines = wrap(&b.text, avail - indents[bi], &m);
+            draw_block(b, bi, numbers[bi], indents[bi], top, &lines.lines, &m, paper, t, &mut runs, &mut rules, &mut markers, &mut checks);
             let count = lines.lines.len();
-            laid.push(BlockLayout { kind: b.kind, top, text: Rc::from(&*b.text), lines: Rc::new(lines), image: None });
+            laid.push(BlockLayout { kind: b.kind, indent: indents[bi], top, text: Rc::from(&*b.text), lines: Rc::new(lines), image: None });
             // every block takes at least one line, even when empty
             top += count as f64 * st.pitch;
         }
@@ -688,7 +727,7 @@ impl Layout {
 
     /// How far block `block`'s text is indented from the text area's left edge.
     pub fn indent(&self, block: usize) -> f64 {
-        self.blocks.get(block).map_or(0.0, |b| indent(b.kind))
+        self.blocks.get(block).map_or(0.0, |b| b.indent)
     }
 
     /// The markers behind colored text.
@@ -738,7 +777,7 @@ impl Layout {
         let pitch = self.tokens.style(b.kind).pitch;
         let at = caret_line_in(&b.text, &b.lines.starts, &self.measure(b), offset, line_end);
         let y = b.top + at.line as f64 * pitch;
-        Some((self.tokens.inset_left + indent(b.kind) + at.x, y, y + pitch))
+        Some((self.tokens.inset_left + b.indent + at.x, y, y + pitch))
     }
 
     /// The top and bottom of the line holding the caret (byte `offset` of block `block`).
@@ -770,7 +809,7 @@ impl Layout {
         }
         let pitch = self.tokens.style(b.kind).pitch;
         let line = ((point.1 - b.top) / pitch).floor().max(0.0) as usize;
-        let (offset, line_end) = offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, point.0 - self.tokens.inset_left - indent(b.kind));
+        let (offset, line_end) = offset_in(&b.text, &b.lines.lines, &b.lines.starts, &self.measure(b), line, point.0 - self.tokens.inset_left - b.indent);
         (Caret { block, offset }, line_end)
     }
 
@@ -793,7 +832,7 @@ impl Layout {
             }
             let from = if bi == start.block { start.offset.min(b.text.len()) } else { 0 };
             let to = if bi == end.block { end.offset.min(b.text.len()) } else { b.text.len() };
-            wash_block(&b.text, &b.lines.starts, &self.measure(b), t.style(b.kind), t.inset_left + indent(b.kind), b.top, (from, to), bi < end.block, &mut out);
+            wash_block(&b.text, &b.lines.starts, &self.measure(b), t.style(b.kind), t.inset_left + b.indent, b.top, (from, to), bi < end.block, &mut out);
         }
         out
     }
@@ -856,17 +895,17 @@ mod tests {
     }
 
     #[test]
-    fn a_check_item_is_indented_has_a_box_and_hits_its_box() {
+    fn a_check_item_hangs_its_box_in_the_margin_and_hits_its_box() {
         let t = Block::new(Kind::Title, "t");
         let plain = Block::new(Kind::Body, "milk");
         let open = Block::new(Kind::Check, "milk");
         let l = lay(&[t, plain, open], PAPER, &TOKENS);
         let first = |bi: usize| l.runs().iter().find(|r| r.block == bi).unwrap().x;
         assert!((first(1) - TOKENS.inset_left).abs() < 1e-9);
-        assert!((first(2) - (TOKENS.inset_left + CHECK_INDENT)).abs() < 1e-9, "the text leaves room for the box");
+        assert!((first(2) - TOKENS.inset_left).abs() < 1e-9, "the text is in line with body text, the box is in the margin");
         let c = &l.checks()[0];
         assert_eq!((c.block, c.checked), (2, false));
-        assert!((c.x - TOKENS.inset_left).abs() < 1e-9 && c.x + c.size <= first(2));
+        assert!((c.x - (TOKENS.inset_left - LIST_INDENT)).abs() < 1e-9 && c.x + c.size <= first(2));
         // a press on the box is a hit, one on the text or on a plain paragraph is not
         let (cx, cy) = (c.x + c.size / 2.0, c.y + c.size / 2.0);
         assert_eq!(l.check_at((cx, cy)), Some(2));
@@ -1433,6 +1472,81 @@ mod tests {
         // the pictures stack: each starts where the one above it ends
         assert!((layout.block_top(2).unwrap() - (layout.block_top(1).unwrap() + avail / 2.0)).abs() < 1e-9);
         assert!((layout.content_height() - (layout.block_top(4).unwrap() + TOKENS.body.pitch)).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod numbered {
+    use super::*;
+    use crate::document::Block;
+
+    #[test]
+    fn a_numbered_item_draws_its_number_before_its_indented_text() {
+        let mut blocks = [Block::new(Kind::Title, "t"), Block::new(Kind::Numbered, "a"), Block::new(Kind::Numbered, "b"), Block::new(Kind::Body, "x"), Block::new(Kind::Numbered, "c")];
+        for b in &mut blocks {
+            b.indented = true;
+        }
+        let l = Layout::build(&blocks, (363.0, 433.0), &super::tests::TOKENS, &|_| None);
+        let numbers: Vec<(usize, &str)> = l.runs().iter().filter(|r| r.text.ends_with('.')).map(|r| (r.block, r.text.as_str())).collect();
+        assert_eq!(numbers, [(1, "1."), (2, "2."), (4, "1.")]);
+        let left = super::tests::TOKENS.inset_left + LIST_INDENT;
+        for bi in [1, 2, 4] {
+            let number = l.runs().iter().find(|r| r.block == bi && r.text.ends_with('.')).unwrap();
+            let text = l.runs().iter().find(|r| r.block == bi && !r.text.ends_with('.')).unwrap();
+            assert!((text.x - left).abs() < 1e-9, "the text is indented");
+            assert!((number.x + number.width - (left - NUMBER_GAP)).abs() < 1e-9, "the number ends a gap before it");
+        }
+        assert_eq!(l.indent(1), LIST_INDENT);
+    }
+
+    fn first_x(l: &Layout, bi: usize) -> f64 {
+        l.runs().iter().find(|r| r.block == bi && !r.text.ends_with('.')).unwrap().x
+    }
+
+    #[test]
+    fn a_list_that_is_not_moved_in_has_its_text_in_line_with_body_text_whatever_its_markers() {
+        let t = &super::tests::TOKENS;
+        let blocks = [Block::new(Kind::Title, "t"), Block::new(Kind::Body, "x"), Block::new(Kind::ListItem, "a"), Block::new(Kind::Numbered, "b"), Block::new(Kind::Check, "c")];
+        let l = Layout::build(&blocks, (363.0, 433.0), t, &|_| None);
+        for bi in 1..5 {
+            assert!((first_x(&l, bi) - t.inset_left).abs() < 1e-9, "block {bi}");
+        }
+        let number = l.runs().iter().find(|r| r.text == "1.").unwrap();
+        assert!(number.x >= 0.0 && number.x + number.width <= t.inset_left - NUMBER_GAP + 1e-9);
+        assert!(l.checks()[0].x >= 0.0);
+    }
+
+    #[test]
+    fn a_moved_in_list_is_one_step_further_and_so_are_all_its_kinds() {
+        let t = &super::tests::TOKENS;
+        let mut blocks = [Block::new(Kind::Title, "t"), Block::new(Kind::ListItem, "a"), Block::new(Kind::Numbered, "b"), Block::new(Kind::Check, "c"), Block::new(Kind::Body, "x"), Block::new(Kind::ListItem, "d")];
+        blocks[1].indented = true;
+        let l = Layout::build(&blocks, (363.0, 433.0), t, &|_| None);
+        for bi in 1..4 {
+            assert!((first_x(&l, bi) - (t.inset_left + LIST_INDENT)).abs() < 1e-9, "block {bi}");
+        }
+        assert!((first_x(&l, 4) - t.inset_left).abs() < 1e-9);
+        assert!((first_x(&l, 5) - t.inset_left).abs() < 1e-9, "the next list is its own");
+    }
+
+    #[test]
+    fn a_numbered_list_with_wide_numbers_moves_its_text_right_all_together_and_a_short_one_stays() {
+        let t = &super::tests::TOKENS;
+        let build = |count: usize| {
+            let mut blocks = vec![Block::new(Kind::Title, "t")];
+            blocks.extend((0..count).map(|_| Block::new(Kind::Numbered, "a")));
+            Layout::build(&blocks, (363.0, 433.0), t, &|_| None)
+        };
+        let nine = build(9);
+        assert!((first_x(&nine, 1) - t.inset_left).abs() < 1e-9, "nine items fit the margin");
+        let wide = build(99);
+        let shifted = first_x(&wide, 1);
+        assert!(shifted > t.inset_left + 0.5, "{shifted}");
+        for bi in 1..=99 {
+            assert!((first_x(&wide, bi) - shifted).abs() < 1e-9, "the list stays lined up");
+        }
+        let widest = wide.runs().iter().find(|r| r.text == "99.").unwrap();
+        assert!(widest.x >= 0.0, "the widest number is on the paper");
     }
 }
 

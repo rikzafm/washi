@@ -20,6 +20,22 @@ _Avoid_: Slanted editing (slant is the italic style)
 A paragraph of a Note with a box in front of it. Pressing the box ticks it: the box gets a green tick and the text turns grey and struck through. Made with the toolbar's check button, Ctrl+Shift+C, or by typing `[] ` at the start of a paragraph. Stored as `- [ ] text` and `- [x] text`.
 _Avoid_: Todo, task, checkbox (the box is only the item's marker)
 
+**List item**:
+A paragraph of a Note with a bullet in front of it. Made with the toolbar's list button (when Bulleted was picked last), its flyout, Ctrl+Shift+L, or by typing `- ` at the start of a paragraph. Stored as `- text`.
+_Avoid_: Bullet (the bullet is only the item's marker)
+
+**Numbered item**:
+A paragraph of a Note with its number in front (`1.`, `2.` ...). The number is never typed or stored on the paragraph: each unbroken run of numbered items counts from 1. Made with the list button's flyout, the list button when Numbered was picked last, or by typing `1. ` or `1, ` at the start of a paragraph. Stored as `N. text`.
+_Avoid_: Ordered list item, step
+
+**List**:
+An unbroken run of list items, numbered items and check items, in any mix. A list has one of two positions and always moves as a whole: Left, where its markers hang in the margin and its text is in line with body text, or Indented, one step further right. Tab moves it Indented, Shift+Tab (or Backspace at the very front of one of its items) moves it back. A numbered list whose widest number does not fit the margin keeps its text right of it. Stored with four spaces before each item's marker when Indented.
+_Avoid_: Nested list, sub-list (a list has no levels)
+
+**Flyout**:
+The small popup above the toolbar's list button that offers Bulleted and Numbered. Opened by the notch in the button's corner, a right-click on the button, or holding it down.
+_Avoid_: Popover (that is the color popover), dropdown (that is the Dropdown menu)
+
 **Dropdown menu**:
 The popup opened from a Note's menu button. It lists notes to jump to and holds the New, All notes and Settings actions.
 _Avoid_: Context menu (that is the separate right-click menu), overflow menu

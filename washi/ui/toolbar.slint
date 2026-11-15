@@ -1,4 +1,5 @@
-// The formatting toolbar: seven visual buttons (B, I, U, ab, A, check, image) in the band reserved at the
+// The formatting toolbar: eight visual buttons (B, I, U, ab, A, list, check, image), and the list
+// button's flyout (bulleted or numbered), in the band reserved at the
 // bottom of the paper. Geometry is measured from the hover mockup (docs/design/spec.json,
 // layout.toolbar), in logical px in the paper's own (untilted) frame. The glyph fonts come from
 // docs/design/fonts.md (ticket 03).
@@ -33,6 +34,19 @@ export global ToolbarMetrics {
     /// The check button when its paragraph is a check item: a pale green fill and a green tick.
     out property <color> check-fill: #DDEFE5;
     out property <color> check-green: #1F8A4C;
+    /// How long the list button is held down before its flyout opens.
+    out property <duration> list-hold: 400ms;
+    /// The list flyout: two 40 px choices in a white body above the band, a tail at the button.
+    out property <length> flyout-choice: 40px;
+    out property <length> flyout-pad: 6px;
+    out property <length> flyout-gap: 10px;
+    out property <length> flyout-radius: 12px;
+    out property <length> flyout-tail-width: 14px;
+    out property <length> flyout-tail-height: 7px;
+    out property <color> flyout-fill: #FFFFFD;
+    out property <color> flyout-border: #ECECE8;
+    out property <color> flyout-shadow: #2B2F360A;
+    out property <color> focus-ring: #6FA2F5;
     /// Top-right menu button metrics.
     out property <length> menu-button-width: 28px;
     out property <length> menu-button-height: 24px;
@@ -132,6 +146,25 @@ export component TRect inherits Path {
         y: Tilt.y(root.f, root.u0 + root.r, root.v0);
     }
 
+    Close { }
+}
+
+/// A filled triangle through three tilted points.
+component TTri inherits Path {
+    in property <Frame> f;
+    in property <float> u0;
+    in property <float> v0;
+    in property <float> u1;
+    in property <float> v1;
+    in property <float> u2;
+    in property <float> v2;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
+    viewbox-width: self.width / 1px;
+    viewbox-height: self.height / 1px;
+    MoveTo { x: Tilt.x(root.f, root.u0, root.v0); y: Tilt.y(root.f, root.u0, root.v0); }
+    LineTo { x: Tilt.x(root.f, root.u1, root.v1); y: Tilt.y(root.f, root.u1, root.v1); }
+    LineTo { x: Tilt.x(root.f, root.u2, root.v2); y: Tilt.y(root.f, root.u2, root.v2); }
     Close { }
 }
 
@@ -251,6 +284,50 @@ component Line3 inherits Path {
     }
 }
 
+/// A list icon centered at (`du`, `dv`): three bullets, or the numbers 1 2 3, each before a rule.
+/// (Path-drawn TRects, not Dots: a Rectangle's position snaps to whole pixels, so the bullets
+/// would jump about as a resize changes the tilted position.)
+component ListIcon inherits Rectangle {
+    in property <Frame> f;
+    in property <float> du;
+    in property <float> dv;
+    in property <bool> numbered: false;
+    in property <color> ink;
+    x: 0px;
+    y: 0px;
+    width: root.f.w * 1px;
+    height: root.f.h * 1px;
+    for k in [0, 1, 2]: TRect {
+        visible: !root.numbered;
+        f: root.f;
+        u0: root.du - 8.5;
+        v0: root.dv - 7.5 + k * 6;
+        w: 3;
+        h: 3;
+        r: 1.5;
+        fill: root.ink;
+    }
+    for k in [0, 1, 2]: Glyph {
+        visible: root.numbered;
+        f: root.f;
+        du: root.du - 7.2;
+        dv: root.dv - 6.1 + k * 6;
+        text: "\{k + 1}";
+        font-family: "Gelasio";
+        font-weight: 700;
+        font-size: 7.6px;
+        color: root.ink;
+    }
+    for k in [0, 1, 2]: TRect {
+        f: root.f;
+        u0: root.du - 2;
+        v0: root.dv - 6.65 + k * 6;
+        w: 11;
+        h: 1.3;
+        fill: root.ink;
+    }
+}
+
 /// The toolbar. It covers the whole window (it draws only its buttons); the owner gives it the
 /// paper's frame: where the paper's untilted top-left corner is, its size, and its tilt.
 export component Toolbar inherits Rectangle {
@@ -259,6 +336,12 @@ export component Toolbar inherits Rectangle {
     in property <bool> italic-active: false;
     in property <bool> underline-active: false;
     in property <bool> strike-active: false;
+    /// The list type of the paragraph holding the caret: 0 none, 1 bulleted, 2 numbered.
+    in property <int> list-kind: 0;
+    /// The list type a click on the list button applies (the one picked last): 1 bulleted, 2 numbered.
+    in property <int> list-last: 1;
+    /// The list flyout is open (the list button is filled while it is).
+    in property <bool> list-menu-open: false;
     in property <bool> check-active: false;
     /// The color popover is open (the "A" button is filled while it is).
     in property <bool> picker-open: false;
@@ -267,15 +350,21 @@ export component Toolbar inherits Rectangle {
     /// The "A" shows the ink color of the selection and its bar the marker color (transparent: none).
     in property <color> ink-color: ToolbarMetrics.ink-active;
     in property <color> marker-color: transparent;
-    /// A button was clicked: 0 B, 1 I, 2 U, 3 ab, 4 A (color), 5 check, 6 image.
+    /// A button was clicked: 0 B, 1 I, 2 U, 3 ab, 4 A (color), 5 check, 6 image, 7 list (the buttons sit in the order
+    /// B I U ab A list check image).
     callback activated(int);
+    /// The list button's notch was clicked, the button right-clicked or held down: open (or close) its flyout.
+    callback list-menu();
     in property <length> paper-x;
     in property <length> paper-y;
     in property <length> paper-w;
     in property <length> paper-h;
     in property <angle> tilt;
     /// True while the pointer holds one of the buttons down.
-    out property <bool> any-pressed: h0.pressed || h1.pressed || h2.pressed || h3.pressed || h4.pressed || h5.pressed || h6.pressed;
+    out property <bool> any-pressed: h0.pressed || h1.pressed || h2.pressed || h3.pressed || h4.pressed || h5.pressed || h6.pressed || h7.pressed || notch.pressed;
+    /// The list button opened its flyout while held down: the release that follows is no click.
+    property <bool> list-held: false;
+    property <bool> list-on: root.list-kind != 0 || root.list-menu-open;
 
     out property <Frame> f: {
         w: root.width / 1px,
@@ -297,6 +386,7 @@ export component Toolbar inherits Rectangle {
     property <float> c4: root.u-first + 4 * root.pitch;
     property <float> c5: root.u-first + 5 * root.pitch;
     property <float> c6: root.u-first + 6 * root.pitch;
+    property <float> c7: root.u-first + 7 * root.pitch;
     property <color> muted: ToolbarMetrics.ink-muted;
     property <color> ink: ToolbarMetrics.ink-active;
     property <bool> a-on: root.picker-open || root.color-active;
@@ -308,6 +398,7 @@ export component Toolbar inherits Rectangle {
         root.underline-active,
         root.strike-active,
         root.picker-open || root.color-active,
+        root.list-on,
         root.check-active
     ]: TRect {
         visible: on;
@@ -317,7 +408,7 @@ export component Toolbar inherits Rectangle {
         w: 2 * root.half;
         h: 2 * root.half;
         r: ToolbarMetrics.button-radius / 1px;
-        fill: k == 5 ? ToolbarMetrics.check-fill : ToolbarMetrics.button-fill;
+        fill: k == 6 ? ToolbarMetrics.check-fill : ToolbarMetrics.button-fill;
     }
 
     Glyph {
@@ -411,10 +502,31 @@ export component Toolbar inherits Rectangle {
         fill: root.marker-color.alpha > 0 ? root.marker-color : (root.a-on ? root.ink-color : root.muted);
     }
 
+    // list: the caret paragraph's list type, or (muted) the one a click applies; a notch in the
+    // bottom-right corner says the button holds more than one
+    ListIcon {
+        f: root.f;
+        du: root.c5;
+        dv: root.cv;
+        numbered: root.list-kind == 2 || (root.list-kind == 0 && root.list-last == 2);
+        ink: root.list-on ? root.ink : root.muted;
+    }
+
+    TTri {
+        f: root.f;
+        u0: root.c5 + 13;
+        v0: root.cv + 8;
+        u1: root.c5 + 13;
+        v1: root.cv + 13;
+        u2: root.c5 + 8;
+        v2: root.cv + 13;
+        fill: root.list-on || notch.has-hover ? root.ink : root.muted;
+    }
+
     // check: a rounded box with a tick (green on a pale green button while the paragraph is a check item)
     TRect {
         f: root.f;
-        u0: root.c5 - 8;
+        u0: root.c6 - 8;
         v0: root.cv - 8;
         w: 16;
         h: 16;
@@ -425,11 +537,11 @@ export component Toolbar inherits Rectangle {
 
     Line3 {
         f: root.f;
-        u0: root.c5 - 4;
+        u0: root.c6 - 4;
         v0: root.cv + 0.3;
-        u1: root.c5 - 1;
+        u1: root.c6 - 1;
         v1: root.cv + 3.4;
-        u2: root.c5 + 4.2;
+        u2: root.c6 + 4.2;
         v2: root.cv - 3;
         stroke: root.check-active ? ToolbarMetrics.check-green : root.muted;
         stroke-width: 1.9px;
@@ -438,7 +550,7 @@ export component Toolbar inherits Rectangle {
     // image: frame, sun, and mountains
     TRect {
         f: root.f;
-        u0: root.c6 - 7.5;
+        u0: root.c7 - 7.5;
         v0: root.cv - 8.5;
         w: 17.7;
         h: 15.7;
@@ -449,7 +561,7 @@ export component Toolbar inherits Rectangle {
 
     Dot {
         f: root.f;
-        du: root.c6 - 2.5;
+        du: root.c7 - 2.5;
         dv: root.cv - 4.5;
         d: 5px;
         border-width: 1.4px;
@@ -458,15 +570,15 @@ export component Toolbar inherits Rectangle {
 
     Line5 {
         f: root.f;
-        u0: root.c6 - 7;
+        u0: root.c7 - 7;
         v0: root.cv + 6;
-        u1: root.c6 - 2;
+        u1: root.c7 - 2;
         v1: root.cv + 1;
-        u2: root.c6 + 1.5;
+        u2: root.c7 + 1.5;
         v2: root.cv + 4;
-        u3: root.c6 + 4.5;
+        u3: root.c7 + 4.5;
         v3: root.cv + 1.5;
-        u4: root.c6 + 8;
+        u4: root.c7 + 8;
         v4: root.cv + 5;
         stroke: root.muted;
         stroke-width: 1.5px;
@@ -509,16 +621,171 @@ export component Toolbar inherits Rectangle {
 
     h5 := Hit {
         f: root.f;
-        du: root.c5;
+        du: root.c6;
         dv: root.cv;
         clicked => { root.activated(5); }
     }
 
     h6 := Hit {
         f: root.f;
-        du: root.c6;
+        du: root.c7;
         dv: root.cv;
         clicked => { root.activated(6); }
+    }
+
+    h7 := Hit {
+        f: root.f;
+        du: root.c5;
+        dv: root.cv;
+        accessible-role: button;
+        accessible-label: root.list-kind == 2 || (root.list-kind == 0 && root.list-last == 2) ? "Numbered list" : "Bulleted list";
+        accessible-action-default => { root.activated(7); }
+        clicked => {
+            if (root.list-held) { root.list-held = false; return; }
+            root.activated(7);
+        }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.list-held = false; }
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.list-menu(); }
+        }
+    }
+
+    // held down long enough, the list button opens its flyout
+    Timer {
+        interval: ToolbarMetrics.list-hold;
+        running: h7.pressed && !root.list-held;
+        triggered => {
+            root.list-held = true;
+            root.list-menu();
+        }
+    }
+
+    // the notch: over the button's corner, so it takes the clicks there
+    notch := TouchArea {
+        x: Tilt.x(root.f, root.c5 + 11, root.cv + 11) * 1px - self.width / 2;
+        y: Tilt.y(root.f, root.c5 + 11, root.cv + 11) * 1px - self.height / 2;
+        width: 14px;
+        height: 14px;
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: "More list types";
+        accessible-action-default => { root.list-menu(); }
+        clicked => { root.list-menu(); }
+    }
+}
+
+/// The list button's flyout: Bulleted and Numbered, side by side in a small body above the toolbar
+/// band, its tail at the list button. Drawn in the paper's tilted frame like the color popover; plain
+/// hit areas only, so it never takes the keyboard focus. Nothing is drawn or hit while it is not `open`.
+export component ListFlyout inherits Rectangle {
+    in property <bool> open: false;
+    /// The list type of the caret's paragraph (0 none, 1 bulleted, 2 numbered): its choice is filled.
+    in property <int> list-kind: 0;
+    /// The choice the keyboard has reached: -1 none, 0 bulleted, 1 numbered.
+    in property <int> focus-index: -1;
+    /// A choice was picked: 1 bulleted, 2 numbered.
+    callback pick(int);
+    in property <length> paper-x;
+    in property <length> paper-y;
+    in property <length> paper-w;
+    in property <length> paper-h;
+    in property <angle> tilt;
+    visible: root.open;
+
+    property <Frame> f: {
+        w: root.width / 1px,
+        h: root.height / 1px,
+        cx: (root.paper-x + root.paper-w / 2) / 1px,
+        cy: (root.paper-y + root.paper-h / 2) / 1px,
+        cs: Math.cos(root.tilt),
+        sn: Math.sin(root.tilt),
+    };
+    property <float> choice: ToolbarMetrics.flyout-choice / 1px;
+    property <float> pad: ToolbarMetrics.flyout-pad / 1px;
+    property <float> pw: 2 * root.choice + 3 * root.pad;
+    property <float> ph: root.choice + 2 * root.pad;
+    // the list button's center, from the paper's center (untilted px)
+    property <float> button-u: (ToolbarMetrics.first-button-x + 5 * ToolbarMetrics.pitch + ToolbarMetrics.button-size / 2 - root.paper-w / 2) / 1px;
+    property <float> pl: root.button-u - root.pw / 2;
+    property <float> bottom: (root.paper-h / 2 - ToolbarMetrics.band-height - ToolbarMetrics.flyout-gap) / 1px;
+    property <float> top: root.bottom - root.ph;
+    property <float> tail-w: ToolbarMetrics.flyout-tail-width / 1px;
+    property <float> tail-h: ToolbarMetrics.flyout-tail-height / 1px;
+    property <float> r: ToolbarMetrics.flyout-radius / 1px;
+    property <float> cv: root.top + root.pad + root.choice / 2;
+    property <float> u0: root.pl + root.pad + root.choice / 2;
+    property <float> u1: root.u0 + root.choice + root.pad;
+
+    // the shadow: layers of see-through ink (a blur cannot be tilted)
+    for k in 4: TRect {
+        f: root.f;
+        u0: root.pl - k * 3;
+        v0: root.top + 5 - k * 3;
+        w: root.pw + k * 6;
+        h: root.ph + k * 6 + 5;
+        r: root.r + k * 3;
+        fill: ToolbarMetrics.flyout-shadow;
+    }
+    TTri {
+        f: root.f;
+        u0: root.button-u - root.tail-w / 2 - 1; v0: root.bottom - 1;
+        u1: root.button-u + root.tail-w / 2 + 1; v1: root.bottom - 1;
+        u2: root.button-u; v2: root.bottom + root.tail-h + 1.2;
+        fill: ToolbarMetrics.flyout-border;
+    }
+    TRect { f: root.f; u0: root.pl; v0: root.top; w: root.pw; h: root.ph; r: root.r; fill: ToolbarMetrics.flyout-border; }
+    TRect { f: root.f; u0: root.pl + 1; v0: root.top + 1; w: root.pw - 2; h: root.ph - 2; r: root.r - 1; fill: ToolbarMetrics.flyout-fill; }
+    TTri {
+        f: root.f;
+        u0: root.button-u - root.tail-w / 2 + 0.6; v0: root.bottom - 1.5;
+        u1: root.button-u + root.tail-w / 2 - 0.6; v1: root.bottom - 1.5;
+        u2: root.button-u; v2: root.bottom + root.tail-h - 0.2;
+        fill: ToolbarMetrics.flyout-fill;
+    }
+
+    // swallows clicks on the body (and the tail) so they reach neither the text nor the dismissal
+    TouchArea {
+        x: Tilt.x(root.f, root.pl + root.pw / 2, root.top + (root.ph + root.tail-h) / 2) * 1px - self.width / 2;
+        y: Tilt.y(root.f, root.pl + root.pw / 2, root.top + (root.ph + root.tail-h) / 2) * 1px - self.height / 2;
+        width: root.pw * 1px;
+        height: (root.ph + root.tail-h) * 1px;
+    }
+
+    // the chosen type is filled; the keyboard's choice has a ring
+    for k in [0, 1]: TRect {
+        visible: root.list-kind == k + 1;
+        f: root.f;
+        u0: (k == 0 ? root.u0 : root.u1) - root.choice / 2;
+        v0: root.cv - root.choice / 2;
+        w: root.choice;
+        h: root.choice;
+        r: 9;
+        fill: ToolbarMetrics.button-fill;
+    }
+    for k in [0, 1]: TRect {
+        visible: root.focus-index == k;
+        f: root.f;
+        u0: (k == 0 ? root.u0 : root.u1) - root.choice / 2 + 1;
+        v0: root.cv - root.choice / 2 + 1;
+        w: root.choice - 2;
+        h: root.choice - 2;
+        r: 8;
+        stroke: ToolbarMetrics.focus-ring;
+        stroke-width: 2px;
+    }
+    ListIcon { f: root.f; du: root.u0; dv: root.cv; numbered: false; ink: ToolbarMetrics.ink-active; }
+    ListIcon { f: root.f; du: root.u1; dv: root.cv; numbered: true; ink: ToolbarMetrics.ink-active; }
+
+    for k in [0, 1]: TouchArea {
+        x: Tilt.x(root.f, k == 0 ? root.u0 : root.u1, root.cv) * 1px - self.width / 2;
+        y: Tilt.y(root.f, k == 0 ? root.u0 : root.u1, root.cv) * 1px - self.height / 2;
+        width: ToolbarMetrics.flyout-choice;
+        height: ToolbarMetrics.flyout-choice;
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: k == 0 ? "Bulleted list" : "Numbered list";
+        accessible-action-default => { root.pick(k + 1); }
+        clicked => { root.pick(k + 1); }
     }
 }
 

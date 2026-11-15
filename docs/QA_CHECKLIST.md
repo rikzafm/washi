@@ -49,11 +49,17 @@ Tip: use a throwaway profile so your own notes stay untouched:
 - [ ] Emoji picker (Win+.) and emoji fallback rendering. Pasting rich text from a browser gives plain text.
 - [ ] Clipboard: copy and paste in the text, paste a screenshot (inserts an image paragraph), "Export as Markdown..." writes the .md and PNGs and the .md opens correctly in a Markdown viewer.
 
+## Lists (list-indent spec)
+
+- [ ] Bulleted, numbered and check items all have their text in line with body text, their bullet, number or box hanging in the left margin. Tab in any item moves the whole list (every item touching it, of any kind) one step right, Shift+Tab moves it back, Backspace at the very front of an item in a moved-in list moves it back before it drops the marker. Look at the paper edge: the check box and the numbers should not feel cramped on the tilted paper.
+- [ ] A numbered list with 100 items: its text shifts right just enough that "99." stays clear of the paper edge, and every item stays lined up. Lists up to 9 items do not shift.
+- [ ] Tab in a plain paragraph, a heading or the title types nothing and moves nothing. A list that is already there does not react to a second Tab.
+
 ## Text color and highlight (text-color-and-highlight spec, ticket 05)
 
 Unchecked on purpose, like the rest of this file. Run on the release build.
 
-- [ ] The "A" button (fifth of seven): its letter shows the selection's ink and its bar the marker. The button fill is on while the popover is open or the selection has a color. Known: the bar is near-invisible for a pale marker on the button's fill (`#F0F0EE`); judge by eye whether that is acceptable.
+- [ ] The "A" button (fifth of eight): its letter shows the selection's ink and its bar the marker. The button fill is on while the popover is open or the selection has a color. Known: the bar is near-invisible for a pale marker on the button's fill (`#F0F0EE`); judge by eye whether that is acceptable.
 - [ ] Popover look against the claude.ai canvas "B · Ink dots" (https://claude.ai/artifact/66MmBXsWquEdiGhr2BFA6x): tilt follows the paper (1.5 degrees), the tail's tip sits on the center of the "A", the shadow is soft, the caption is in the handwriting font, the rings are right. The `uidiff` comparison against the board was never run (needs the board's PNG): do it by eye.
 - [ ] Popover close paths: Escape, a click in the text, a click on another toolbar button, the pink tape or a resize zone, resizing, minimising, clicking another note or app (the note loses focus), typing over the selection, Clear. Opening it never blurs the text or collapses the selection.
 - [ ] Keyboard: with the popover open, Left/Right walk a row, Up/Down switch rows, Enter or Space picks, Escape closes. The ring is blue (`#6FA2F5`, 2 px, 2 px off the swatch), also on the chosen swatch. The caret and selection stay in the text the whole time. Enter or Space before any arrow key types a space (and closes the popover).

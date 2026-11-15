@@ -44,8 +44,8 @@ impl Harness {
         let margin = self.app().with_note(self.id(note), |n| n.ui().get_window_margin()).unwrap();
         let (pw, ph) = (w as f32 - 2.0 * margin, h as f32 - 2.0 * margin);
         // toolbar.slint: first button 23.2 from the paper's left, 40 wide, pitch 42.667; buttons
-        // 55.8 above the paper's bottom, 40 high; the seventh is the image button
-        let u = 23.2 + 20.0 + 6.0 * 42.667 - pw / 2.0;
+        // 55.8 above the paper's bottom, 40 high; the eighth is the image button
+        let u = 23.2 + 20.0 + 7.0 * 42.667 - pw / 2.0;
         let v = ph / 2.0 - 55.8 + 20.0;
         let tilt = 1.5f32.to_radians();
         let (x, y) = (w as f32 / 2.0 + u * tilt.cos() - v * tilt.sin(), h as f32 / 2.0 + u * tilt.sin() + v * tilt.cos());
