@@ -216,3 +216,37 @@ The old free functions are gone; Layout is the only geometry source. Same machin
 | 50 paragraphs | 10 px resize | 7.029 / 151 | 6.445 / 50 |
 
 The measured gain is one layout build per input, which is 3x to 12x fewer wrap passes (506 to 50 on a typed character of the 50 paragraph note, 36 to 3 on the mockup); most of a keystroke is spent elsewhere, in the work done for Slint, not in the layout.
+
+
+## Font manager (font-manager ticket 10)
+
+Release builds (`opt-level = "s"`, fat LTO), Windows 11, same machine as above (100% display scale), `integration/font-manager` tip 06d5764 against its merge base with main, c8fcc38 (the last commit before the feature). Headless only: no person drove the real app.
+
+### Startup with the Default font: not slower (measured)
+
+`tools/memprobe.ps1 -Notes 3 -Startup -StartupRuns 9 -NoLog`, base and feature builds taken alternately (two rounds each), seeded 3-note profile, no installed font, so the Default font runs on its bundled faces. Process start to all 3 windows shown:
+
+| build | round 1 median (range) ms | round 2 median (range) ms | active 3 notes, trimmed private WS MB | release exe MB |
+|---|---|---|---|---|
+| before (c8fcc38) | 154 (140 - 197) | 162 (147 - 169) | 3.06 / 3.11 | 15.87 |
+| with the font manager | 155 (144 - 192) | 160 (148 - 183) | 3.45 / 3.38 | 16.48 |
+
+Startup is unchanged within the run-to-run spread (about 10 ms); the Default font path bakes and registers nothing. Both builds sit above the old 147 ms and the 150 ms target (memprobe prints its FAIL line for both): this session's machine is slower than the one the figures above were taken on, so the absolute numbers are not comparable with them, only the before / after pair. Cost of the feature that is not zero: the exe grew 0.61 MB (3.8%; ADR 0003 predicted +0.34 MB for the dependencies alone, the rest is the font manager code and UI) and 3 active notes sit 0.3 MB higher in private WS (UI: the Font manager's elements, settings).
+
+### Making a Face set (measured, library level)
+
+A throwaway program calling `fonts::bake` (the five faces at default Axis values), `registry::activate` (Slint registration) and `GetProcessMemoryInfo`. 11 bakes, median; the Default-font fast path and Slint drawing are not part of it. No Roboto Flex or Open Sans is on this machine (nothing was downloaded); the nearest stand-ins were Bahnschrift (variable, 961 glyphs, a Roboto Flex-sized case), Arial (4,652 glyphs) and Segoe UI (5,395), the same fonts as ADR 0003 S4.
+
+| font | glyphs | bake, all five faces: median (min - max) ms | faces made | private bytes: after one bake / after registering with Slint |
+|---|---|---|---|---|
+| Bahnschrift (variable, wght + wdth) | 961 | 9.7 (9.3 - 10.5) | 0.47 MB | +0.98 / +1.25 MB (total +2.2) |
+| Arial (static, no Bold file: double-strike bold) | 4,652 | 66.0 (64.6 - 68.9) | 4.72 MB | +9.5 / +4.9 MB (total +14.3) |
+| Segoe UI (static, double-strike bold) | 5,395 | 87.8 (86.6 - 92.1) | 6.38 MB | +12.6 / +6.5 MB (total +19.1) |
+
+These agree with ADR 0003 (11 / 62 / 73 ms with axis or static bold; Segoe UI's 122 ms there was the double-strike case, 88 ms here). The memory figures are the process's private bytes (commit), not the trimmed working set; the "after one bake" column includes freed buffers the allocator has not given back, so read the total as an upper bound on what one font in use costs: about 2 MB for a 1,000-glyph font and 14 - 19 MB for a 5,000-glyph one. That large-font cost sits on top of the 3.4 MB trimmed figure above while such a font is in use, and goes away when the Default font is back in use (the earlier Face set is dropped when replaced; not measured end to end).
+
+### Not measured
+
+- Startup and memory with a large font already in use through the real app (needs an installed font row in a profile; only the library-level numbers above exist). Startup with a large font in use bakes five faces on the UI thread before the first window: 10 ms for a 1,000-glyph font, 66 - 88 ms for Arial and Segoe UI, from the table.
+- "Regular first" is not implemented (ADR 0003 S4's fallback for fonts of about 4,000 glyphs and more): picking or starting with such a font blocks the UI thread for those 66 - 88 ms.
+- Roboto Flex itself (not installed here), a drag of an Axis slider in the real app (Regular alone is about a quarter of the bake: 4 to 24 ms in ADR 0003), idle CPU with the Font manager open, the Font manager's open / close tween frame cost, and 150% display scale.
