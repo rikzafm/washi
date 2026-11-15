@@ -72,3 +72,4 @@ Binary: the same Slint window program with and without the baker, the Slint regi
 - Fonts over about 4,000 glyphs apply Regular first and the rest one loop turn later.
 - Tests that prove a registered face is used must not use the system default font (Segoe UI on Windows) as the registered font.
 - A Slint upgrade must rerun `spikes/fonts` (`s1_register`, `s2_bake`, `s3_drop`) before the lock file moves.
+- Startup with the Default font and the Face set times were re-measured on the finished feature (ticket 10): see "Font manager" in `docs/PERF.md`. Startup is unchanged; Arial and Segoe UI still take 66 to 88 ms to bake, and the "Regular first" fallback above was not built.
